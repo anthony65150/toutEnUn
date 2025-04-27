@@ -7,25 +7,14 @@ if (!isset($_SESSION["langue"])) {
 
 if (isset($_GET["langue"])) {
     $_SESSION["langue"] = htmlspecialchars($_GET["langue"]);
-    // Définir un cookie pour garder la langue
-    setcookie("langue", $_SESSION["langue"], time() + (60 * 60 * 24 * 30), "/");  // Durée du cookie : 30 jours
 }
 
-// Si la langue n'est pas définie dans la session et dans le cookie, utilisez le cookie
-if (!isset($_SESSION["langue"]) && isset($_COOKIE["langue"])) {
-    $_SESSION["langue"] = $_COOKIE["langue"];
-}
-
-// Si la langue n'est pas définie dans la session ou le cookie, utiliser le Français par défaut
-if (!isset($_SESSION["langue"])) {
-    $_SESSION["langue"] = "Français";
-}
 
 $langue = $_SESSION["langue"];
 
 
 
-// Nouveau : définir un code langue pour la balise <html lang="">
+// code langue pour la balise <html lang="">
 switch ($langue) {
     case 'Portugais':
         $htmlLang = 'pt';
@@ -89,8 +78,6 @@ $drapeau = isset($drapeaux[$langue]) ? $drapeaux[$langue] : $drapeaux['Français
                     <button class="btn btn-outline-primary dropdown-toggle d-md-none" type="button" data-bs-toggle="dropdown" aria-expanded="false">
                         <img src="<?php echo $drapeau; ?>" alt="Langues" width="30" height="30">
                     </button>
-
-
 
                     <ul class="dropdown-menu">
                         <li><button class="dropdown-item" type="submit" name="langue" value="Français">Français</button></li>
