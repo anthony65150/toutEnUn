@@ -53,28 +53,39 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                                         <button data-mdb-button-init data-mdb-ripple-init class="btn btn-primary btn-block fa-lg mb-3" type="submit">Connexion</button>
                                     </div>
 
-                                    <div class="d-flex align-items-center justify-content-center pb-4">
-                                        <p class="mb-0 me-2">Vous n'avez pas de compte ?</p>
-                                        <button type="button" data-mdb-button-init data-mdb-ripple-init class="btn btn-secondary">Inscription</button>
-                                    </div>
-
                                 </form>
 
                             </div>
                         </div>
                         <div class="col-lg-6 d-flex align-items-center gradient-custom">
-                            <div class="text-white px-3 py-4 p-md-5 mx-md-4">
-                                <h4 class="mb-4">Simpliz – La gestion d’entreprise, réinventée</h4>
-                                <p class="small mb-0">
-                                    Simpliz transforme la gestion quotidienne des employés et des employeurs. Une seule application pour une gestion simplifiée et une communication fluide.
 
-                                    Pour les employés : Suivez vos congés, consultez la météo au travail, gérez votre pointage et le temps de trajet en un clin d'œil. Soumettez vos idées pour améliorer l’entreprise et demandez facilement des documents administratifs.
-
-                                    Pour les employeurs : Prenez le contrôle total de votre entreprise en temps réel. Suivez l’état des stocks, gérez les livraisons, et contrôlez les pointages de vos employés, le tout sur une plateforme intuitive.
-
-                                    Avec Simpliz, simplifiez la gestion et boostez l’efficacité de votre équipe. Plus qu’une application, c’est une véritable solution pour un environnement de travail plus harmonieux et productif.
+                            <!-- Version mobile : texte court -->
+                            <div class="mobile-text text-white px-3 py-4 p-md-5 mx-md-4 text-center d-lg-none">
+                                <p><strong>Simpliz – La gestion d’entreprise, tout simplement facile</strong></p>
+                                <ul class="list-unstyled mb-0">
+                                    <li>- Suivez vos congés, pointages et trajets en un clic.</li>
+                                    <li>- Demandez facilement vos documents administratifs.</li>
+                                    <li>- Pour les employeurs, contrôlez stocks, livraisons et pointages en temps réel.</li>
+                                </ul>
+                                <p>Une solution simple pour un travail plus fluide et efficace.</p>
                             </div>
+
+                            <!-- Version tablette & desktop : texte long -->
+                            <div class="text-white px-3 py-4 p-md-5 mx-md-4 d-none d-lg-block">
+                                <h4 class="mb-4">Simpliz – La gestion d’entreprise, tout simplement facile</h4>
+                                <p class="small mb-0">
+                                    <strong>- Simpliz</strong> transforme la gestion quotidienne des employés et des employeurs. Une seule application pour une gestion simplifiée et une communication fluide. <br><br>
+
+                                    <strong>- Pour les employé</strong>s : Suivez vos congés, consultez la météo au travail, gérez votre pointage et le temps de trajet en un clin d'œil. Soumettez vos idées pour améliorer l’entreprise et demandez facilement des documents administratifs. <br><br>
+
+                                    <strong>- Pour les employeurs</strong> : Prenez le contrôle total de votre entreprise en temps réel. Suivez l’état des stocks, gérez les livraisons, et contrôlez les pointages de vos employés, le tout sur une plateforme intuitive. <br><br>
+
+                                    Avec <strong>Simpliz</strong>, simplifiez la gestion et boostez l’efficacité de votre équipe. Plus qu’une application, c’est une véritable solution pour un environnement de travail plus harmonieux et productif.
+                                </p>
+                            </div>
+
                         </div>
+
                     </div>
                 </div>
             </div>

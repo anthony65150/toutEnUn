@@ -2,9 +2,16 @@
 
 
 <footer class="p-4 border-top mt-auto">
-    <div class="d-flex justify-content-center">
-        <a href="/" class="text-body-secondary" aria-label="Bootstrap">
-        </a> <span class="mb-3 mb-md-0 text-body-secondary">© 2025 Simpliz, Tout droits réservés</span>
+    <div class="d-flex justify-content-around">
+        <div>
+            <a href="/" class="text-body-secondary" aria-label="Bootstrap">
+            </a> <span class="mb-3 mb-md-0 text-body-secondary"><strong class="gradient-icon">© 2025 Simpliz</strong>, Tout droits réservés</span>
+        </div>
+        <div>
+            <a href="mailto:contact@simpliz.com" class="text-decoration-none text-body-secondary" aria-label="Contact" >
+                <i class="bi bi-envelope-fill me-1 gradient-icon" ></i> Contact</a>
+        </div>
+
     </div>
 </footer>
 

@@ -52,21 +52,7 @@ $current_page = $_SERVER['PHP_SELF'];
             <?php endif; ?>
         </ul>
 
-
-
-    </div>
-
-
-
-
-    <div class="col-md-9 p-0">
-        <h1>salut</h1>
-
-    </div>
-
 </div>
-
-
 
 
 

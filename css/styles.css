@@ -39,7 +39,7 @@ body {
     }
 
     .gradient-text {
-        background: linear-gradient(to right, rgba(55,126,234,1), rgb(199, 149, 32)); /* Remplacez ces couleurs par celles de votre choix */
+        background: linear-gradient(to right, rgba(55,126,234,1), rgb(199, 149, 32));
         -webkit-background-clip: text;
         color: transparent;
         font-weight: bold;
@@ -65,3 +65,24 @@ body {
         border-color: transparent;
         color: white;
       }
+
+      .gradient-icon {
+    background: linear-gradient(to right, rgba(55,126,234,1), rgb(199, 149, 32));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    display: inline-block;
+}
+
+.mobile-text {
+    font-size: 1rem;
+    line-height: 1.4;
+}
+
+@media (min-width: 767px) {
+    .mobile-text {
+        font-size: 1.25rem;
+        text-align: left;
+        max-width: 400px;
+        margin: auto;
+    }
+}
