@@ -3,8 +3,21 @@ require_once "fonctions/utilisateurs.php";
 require_once "fonctions/pdo.php";
 require_once "templates/header.php";
 
-$error = null;
+// Déconnexion automatique si l'utilisateur est connecté
+if (isset($_SESSION["utilisateurs"])) {
+    session_unset();
+    session_destroy();
 
+    // Empêche le navigateur de revenir à une session morte
+    header("Cache-Control: no-cache, no-store, must-revalidate");
+    header("Pragma: no-cache");
+    header("Expires: 0");
+
+    header("Location: connexion.php?logout=1"); // Pour éviter la boucle
+    exit;
+}
+
+$error = null;
 
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
     $utilisateurs = verifyUserLoginPassword($pdo, $_POST["email"], $_POST["motDePasse"]);
@@ -14,16 +27,37 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             "id" => $utilisateurs["id"],
             "nom" => $utilisateurs["nom"],
             "prenom" => $utilisateurs["prenom"],
+            "email" => $utilisateurs["email"],
+            "photo" => $utilisateurs["photo"] ?? '/images/image-default.png' ,
             "fonction" => $utilisateurs["fonction"]
         ];
         header("location: index.php");
+        exit;
     } else {
         $error = "Email ou mot de passe incorrect";
     }
 }
-
-
 ?>
+
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Connexion - Simpliz</title>
+
+    <!-- Empêche le cache navigateur -->
+    <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+    <link rel="stylesheet" href="/assets/css/override-bootstrap.css" />
+    <link rel="stylesheet" href="/css/styles.css" />
+</head>
+
+<body>
 <section class="d-flex align-items-center justify-content-center">
     <div class="container mt-5 mb-5 pt-3">
         <div class="row d-flex justify-content-center align-items-center w-100">
@@ -37,27 +71,30 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                                     <h3 class="mt-1 mb-5 pb-1 gradient-text">Bienvenue chez Simpliz</h3>
                                 </div>
 
+                                <?php if ($error) : ?>
+                                    <div class="alert alert-danger"><?= $error ?></div>
+                                <?php endif; ?>
+
                                 <form method="post">
-                                    <div data-mdb-input-init class="form-outline mb-4">
+                                    <div class="form-outline mb-4">
                                         <label class="form-label" for="email">Email :</label>
-                                        <input type="email" name="email" id="email" class="form-control"
-                                            placeholder="Votre adresse email" />
+                                        <input type="email" name="email" id="email" class="form-control" placeholder="Votre adresse email" />
                                     </div>
 
-                                    <div data-mdb-input-init class="form-outline mb-4">
+                                    <div class="form-outline mb-4">
                                         <label class="form-label" for="motDePasse">Mot de passe :</label>
                                         <input type="password" id="motDePasse" name="motDePasse" class="form-control" placeholder="Votre mot de passe" />
                                     </div>
 
                                     <div class="text-center pt-1 mb-5 pb-1">
-                                        <button data-mdb-button-init data-mdb-ripple-init class="btn btn-primary btn-block fa-lg mb-3" type="submit">Connexion</button>
+                                        <button class="btn btn-primary btn-block fa-lg mb-3" type="submit">Connexion</button>
                                     </div>
-
                                 </form>
 
                             </div>
                         </div>
-                        <div class="col-lg-6 d-flex align-items-center gradient-custom">
+
+                       <div class="col-lg-6 d-flex align-items-center gradient-custom">
 
                             <!-- Version mobile : texte court -->
                             <div class="mobile-text text-white px-3 py-4 p-md-5 mx-md-4 text-center d-lg-none">
@@ -85,7 +122,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                             </div>
 
                         </div>
-
                     </div>
                 </div>
             </div>
@@ -93,6 +129,6 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     </div>
 </section>
 
-<?php
-require_once "templates/footer.php"
-?>
+<?php require_once "templates/footer.php"; ?>
+</body>
+</html>

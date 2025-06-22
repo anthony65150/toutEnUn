@@ -1,20 +1,15 @@
 <?php
-
 session_start();
 require_once(__DIR__ . '/../fonctions/pdo.php');
+
+
 if (!isset($_SESSION["langue"])) {
     $_SESSION["langue"] = "Français";
 }
-
 if (isset($_GET["langue"])) {
     $_SESSION["langue"] = htmlspecialchars($_GET["langue"]);
 }
-
-
 $langue = $_SESSION["langue"];
-
-
-
 
 switch ($langue) {
     case 'Portugais':
@@ -41,49 +36,46 @@ $drapeaux = [
     "Roumain" => "/images/roumain.png",
     "Espagnol" => "/images/espagne.png"
 ];
-$drapeau = isset($drapeaux[$langue]) ? $drapeaux[$langue] : $drapeaux['Français'];
-
-
+$drapeau = $drapeaux[$langue] ?? $drapeaux['Français'];
 ?>
 
-
-
-
 <!DOCTYPE html>
-<html lang="<?php echo $htmlLang; ?>">
+<html lang="<?= $htmlLang ?>">
 
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
-    <link rel="stylesheet" href="/assets/css/override-bootstrap.css">
-    <link rel="stylesheet" href="../css/styles.css">
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Simpliz</title>
+
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" crossorigin="anonymous" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
+    <link rel="stylesheet" href="/assets/css/override-bootstrap.css" />
+    <link rel="stylesheet" href="../css/styles.css" />
 </head>
 
-<body class="d-flex flex-column min-vh-100" style="background-color: #eee;">
-    <div>
-        <header class="d-flex align-items-center justify-content-center justify-content-around border-bottom">
-            <div class="col-md-3">
-                <a href="#">
-                    <img class="bi" width="120" height="120" role="img" src="/images/simpliz-trans.png" alt="logo">
-                </a>
-            </div>
+<body class="d-flex flex-column min-vh-100 fond-gris">
 
+    <nav class="navbar navbar-expand-md navbar-light fond-gris border-bottom">
+        <div class="container-fluid d-flex justify-content-between align-items-center">
 
+            <!-- Logo -->
+            <a class="navbar-brand d-flex align-items-center" href="/connexion.php">
+                <img src="/images/simpliz-trans.png" alt="logo" width="100" height="100" />
+            </a>
+
+            <!-- Sélection langue -->
             <form action="" method="get">
                 <?php if (!isset($_SESSION["utilisateurs"])) { ?>
-                    <div class="col-md-9 dropdown ms-auto">
-                        <button class="btn btn-outline-primary dropdown-toggle d-none d-md-block d-flex justify-content-end" type="button" data-bs-toggle="dropdown" aria-expanded="false">
-                            <img src="<?php echo $drapeau; ?>" alt="Langues" width="30" height="30">
-                            <?php echo $langue; ?>
+                    <div class="dropdown ms-auto">
+                        <!-- Desktop -->
+                        <button class="btn btn-outline-primary dropdown-toggle d-none d-md-flex align-items-center" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                            <img src="<?= $drapeau ?>" alt="Langue" width="30" height="30" class="me-1">
+                            <?= $langue ?>
                         </button>
-                        <!-- Logo pour les écrans mobiles -->
+                        <!-- Mobile -->
                         <button class="btn btn-outline-primary dropdown-toggle d-md-none" type="button" data-bs-toggle="dropdown" aria-expanded="false">
-                            <img src="<?php echo $drapeau; ?>" alt="Langues" width="30" height="30" aria-label="Langue sélectionnée : <?php echo $langue; ?>">
+                            <img src="<?= $drapeau ?>" alt="Langue" width="30" height="30">
                         </button>
-
                         <ul class="dropdown-menu">
                             <li><button class="dropdown-item" type="submit" name="langue" value="Français">Français</button></li>
                             <li><button class="dropdown-item" type="submit" name="langue" value="Portugais">Portugais</button></li>
@@ -91,26 +83,48 @@ $drapeau = isset($drapeaux[$langue]) ? $drapeaux[$langue] : $drapeaux['Français
                             <li><button class="dropdown-item" type="submit" name="langue" value="Espagnol">Espagnol</button></li>
                             <li><button class="dropdown-item" type="submit" name="langue" value="Roumain">Roumain</button></li>
                         </ul>
-
                     </div>
-                <?php }; ?>
-
-
+                <?php } ?>
             </form>
 
-            <div class="col-md-9 d-flex justify-content-around">
-                <?php if (isset($_SESSION["utilisateurs"])) { ?>
+            <!-- Bonjour + prénom centré -->
+            <?php if (isset($_SESSION['utilisateurs'])) : ?>
+                <div class="flex-grow-1 d-flex justify-content-center px-2">
+                    <div class="d-flex align-items-center flex-nowrap overflow-auto py-2 px-2 rounded" style="max-width: 100%;">
+                        <a href="/mon-profil.php" class="me-2 flex-shrink-0">
+                            <?php
+                            $photo = '/images/image-default.png'; // image par défaut
+                            if (isset($_SESSION['utilisateurs']['photo']) && !empty($_SESSION['utilisateurs']['photo'])) {
+                                $chemin = $_SESSION['utilisateurs']['photo'];
+                                if (file_exists(__DIR__ . '/../' . ltrim($chemin, '/'))) {
+                                    $photo = $chemin;
+                                }
+                            }
+                            ?>
+                            <img src="<?= $photo ?>"
+                                alt="Photo de profil"
+                                class="rounded-circle"
+                                style="width: 40px; height: 40px; object-fit: cover;">
 
-                    <h5>Bonjour <?= $_SESSION["utilisateurs"]["prenom"]; ?> </h5>
-                    <a class="btn btn-outline-danger me-2" href="/deconnexion.php"><i class="bi bi-list"></i>Déconnexion</a>
+                        </a>
+                        <span class="fw-bold fs-6 text-nowrap">
+                            Bonjour <?= htmlspecialchars($_SESSION['utilisateurs']['prenom']) ?>
+                        </span>
+                    </div>
+                </div>
+            <?php endif; ?>
+
+            <!-- Bouton burger (mobile) -->
+            <?php $currentPage = basename($_SERVER['PHP_SELF']); ?>
+            <?php if ($currentPage !== 'connexion.php') : ?>
+                <button class="navbar-toggler d-md-none" type="button" data-bs-toggle="collapse" data-bs-target="#navbarBurgerMenu" aria-controls="navbarBurgerMenu" aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+            <?php endif; ?>
+
+        </div>
+    </nav>
 
 
-
-                <?php }; ?>
-            </div>
-        </header>
-    </div>
     <main class="flex-grow-1">
-
-
-    
+        <!-- Le reste de ta page -->
