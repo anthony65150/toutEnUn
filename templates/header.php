@@ -1,5 +1,11 @@
 <?php
-session_start();
+require_once "./config/init.php";
+
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
+
 require_once(__DIR__ . '/../fonctions/pdo.php');
 
 
@@ -93,19 +99,24 @@ $drapeau = $drapeaux[$langue] ?? $drapeaux['Français'];
                     <div class="d-flex align-items-center flex-nowrap overflow-auto py-2 px-2 rounded" style="max-width: 100%;">
                         <a href="/mon-profil.php" class="me-2 flex-shrink-0">
                             <?php
-                            $photo = '/images/image-default.png'; // image par défaut
+                            $photo = '/images/image-default.png'; // Image par défaut
+
                             if (isset($_SESSION['utilisateurs']['photo']) && !empty($_SESSION['utilisateurs']['photo'])) {
-                                $chemin = $_SESSION['utilisateurs']['photo'];
-                                if (file_exists(__DIR__ . '/../' . ltrim($chemin, '/'))) {
-                                    $photo = $chemin;
+                                $cheminRelatif = ltrim($_SESSION['utilisateurs']['photo'], '/'); // ex: uploads/photo1.jpg
+                                $cheminAbsolu = $_SERVER['DOCUMENT_ROOT'] . '/' . $cheminRelatif;
+
+                                $extension = strtolower(pathinfo($cheminAbsolu, PATHINFO_EXTENSION));
+                                $formatsAutorises = ['jpg', 'jpeg', 'png', 'webp'];
+
+                                if (file_exists($cheminAbsolu) && in_array($extension, $formatsAutorises)) {
+                                    $photo = '/' . $cheminRelatif;
                                 }
                             }
                             ?>
-                            <img src="<?= $photo ?>"
+                            <img src="<?= htmlspecialchars($photo) ?>"
                                 alt="Photo de profil"
                                 class="rounded-circle"
                                 style="width: 40px; height: 40px; object-fit: cover;">
-
                         </a>
                         <span class="fw-bold fs-6 text-nowrap">
                             Bonjour <?= htmlspecialchars($_SESSION['utilisateurs']['prenom']) ?>

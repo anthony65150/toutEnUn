@@ -1,19 +1,10 @@
 <?php
-require_once "fonctions/utilisateurs.php";
-require_once "fonctions/pdo.php";
-require_once "templates/header.php";
+require_once "./config/init.php";
 
-// Déconnexion automatique si l'utilisateur est connecté
-if (isset($_SESSION["utilisateurs"])) {
-    session_unset();
-    session_destroy();
 
-    // Empêche le navigateur de revenir à une session morte
-    header("Cache-Control: no-cache, no-store, must-revalidate");
-    header("Pragma: no-cache");
-    header("Expires: 0");
-
-    header("Location: connexion.php?logout=1"); // Pour éviter la boucle
+// Si utilisateur déjà connecté, rediriger vers page d'accueil (index.php)
+if (isset($_SESSION['utilisateurs'])) {
+    header('Location: index.php');
     exit;
 }
 
@@ -28,15 +19,18 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             "nom" => $utilisateurs["nom"],
             "prenom" => $utilisateurs["prenom"],
             "email" => $utilisateurs["email"],
-            "photo" => $utilisateurs["photo"] ?? '/images/image-default.png' ,
+            // Stocker la photo relative ou vide si pas de photo
+            "photo" => !empty($utilisateurs["photo"]) ? $utilisateurs["photo"] : '',
             "fonction" => $utilisateurs["fonction"]
         ];
-        header("location: index.php");
+        header("Location: index.php");
         exit;
     } else {
         $error = "Email ou mot de passe incorrect";
     }
 }
+
+require_once "templates/header.php";
 ?>
 
 <!DOCTYPE html>

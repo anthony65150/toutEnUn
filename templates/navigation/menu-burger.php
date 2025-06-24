@@ -36,7 +36,7 @@
             <?php endif; ?>
             <?php if (isset($_SESSION['utilisateurs']['fonction']) && $_SESSION['utilisateurs']['fonction'] === 'administrateur') : ?>
                 <li class="p-2">
-                    <a href="/admin/ajoutEmploye.php" class="nav-link <?php echo ($current_page == 'ajoutEmploye.php') ? 'active' : ''; ?> text-center">
+                    <a href="/ajoutEmploye.php" class="nav-link <?php echo ($current_page == 'ajoutEmploye.php') ? 'active' : ''; ?> text-center">
                         Ajout employés
                     </a>
                 </li>

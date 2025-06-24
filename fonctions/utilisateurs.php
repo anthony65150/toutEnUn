@@ -49,16 +49,20 @@ function verifieUtilisateur($utilisateurs): array | bool
 
 function verifyUserLoginPassword(PDO $pdo, string $email, string $motDePasse): bool|array
 {
-    $query = $pdo->prepare("SELECT id, nom, prenom, email, motDePasse, fonction FROM utilisateurs WHERE email = :email");
+    $query = $pdo->prepare("SELECT id, nom, prenom, email, photo, motDePasse, fonction FROM utilisateurs WHERE email = :email");
     $query->bindValue(":email", $email);
     $query->execute();
     $utilisateurs = $query->fetch(PDO::FETCH_ASSOC);
+
     if ($utilisateurs && password_verify($motDePasse, $utilisateurs["motDePasse"])) {
+        // On peut supprimer le mot de passe avant de retourner les données
+        unset($utilisateurs["motDePasse"]);
         return $utilisateurs;
     } else {
         return false;
     }
 }
+
 
 //fonction debug
 
