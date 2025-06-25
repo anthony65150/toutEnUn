@@ -14,19 +14,20 @@ if (!isset($_SESSION['utilisateurs'])) {
         <h2 class="text-center mb-5">Gestion de stock</h2>
 
         <!-- Slide horizontal de catégories -->
-        <div class="overflow-auto pb-2">
-            <div id="categoriesSlide" class="d-flex flex-nowrap gap-3 justify-content-center flex-wrap-nowrap">
-                <button class="btn btn-outline-primary flex-shrink-0">Étais</button>
-                <button class="btn btn-outline-primary flex-shrink-0">Banches</button>
-                <button class="btn btn-outline-primary flex-shrink-0">Madriers</button>
-                <button class="btn btn-outline-primary flex-shrink-0">Planches</button>
-                <button class="btn btn-outline-primary flex-shrink-0">Coffrages</button>
-                <button class="btn btn-outline-primary flex-shrink-0">Échelles</button>
-                <button class="btn btn-outline-primary flex-shrink-0">Niveaux</button>
-                <button class="btn btn-outline-primary flex-shrink-0">Autres</button>
+        <div class="pb-2">
+            <div class="d-flex justify-content-center">
+                <div id="categoriesSlide" class="d-flex gap-3 px-2 overflow-auto" style="max-width: 100%; -webkit-overflow-scrolling: touch; scroll-behavior: smooth;">
+                    <button class="btn btn-outline-primary flex-shrink-0">Étais</button>
+                    <button class="btn btn-outline-primary flex-shrink-0">Banches</button>
+                    <button class="btn btn-outline-primary flex-shrink-0">Madriers</button>
+                    <button class="btn btn-outline-primary flex-shrink-0">Planches</button>
+                    <button class="btn btn-outline-primary flex-shrink-0">Coffrages</button>
+                    <button class="btn btn-outline-primary flex-shrink-0">Échelles</button>
+                    <button class="btn btn-outline-primary flex-shrink-0">Niveaux</button>
+                    <button class="btn btn-outline-primary flex-shrink-0">Autres</button>
+                </div>
             </div>
         </div>
-
         <!-- Sous-catégories - filtres -->
         <div id="subCategoriesSlide" class="overflow-auto pb-2 mt-3 d-flex gap-3 justify-content-center flex-nowrap"></div>
     </div>

@@ -62,22 +62,23 @@ function updateActiveButtons(container, activeBtn) {
 }
 
 // Filtrage des lignes du tableau selon catégorie, sous-catégorie, recherche sur nom uniquement
-function normalizeText(text) {
-    return text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+function normalize(str) {
+    return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 }
 
-function filterTable(cat, subcat, search) {
-    const normalizedSearch = normalizeText(search);
-    [...stockTableBody.querySelectorAll('tr')].forEach(row => {
-        const nameCell = row.querySelector('td:first-child');
-        const nameText = nameCell ? normalizeText(nameCell.textContent) : '';
+document.getElementById('searchInput').addEventListener('input', function () {
+    const searchValue = normalize(this.value.trim());
+    const rows = document.querySelectorAll('#stockTableBody tr');
 
-        // Filtre uniquement sur le nom, insensible aux accents et à la casse
-        const matchesSearch = !search || nameText.includes(normalizedSearch);
+    rows.forEach(row => {
+        const nom = row.querySelector('td:nth-child(1)').textContent;
+        const normalizedNom = normalize(nom.trim());
 
-        row.style.display = matchesSearch ? '' : 'none';
+        // Affiche uniquement si le nom commence par la recherche
+        row.style.display = normalizedNom.startsWith(searchValue) ? '' : 'none';
     });
-}
+});
+
 // Événement clic catégorie
 categoriesSlide.querySelectorAll('button').forEach(btn => {
     btn.addEventListener('click', () => {
