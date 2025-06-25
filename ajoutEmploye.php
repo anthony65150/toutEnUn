@@ -90,6 +90,6 @@ if (!isset($_SESSION['utilisateurs']) || $_SESSION['utilisateurs']['fonction'] !
 
 
 <?php
-require_once __DIR__ . '/../templates/footer.php';
+require_once __DIR__ . '/templates/footer.php';
 ob_end_flush(); // Termine et affiche le tampon
 ?>

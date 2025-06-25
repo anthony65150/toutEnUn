@@ -112,3 +112,12 @@ html, body {
         width: 100%;
     }
 }
+
+.flex-wrap-nowrap {
+        flex-wrap: nowrap !important;
+    }
+    .btn.active, .btn:active {
+        background-color: #0d6efd !important;
+        color: white !important;
+        font-weight: bold;
+    }

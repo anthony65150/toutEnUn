@@ -46,6 +46,13 @@ $current_page = basename($_SERVER['PHP_SELF']);
                     </a>
                 </li>
             <?php endif; ?>
+            <?php if (isset($_SESSION['utilisateurs']['fonction']) && ($_SESSION['utilisateurs']['fonction'] === 'administrateur' || $_SESSION['utilisateurs']['fonction'] === 'chef')) : ?>
+                <li class="p-2">
+                    <a href="/stock.php" class="nav-link <?php echo ($current_page == 'stock.php') ? 'active' : ''; ?> text-center">
+                        Stock
+                    </a>
+                </li>
+            <?php endif; ?>
             <?php if (isset($_SESSION["utilisateurs"])) { ?>
                 <li class="p-2">
                     <a class="nav-link text-danger" href="/deconnexion.php">Déconnexion</a>
