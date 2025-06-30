@@ -59,7 +59,7 @@ $drapeau = $drapeaux[$langue] ?? $drapeaux['Français'];
     <link rel="stylesheet" href="../css/styles.css" />
 </head>
 
-<body class="d-flex flex-column min-vh-100 fond-gris">
+<body <?= isset($_POST['sous_categorie']) ? 'data-sous-categorie="' . htmlspecialchars($_POST['sous_categorie']) . '"' : '' ?> class="d-flex flex-column min-vh-100 fond-gris">
 
     <nav class="navbar navbar-expand-md navbar-light fond-gris border-bottom">
         <div class="container-fluid d-flex justify-content-between align-items-center">
