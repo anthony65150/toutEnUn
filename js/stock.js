@@ -30,15 +30,6 @@ document.addEventListener("DOMContentLoaded", () => {
         const subs = subCategories[cat] || [];
 
         if (subs.length > 0) {
-            const allBtn = document.createElement("button");
-            allBtn.className = "btn btn-outline-secondary";
-            allBtn.textContent = "Toutes";
-            allBtn.onclick = () => {
-                document.querySelectorAll("#subCategoriesSlide button").forEach(btn => btn.classList.remove("active"));
-                allBtn.classList.add("active");
-                filterRows();
-            };
-            subCategoriesSlide.appendChild(allBtn);
 
             subs.forEach(sub => {
                 const btn = document.createElement("button");
