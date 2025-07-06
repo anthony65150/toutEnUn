@@ -2,6 +2,7 @@
 require_once "./config/init.php";
 
 
+
 // Si utilisateur déjà connecté, rediriger vers page d'accueil (index.php)
 if (isset($_SESSION['utilisateurs'])) {
     header('Location: index.php');
@@ -21,7 +22,8 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             "email" => $utilisateurs["email"],
             // Stocker la photo relative ou vide si pas de photo
             "photo" => !empty($utilisateurs["photo"]) ? $utilisateurs["photo"] : '',
-            "fonction" => $utilisateurs["fonction"]
+            "fonction" => $utilisateurs["fonction"],
+            "chantier_id" => (int)$utilisateurs["chantier_id"]
         ];
         header("Location: index.php");
         exit;
