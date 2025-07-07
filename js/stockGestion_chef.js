@@ -5,6 +5,22 @@ document.addEventListener('DOMContentLoaded', () => {
   const transferQtyInput = document.getElementById('transferQty');
   const modalStockIdInput = document.getElementById('modalStockId');
 
+  // ✅ Fonction d'affichage du toast
+  function showToast(id) {
+    const toastElement = document.getElementById(id);
+    if (toastElement) {
+      const toast = new bootstrap.Toast(toastElement);
+      toast.show();
+    }
+  }
+
+  // ❌ Toast d'erreur
+  function showErrorToast(message) {
+    const msgElem = document.getElementById("errorToastMessage");
+    if (msgElem) msgElem.textContent = message;
+    showToast("errorToast");
+  }
+
   function sendTransfer(payload) {
     fetch('transferStock_chef.php', {
       method: 'POST',
@@ -14,7 +30,7 @@ document.addEventListener('DOMContentLoaded', () => {
     .then(res => res.json())
     .then(data => {
       if (!data.success) {
-        alert(data.message || "Erreur lors du transfert.");
+        showErrorToast(data.message || "Erreur lors du transfert.");
         return;
       }
 
@@ -35,10 +51,11 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       bootstrap.Modal.getInstance(transferModal)?.hide();
+      showToast("transferToast"); // ✅ Toast de succès
     })
     .catch(error => {
-      console.error("Erreur réseau :", error);
-      alert("Erreur réseau.");
+      console.error("❌ Erreur réseau :", error);
+      showErrorToast("Erreur réseau ou serveur.");
     });
   }
 
@@ -48,7 +65,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const stockId = modalStockIdInput.value;
 
     if (!destination || isNaN(qty) || qty < 1) {
-      alert("Veuillez remplir tous les champs.");
+      showErrorToast("Veuillez remplir tous les champs.");
       return;
     }
 
@@ -64,4 +81,3 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 });
-
