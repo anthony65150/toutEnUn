@@ -6,19 +6,20 @@ document.addEventListener('DOMContentLoaded', () => {
   const qtyInput = document.getElementById('transferQty');
   const modalStockIdInput = document.getElementById('modalStockId');
 
-  function showToast(id) {
-    const toastEl = document.getElementById(id);
-    if (toastEl) {
-      const toast = new bootstrap.Toast(toastEl);
-      toast.show();
-    }
+ function showToast(id) {
+  const toastElement = document.getElementById(id);
+  if (toastElement) {
+    const toast = new bootstrap.Toast(toastElement);
+    toast.show();
   }
+}
 
-  function showErrorToast(message) {
-    const msgElem = document.getElementById("errorToastMessage");
-    if (msgElem) msgElem.textContent = message;
-    showToast("errorToast");
-  }
+function showErrorToast(message) {
+  const msgElem = document.getElementById("errorToastMessage");
+  if (msgElem) msgElem.textContent = message;
+  showToast("errorToast");
+}
+
 
   function sendTransfer(payload) {
     fetch('transferStock_admin.php', {
@@ -28,10 +29,10 @@ document.addEventListener('DOMContentLoaded', () => {
     })
     .then(res => res.json())
     .then(data => {
-      if (!data.success) {
-        showErrorToast(data.message || "Erreur lors du transfert.");
-        return;
-      }
+   if (!data.success) {
+  showErrorToast(data.message || "Erreur lors du transfert.");
+  return;
+}
 
       const row = document.querySelector(`button[data-stock-id="${payload.stockId}"]`)?.closest("tr");
       if (row) {
@@ -88,3 +89,4 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 });
+

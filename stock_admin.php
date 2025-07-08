@@ -171,6 +171,31 @@ foreach ($subCatRaw as $row) {
   </div>
 </div>
 
+<!-- Toast de succès -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index: 9999">
+  <div id="transferToast" class="toast align-items-center text-bg-success border-0" role="alert" aria-live="assertive" aria-atomic="true">
+    <div class="d-flex">
+      <div class="toast-body" id="transferToastMessage">
+        ✅ Transfert effectué avec succès !
+      </div>
+      <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Fermer"></button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast d'erreur -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index: 9999">
+  <div id="errorToast" class="toast align-items-center text-bg-danger border-0" role="alert" aria-live="assertive" aria-atomic="true">
+    <div class="d-flex">
+      <div class="toast-body" id="errorToastMessage">
+        ❌ Une erreur est survenue.
+      </div>
+      <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Fermer"></button>
+    </div>
+  </div>
+</div>
+
+
 
 
 <script>
