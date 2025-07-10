@@ -1,12 +1,13 @@
 <?php
 require_once "./config/init.php";
-require_once __DIR__ . '/templates/header.php';
-require_once __DIR__ . '/templates/navigation/navigation.php';
+
 
 if (!isset($_SESSION['utilisateurs']) || $_SESSION['utilisateurs']['fonction'] !== 'administrateur') {
-    header("Location: connexion.php");
-    exit;
+  header("Location: connexion.php");
+  exit;
 }
+require_once __DIR__ . '/templates/header.php';
+require_once __DIR__ . '/templates/navigation/navigation.php';
 $allChantiers = $pdo->query("SELECT id, nom FROM chantiers")->fetchAll(PDO::FETCH_KEY_PAIR);
 
 
@@ -19,10 +20,10 @@ $stocks = $stmt->fetchAll(PDO::FETCH_ASSOC);
 $stmt = $pdo->query("SELECT sc.stock_id, c.nom AS chantier_nom, sc.quantite FROM stock_chantiers sc JOIN chantiers c ON sc.chantier_id = c.id");
 $chantierAssoc = [];
 foreach ($stmt as $row) {
-    $chantierAssoc[$row['stock_id']][] = [
-        'nom' => $row['chantier_nom'],
-        'quantite' => $row['quantite']
-    ];
+  $chantierAssoc[$row['stock_id']][] = [
+    'nom' => $row['chantier_nom'],
+    'quantite' => $row['quantite']
+  ];
 }
 
 // Catégories et sous-cat
@@ -30,7 +31,7 @@ $categories = $pdo->query("SELECT DISTINCT categorie FROM stock WHERE categorie 
 $subCatRaw = $pdo->query("SELECT categorie, sous_categorie FROM stock WHERE sous_categorie IS NOT NULL")->fetchAll(PDO::FETCH_ASSOC);
 $subCategoriesGrouped = [];
 foreach ($subCatRaw as $row) {
-    $subCategoriesGrouped[$row['categorie']][] = $row['sous_categorie'];
+  $subCategoriesGrouped[$row['categorie']][] = $row['sous_categorie'];
 }
 ?>
 <div class="container py-4">
@@ -61,67 +62,75 @@ foreach ($subCatRaw as $row) {
 
 
 <div class="container">
-    <!-- Champ de recherche -->
-    <input type="text" id="searchInput" class="form-control mb-4" placeholder="Rechercher un article...">
+  <!-- Champ de recherche -->
+  <input type="text" id="searchInput" class="form-control mb-4" placeholder="Rechercher un article...">
 
-    <div class="table-responsive">
-        <table class="table table-bordered table-hover text-center align-middle">
-            <thead class="table-dark">
-                <tr>
-                    <th>Nom</th>
-                    <th>Photo</th>
-                    <th>Quantité</th>
-                    <th>Chantiers</th>
-                    <th>Actions</th>
-                </tr>
-            </thead>
-            <tbody id="stockTableBody">
-                <?php foreach ($stocks as $stock): ?>
-                    <?php
-                    $stockId = $stock['id'];
-                    $total = (int)$stock['quantite_totale'];
-                    $dispo = (int)$stock['quantite_disponible'];
-                    $surChantier = $total - $dispo;
-                    ?>
-                    <tr data-cat="<?= htmlspecialchars($stock['categorie']) ?>" data-subcat="<?= htmlspecialchars($stock['sous_categorie']) ?>">
-                        <td><a href="article.php?id=<?= $stockId ?>"><?= htmlspecialchars($stock['nom']) ?> (<?= $total ?>)</a></td>
-                        <td><img src="uploads/photos/<?= $stockId ?>.jpg" alt="photo" style="height: 40px;"></td>
-                        <td class="quantite-col">
-                            <span class="badge <?= $dispo < 10 ? 'bg-danger' : 'bg-success' ?>"><?= $dispo ?> dispo</span>
-                            <span class="badge bg-warning text-dark"><?= $surChantier ?> sur chantier</span>
-                        </td>
-                        <td class="admin-col">
-                            <?php if (!empty($chantierAssoc[$stockId])): ?>
-                                <?php foreach ($chantierAssoc[$stockId] as $c): ?>
-                                    <div><?= htmlspecialchars($c['nom']) ?> (<?= $c['quantite'] ?>)</div>
-                                <?php endforeach; ?>
-                            <?php else: ?>
-                                <span class="text-muted">Aucun</span>
-                            <?php endif; ?>
-                        </td>
-                        <td>
-                            <button class="btn btn-sm btn-primary transfer-btn" data-stock-id="<?= $stockId ?>">
-                                <i class="bi bi-arrow-left-right"></i>
-                            </button>
-                            <a href="modifierStock.php?id=<?= $stockId ?>" class="btn btn-sm btn-warning">
-                                <i class="bi bi-pencil"></i>
-                            </a>
-                            <a href="supprimerStock.php?id=<?= $stockId ?>" class="btn btn-sm btn-danger" onclick="return confirm('Supprimer cet élément ?')">
-                                <i class="bi bi-trash"></i>
-                            </a>
-                        </td>
-                    </tr>
+  <div class="table-responsive">
+    <table class="table table-bordered table-hover text-center align-middle">
+      <thead class="table-dark">
+        <tr>
+          <th>Nom</th>
+          <th>Photo</th>
+          <th>Quantité</th>
+          <th>Chantiers</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="stockTableBody">
+        <?php foreach ($stocks as $stock): ?>
+          <?php
+          $stockId = $stock['id'];
+          $total = (int)$stock['quantite_totale'];
+          $dispo = (int)$stock['quantite_disponible'];
+          $surChantier = $total - $dispo;
+          ?>
+          <tr data-cat="<?= htmlspecialchars($stock['categorie']) ?>" data-subcat="<?= htmlspecialchars($stock['sous_categorie']) ?>">
+            <td><a href="article.php?id=<?= $stockId ?>"><?= htmlspecialchars($stock['nom']) ?> (<?= $total ?>)</a></td>
+            <td><img src="uploads/photos/<?= $stockId ?>.jpg" alt="photo" style="height: 40px;"></td>
+            <td class="quantite-col">
+              <span class="badge <?= $dispo < 10 ? 'bg-danger' : 'bg-success' ?>"><?= $dispo ?> dispo</span>
+              <span class="badge bg-warning text-dark"><?= $surChantier ?> sur chantier</span>
+            </td>
+            <td class="admin-col">
+              <?php if (!empty($chantierAssoc[$stockId])): ?>
+                <?php foreach ($chantierAssoc[$stockId] as $c): ?>
+                  <div><?= htmlspecialchars($c['nom']) ?> (<?= $c['quantite'] ?>)</div>
                 <?php endforeach; ?>
-            </tbody>
-        </table>
-    </div>
+              <?php else: ?>
+                <span class="text-muted">Aucun</span>
+              <?php endif; ?>
+            </td>
+            <td>
+              <button class="btn btn-sm btn-primary transfer-btn" data-stock-id="<?= $stockId ?>">
+                <i class="bi bi-arrow-left-right"></i>
+              </button>
+              <button class="btn btn-sm btn-warning edit-btn"
+                data-stock-id="<?= $stockId ?>"
+                data-stock-nom="<?= htmlspecialchars($stock['nom']) ?>"
+                data-stock-quantite="<?= $total ?>">
+                <i class="bi bi-pencil"></i>
+              </button>
+              <button type="button"
+                class="btn btn-sm btn-danger delete-btn"
+                data-stock-id="<?= $stockId ?>"
+                data-stock-nom="<?= htmlspecialchars($stock['nom']) ?>">
+                <i class="bi bi-trash"></i>
+              </button>
+
+            </td>
+
+          </tr>
+        <?php endforeach; ?>
+      </tbody>
+    </table>
+  </div>
 </div>
 
 <!-- Modal de transfert (Admin) -->
 <div class="modal fade" id="transferModal" tabindex="-1" aria-labelledby="transferModalLabel" aria-hidden="true">
   <div class="modal-dialog">
     <div class="modal-content">
-    
+
       <div class="modal-header">
         <h5 class="modal-title" id="transferModalLabel">Transfert d'article</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
@@ -197,9 +206,91 @@ foreach ($subCatRaw as $row) {
 
 
 
+<!-- Modal Modifier -->
+<div class="modal fade" id="modifyModal" tabindex="-1" aria-labelledby="modifyModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="modifyModalLabel">Modifier un article</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
+      </div>
+      <div class="modal-body">
+        <form id="modifyForm" enctype="multipart/form-data">
+          <input type="hidden" id="modifyStockId" name="stockId">
+          <div class="mb-3">
+            <label for="modifyNom" class="form-label">Nom</label>
+            <input type="text" class="form-control" id="modifyNom" name="nom" required>
+          </div>
+          <div class="mb-3">
+            <label for="modifyQty" class="form-label">Quantité totale</label>
+            <input type="number" class="form-control" id="modifyQty" name="quantite" required min="0">
+          </div>
+          <div class="mb-3">
+            <label for="modifyPhoto" class="form-label">Photo (optionnel)</label>
+            <input type="file" class="form-control" id="modifyPhoto" name="photo">
+          </div>
+        </form>
+
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+        <button type="submit" class="btn btn-primary" id="confirmModify">Enregistrer</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast modification réussie -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index: 9999">
+  <div id="modifyToast" class="toast align-items-center text-bg-success border-0" role="alert" aria-live="assertive" aria-atomic="true">
+    <div class="d-flex">
+      <div class="toast-body">
+        ✅ Modification enregistrée !
+      </div>
+      <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Fermer"></button>
+    </div>
+  </div>
+</div>
+
+
+<!-- Modal de confirmation de suppression -->
+<div class="modal fade" id="confirmDeleteModal" tabindex="-1" aria-labelledby="confirmDeleteLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header bg-danger text-white">
+        <h5 class="modal-title" id="confirmDeleteLabel">Confirmer la suppression</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Fermer"></button>
+      </div>
+      <div class="modal-body">
+        <p>Es-tu sûr de vouloir supprimer <strong id="deleteItemName"></strong> ? Cette action est irréversible.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+        <button type="button" class="btn btn-danger" id="confirmDeleteButton">Supprimer</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast suppression réussie -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index: 9999">
+  <div id="deleteToast" class="toast align-items-center text-bg-danger border-0" role="alert" aria-live="assertive" aria-atomic="true">
+    <div class="d-flex">
+      <div class="toast-body">
+        🗑️ Article supprimé avec succès !
+      </div>
+      <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Fermer"></button>
+    </div>
+  </div>
+</div>
+
+
+
+
+
 
 <script>
-    const subCategories = <?= json_encode($subCategoriesGrouped) ?>;
+  const subCategories = <?= json_encode($subCategoriesGrouped) ?>;
 </script>
 <script src="/js/stock.js"></script>
 <script src="/js/stockGestion_admin.js"></script>
