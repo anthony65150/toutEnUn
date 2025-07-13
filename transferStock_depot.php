@@ -1,78 +1,51 @@
 <?php
 require_once "./config/init.php";
-
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
-
 header('Content-Type: application/json');
 
-$input = json_decode(file_get_contents('php://input'), true);
-$stockId = isset($input['stockId']) ? (int)$input['stockId'] : null;
-$destination = $input['destination'] ?? null;
-$quantite = isset($input['qty']) ? (int)$input['qty'] : null;
-
-if (!$stockId || !$destination || !$quantite || $quantite < 1) {
-    echo json_encode(["success" => false, "message" => "Paramètres invalides."]);
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    echo json_encode(["success" => false, "message" => "Méthode non autorisée"]);
     exit;
 }
 
-$stmt = $pdo->prepare("SELECT quantite_disponible, nom FROM stock WHERE id = ?");
-$stmt->execute([$stockId]);
-$stock = $stmt->fetch(PDO::FETCH_ASSOC);
+$data = json_decode(file_get_contents("php://input"), true);
+$stockId = (int)($data['stockId'] ?? 0);
+$destination = $data['destination'] ?? null;
+$qty = (int)($data['qty'] ?? 0);
+$depotId = $_SESSION['utilisateurs']['id'] ?? null;
 
-if (!$stock) {
-    echo json_encode(["success" => false, "message" => "Article introuvable."]);
+if (!$stockId || !$qty || !$destination || !$depotId) {
+    echo json_encode(["success" => false, "message" => "Données invalides."]);
     exit;
 }
 
-if ($quantite > $stock['quantite_disponible']) {
-    echo json_encode(["success" => false, "message" => "Quantité disponible insuffisante."]);
-    exit;
-}
+try {
+    $pdo->beginTransaction();
 
-// Déduction du stock disponible
-$update = $pdo->prepare("UPDATE stock SET quantite_disponible = quantite_disponible - :qte WHERE id = :id");
-$update->execute([':qte' => $quantite, ':id' => $stockId]);
+    // Vérifier stock disponible au dépôt
+    $stmt = $pdo->prepare("SELECT quantite_disponible FROM stock WHERE id = ?");
+    $stmt->execute([$stockId]);
+    $dispo = (int)$stmt->fetchColumn();
 
-// Si vers chantier
-if ($destination !== "depot") {
-    $check = $pdo->prepare("SELECT quantite FROM stock_chantiers WHERE stock_id = ? AND chantier_id = ?");
-    $check->execute([$stockId, $destination]);
-    $exist = $check->fetchColumn();
-
-    if ($exist !== false) {
-        $upd = $pdo->prepare("UPDATE stock_chantiers SET quantite = quantite + ? WHERE stock_id = ? AND chantier_id = ?");
-        $upd->execute([$quantite, $stockId, $destination]);
-    } else {
-        $insert = $pdo->prepare("INSERT INTO stock_chantiers (stock_id, chantier_id, quantite) VALUES (?, ?, ?)");
-        $insert->execute([$stockId, $destination, $quantite]);
+    if ($dispo < $qty) {
+        throw new Exception("Stock insuffisant au dépôt.");
     }
+
+    // Insérer transfert en attente
+    $stmt = $pdo->prepare("
+        INSERT INTO transferts_en_attente (article_id, source_id, destination_id, quantite, demandeur_id, statut)
+        VALUES (?, ?, ?, ?, ?, 'en_attente')
+    ");
+    $stmt->execute([
+        $stockId,
+        0, // dépôt = 0
+        $destination === 'depot' ? 0 : $destination,
+        $qty,
+        $depotId
+    ]);
+
+    $pdo->commit();
+    echo json_encode(["success" => true, "message" => "Transfert enregistré, en attente de validation."]);
+} catch (Exception $e) {
+    $pdo->rollBack();
+    echo json_encode(["success" => false, "message" => $e->getMessage()]);
 }
-
-// Récupération des nouvelles données
-$stmt = $pdo->prepare("SELECT quantite_disponible FROM stock WHERE id = ?");
-$stmt->execute([$stockId]);
-$dispo = $stmt->fetchColumn();
-
-// Liste des chantiers mise à jour
-$chantierStmt = $pdo->prepare("
-    SELECT c.nom, sc.quantite
-    FROM stock_chantiers sc
-    JOIN chantiers c ON sc.chantier_id = c.id
-    WHERE sc.stock_id = ?
-");
-$chantierStmt->execute([$stockId]);
-$chantierRows = $chantierStmt->fetchAll(PDO::FETCH_ASSOC);
-
-$chantiersHtml = "";
-foreach ($chantierRows as $chantier) {
-    $chantiersHtml .= "<div>" . htmlspecialchars($chantier['nom']) . " (" . (int)$chantier['quantite'] . ")</div>";
-}
-
-echo json_encode([
-    "success" => true,
-    "disponible" => $dispo,
-    "chantiersHtml" => $chantiersHtml
-]);
-exit;

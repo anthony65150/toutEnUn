@@ -3,62 +3,73 @@ require_once "./config/init.php";
 
 header('Content-Type: application/json');
 
-$id = isset($_POST['stockId']) ? (int)$_POST['stockId'] : null;
-$newNom = $_POST['nom'] ?? null;
-$newTotal = isset($_POST['quantite']) ? (int)$_POST['quantite'] : null;
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    echo json_encode(['success' => false, 'message' => 'Méthode non autorisée']);
+    exit;
+}
 
-if (!$id || !$newNom || !$newTotal) {
-    echo json_encode(['success' => false, 'message' => 'Données manquantes']);
+$stockId = $_POST['stockId'] ?? null;
+$nom = trim($_POST['nom'] ?? '');
+$quantite = isset($_POST['quantite']) ? (int)$_POST['quantite'] : null;
+
+if (!$stockId || $nom === '' || $quantite === null || $quantite < 0) {
+    echo json_encode(['success' => false, 'message' => 'Données invalides']);
     exit;
 }
 
 try {
     $pdo->beginTransaction();
 
-    // Récupérer les anciennes valeurs
-    $stmt = $pdo->prepare("SELECT quantite_totale, quantite_disponible FROM stock WHERE id = :id");
-    $stmt->execute([':id' => $id]);
-    $stock = $stmt->fetch(PDO::FETCH_ASSOC);
-
-    if (!$stock) {
-        throw new Exception('Article introuvable');
-    }
-
-    $oldTotal = (int)$stock['quantite_totale'];
-    $oldDispo = (int)$stock['quantite_disponible'];
-    $diff = $newTotal - $oldTotal;
-    $newDispo = $oldDispo + $diff;
-    if ($newDispo < 0) $newDispo = 0;
-
-    // Mettre à jour nom et quantités
-    $stmt = $pdo->prepare("UPDATE stock SET nom = :nom, quantite_totale = :total, quantite_disponible = :dispo WHERE id = :id");
-    $stmt->execute([
-        ':nom' => $newNom,
-        ':total' => $newTotal,
-        ':dispo' => $newDispo,
-        ':id' => $id
-    ]);
-
-    // Gérer la photo si fournie
-    if (!empty($_FILES['photo']['name'])) {
+    // Gestion photo si upload
+    $newPhotoUrl = null;
+    if (isset($_FILES['photo']) && $_FILES['photo']['error'] === UPLOAD_ERR_OK) {
         $uploadDir = __DIR__ . '/uploads/photos/';
         if (!is_dir($uploadDir)) {
             mkdir($uploadDir, 0755, true);
         }
-        $targetPath = $uploadDir . $id . '.jpg';
-        if (!move_uploaded_file($_FILES['photo']['tmp_name'], $targetPath)) {
-            throw new Exception('Erreur lors de l’enregistrement de la photo.');
+
+        $ext = strtolower(pathinfo($_FILES['photo']['name'], PATHINFO_EXTENSION));
+        $allowedExt = ['jpg', 'jpeg', 'png', 'webp'];
+        if (!in_array($ext, $allowedExt)) {
+            throw new Exception('Format de photo non autorisé.');
         }
+
+        // Nom de fichier basé sur l'id du stock pour écraser l'ancienne photo
+        $photoFilename = $stockId . '.' . $ext;
+        $photoPath = $uploadDir . $photoFilename;
+
+        if (!move_uploaded_file($_FILES['photo']['tmp_name'], $photoPath)) {
+            throw new Exception('Erreur lors de l\'upload de la photo.');
+        }
+
+        $newPhotoUrl = '/uploads/photos/' . $photoFilename;
+
+        // Mise à jour du champ photo dans la base
+        $stmt = $pdo->prepare("UPDATE stock SET photo = ? WHERE id = ?");
+        $stmt->execute([$photoFilename, $stockId]);
     }
+
+    // Mise à jour du nom et quantité totale
+    $stmt = $pdo->prepare("UPDATE stock SET nom = ?, quantite_totale = ?, quantite_disponible = quantite_disponible + (? - quantite_totale) WHERE id = ?");
+    // On ajuste quantite_disponible en fonction de la différence entre nouvelle et ancienne quantite_totale
+    // Cette requête suppose que la quantité disponible est ajustée automatiquement.
+    $stmt->execute([$nom, $quantite, $quantite, $stockId]);
 
     $pdo->commit();
 
+    // Récupérer quantité disponible mise à jour
+    $stmt = $pdo->prepare("SELECT quantite_disponible FROM stock WHERE id = ?");
+    $stmt->execute([$stockId]);
+    $quantiteDispo = (int)$stmt->fetchColumn();
+
     echo json_encode([
         'success' => true,
-        'newNom' => $newNom,
-        'newTotal' => $newTotal,
-        'newDispo' => $newDispo
+        'newNom' => $nom,
+        'newQuantiteTotale' => $quantite,
+        'newPhotoUrl' => $newPhotoUrl,
+        'quantiteDispo' => $quantiteDispo
     ]);
+
 } catch (Exception $e) {
     $pdo->rollBack();
     echo json_encode(['success' => false, 'message' => $e->getMessage()]);

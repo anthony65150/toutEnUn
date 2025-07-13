@@ -2,10 +2,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const transferModal = document.getElementById('transferModal');
   const confirmButton = document.getElementById('confirmTransfer');
   const destinationSelect = document.getElementById('destination');
-  const transferQtyInput = document.getElementById('transferQty');
+  const qtyInput = document.getElementById('transferQty');
   const modalStockIdInput = document.getElementById('modalStockId');
 
-  // ✅ Fonction d'affichage du toast
   function showToast(id) {
     const toastElement = document.getElementById(id);
     if (toastElement) {
@@ -14,7 +13,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // ❌ Toast d'erreur
   function showErrorToast(message) {
     const msgElem = document.getElementById("errorToastMessage");
     if (msgElem) msgElem.textContent = message;
@@ -27,41 +25,26 @@ document.addEventListener('DOMContentLoaded', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     })
-    .then(res => res.json())
-    .then(data => {
-      if (!data.success) {
-        showErrorToast(data.message || "Erreur lors du transfert.");
-        return;
-      }
-
-      const row = document.querySelector(`button[data-stock-id="${payload.stockId}"]`)?.closest("tr");
-      if (row) {
-        const qtyCell = row.querySelector(".quantite-col");
-        if (qtyCell) {
-          qtyCell.innerHTML = `
-            <span class="badge bg-success">${data.disponible} dispo</span>
-            <span class="badge bg-warning text-dark">${data.surChantier} sur chantier</span>
-          `;
+      .then(res => res.json())
+      .then(data => {
+        if (!data.success) {
+          showErrorToast(data.message || "Erreur lors du transfert.");
+          return;
         }
 
-        const chantierCell = row.querySelector(".chantier-col");
-        if (chantierCell) {
-          chantierCell.textContent = data.chantierQuantite ?? 0;
-        }
-      }
-
-      bootstrap.Modal.getInstance(transferModal)?.hide();
-      showToast("transferToast"); // ✅ Toast de succès
-    })
-    .catch(error => {
-      console.error("❌ Erreur réseau :", error);
-      showErrorToast("Erreur réseau ou serveur.");
-    });
+        // Pas de mise à jour directe des colonnes → juste le toast
+        bootstrap.Modal.getInstance(transferModal)?.hide();
+        showToast("transferToast");
+      })
+      .catch(error => {
+        console.error("❌ Erreur réseau :", error);
+        showErrorToast("Erreur réseau ou serveur.");
+      });
   }
 
   confirmButton.addEventListener('click', () => {
     const destination = destinationSelect.value;
-    const qty = parseInt(transferQtyInput.value, 10);
+    const qty = parseInt(qtyInput.value, 10);
     const stockId = modalStockIdInput.value;
 
     if (!destination || isNaN(qty) || qty < 1) {
@@ -69,14 +52,15 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    sendTransfer({ stockId, destination, qty });
+    const payload = { stockId, destination, qty };
+    sendTransfer(payload);
   });
 
   document.querySelectorAll('.transfer-btn').forEach(button => {
     button.addEventListener('click', () => {
       modalStockIdInput.value = button.getAttribute('data-stock-id');
+      qtyInput.value = '';
       destinationSelect.value = '';
-      transferQtyInput.value = '';
       new bootstrap.Modal(transferModal).show();
     });
   });

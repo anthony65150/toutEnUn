@@ -10,62 +10,41 @@ document.addEventListener("DOMContentLoaded", () => {
         toast.show();
     }
 
+    function showErrorToast(message) {
+        document.getElementById("errorToastMessage").textContent = message;
+        showToast("errorToast");
+    }
+
     function sendTransfer(payload) {
         fetch("transferStock_depot.php", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload)
         })
-        .then(res => res.text())
-        .then(text => {
-            try {
-                const data = JSON.parse(text);
-
-                if (!data.success) {
-                    document.getElementById("errorToastMessage").textContent = data.message;
-                    showToast("errorToast");
-                    return;
-                }
-
-                const row = document.querySelector(`button[data-stock-id="${payload.stockId}"]`)?.closest("tr");
-                if (row) {
-                    const dispoCell = row.querySelector("td:nth-child(3) .badge");
-                    if (dispoCell) {
-                        dispoCell.textContent = data.disponible;
-                        dispoCell.classList.remove("bg-danger", "bg-success");
-                        dispoCell.classList.add(data.disponible < 10 ? "bg-danger" : "bg-success");
-                    }
-
-                    const chantierCell = row.querySelector("td:nth-child(4)");
-                    if (chantierCell && data.chantiersHtml) {
-                        chantierCell.innerHTML = data.chantiersHtml;
-                    }
-                }
-
-                bootstrap.Modal.getInstance(transferModal)?.hide();
-                showToast("transferToast");
-
-            } catch (e) {
-                document.getElementById("errorToastMessage").textContent = "Erreur serveur : " + e.message;
-                showToast("errorToast");
-                console.error(e, text);
+        .then(res => res.json())
+        .then(data => {
+            if (!data.success) {
+                showErrorToast(data.message || "Erreur lors du transfert.");
+                return;
             }
+
+            // Pas de mise à jour directe → juste fermer le modal et afficher le toast
+            bootstrap.Modal.getInstance(transferModal)?.hide();
+            showToast("transferToast");
         })
         .catch(error => {
-            document.getElementById("errorToastMessage").textContent = "Erreur réseau.";
-            showToast("errorToast");
-            console.error(error);
+            console.error("❌ Erreur réseau :", error);
+            showErrorToast("Erreur réseau ou serveur.");
         });
     }
 
     confirmButton.addEventListener("click", () => {
-        const qty = parseInt(transferQtyInput.value);
+        const qty = parseInt(transferQtyInput.value, 10);
         const destination = destinationSelect.value;
         const stockId = modalStockIdInput.value;
 
         if (!qty || !destination || qty < 1) {
-            document.getElementById("errorToastMessage").textContent = "Veuillez remplir tous les champs.";
-            showToast("errorToast");
+            showErrorToast("Veuillez remplir tous les champs.");
             return;
         }
 
