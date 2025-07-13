@@ -8,7 +8,17 @@ if (!isset($_SESSION['utilisateurs']) || $_SESSION['utilisateurs']['fonction'] !
     exit;
 }
 
-// Récupère les associations stock ↔ chantiers
+// Récupérer l'id du dépôt lié à l'utilisateur connecté
+$userId = $_SESSION['utilisateurs']['id'];
+$stmtDepot = $pdo->prepare("SELECT id FROM depots WHERE responsable_id = ?");
+$stmtDepot->execute([$userId]);
+$depot = $stmtDepot->fetch(PDO::FETCH_ASSOC);
+$depotId = $depot ? (int)$depot['id'] : null;
+if (!$depotId) {
+    die("Dépôt non trouvé pour cet utilisateur.");
+}
+
+// Récupérer les associations stock ↔ chantiers (quantité sur chantier)
 $stmt = $pdo->query("SELECT sc.stock_id, c.nom AS chantier_nom, sc.quantite FROM stock_chantiers sc JOIN chantiers c ON sc.chantier_id = c.id");
 $chantierAssoc = [];
 foreach ($stmt as $row) {
@@ -18,78 +28,90 @@ foreach ($stmt as $row) {
     ];
 }
 
-// Récupération des stocks
-$stmt = $pdo->query("SELECT id, nom, quantite_totale AS total, quantite_disponible AS disponible, categorie, sous_categorie FROM stock ORDER BY nom");
+// Récupérer le stock total et dispo pour le dépôt courant (d'après depot_id)
+$stmt = $pdo->prepare("
+    SELECT 
+        s.id, 
+        s.nom, 
+        s.quantite_totale AS total, 
+        sd.quantite AS quantite_stock_depot,
+        COALESCE(sd.quantite, 0) - COALESCE((
+            SELECT SUM(te.quantite) 
+            FROM transferts_en_attente te 
+            WHERE te.article_id = s.id 
+              AND te.source_type = 'depot' 
+              AND te.source_id = ? 
+              AND te.statut = 'en_attente'
+        ), 0) AS disponible,
+        s.categorie, 
+        s.sous_categorie
+    FROM stock s
+    LEFT JOIN stock_depots sd ON s.id = sd.stock_id AND sd.depot_id = ?
+    ORDER BY s.nom
+");
+$stmt->execute([$depotId, $depotId]);
 $stocks = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Récupérer liste des chantiers pour sélection destination transfert
+$chantiers = $pdo->query("SELECT id, nom FROM chantiers ORDER BY nom")->fetchAll(PDO::FETCH_ASSOC);
 ?>
 
 <div class="container py-5">
-    <h2 class="text-center mb-5">Stock dépôt</h2>
-    <div class="table-responsive">
-        <table class="table table-bordered table-hover align-middle">
-            <thead class="table-dark text-center">
-                <tr>
-                    <th>Nom</th>
-                    <th>Photo</th>
-                    <th>Disponible</th>
-                    <th>Chantiers</th>
-                    <th>Actions</th>
-                </tr>
-            </thead>
-            <tbody>
-                <?php foreach ($stocks as $stock): ?>
-                    <?php
-                    $stockId = $stock['id'];
-                    $total = (int)$stock['total'];
-                    $dispo = (int)$stock['disponible'];
-                    $nom = htmlspecialchars($stock['nom']);
-                    $chantierList = $chantierAssoc[$stockId] ?? [];
-                    ?>
-                    <tr>
-                        <td><?= "$nom ($total)" ?></td>
-                        <td class="text-center">
-                            <img src="uploads/photos/<?= $stockId ?>.jpg" alt="<?= $nom ?>" style="height: 40px;">
-                        </td>
-                        <td class="text-center">
-                            <span class="badge <?= $dispo < 10 ? 'bg-danger' : 'bg-success' ?>">
-                                <?= $dispo ?>
-                            </span>
-                        </td>
-                        <td>
-                            <?php if (count($chantierList)): ?>
-                                <?php foreach ($chantierList as $chantier): ?>
-                                    <div><?= htmlspecialchars($chantier['nom']) ?> (<?= (int)$chantier['quantite'] ?>)</div>
-                                <?php endforeach; ?>
-                            <?php else: ?>
-                                <span class="text-muted">Aucun</span>
-                            <?php endif; ?>
-                        </td>
-                        <td class="text-center">
-                            <button
-                                class="btn btn-sm btn-primary transfer-btn"
-                                data-stock-id="<?= $stockId ?>"
-                                data-stock-nom="<?= $nom ?>">
-                                <i class="bi bi-arrow-left-right"></i> Transférer
-                            </button>
-                        </td>
-                    </tr>
+  <h2 class="text-center mb-5">Stock dépôt</h2>
+  <div class="table-responsive">
+    <table class="table table-bordered table-hover align-middle text-center">
+      <thead class="table-dark">
+        <tr>
+          <th>Nom</th>
+          <th>Photo</th>
+          <th>Disponible</th>
+          <th>Chantiers</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        <?php foreach ($stocks as $stock):
+          $stockId = $stock['id'];
+          $total = (int)$stock['total'];
+          $dispo = (int)$stock['disponible'];
+          $nom = htmlspecialchars($stock['nom']);
+          $chantierList = $chantierAssoc[$stockId] ?? [];
+        ?>
+          <tr>
+            <td><?= "$nom ($total)" ?></td>
+            <td>
+              <img src="uploads/photos/<?= $stockId ?>.jpg" alt="<?= $nom ?>" style="height: 40px;">
+            </td>
+            <td>
+              <span class="badge quantite-disponible <?= $dispo < 10 ? 'bg-danger' : 'bg-success' ?>">
+                <?= $dispo ?>
+              </span>
+            </td>
+            <td>
+              <?php if (count($chantierList)): ?>
+                <?php foreach ($chantierList as $chantier): ?>
+                  <div><?= htmlspecialchars($chantier['nom']) ?> (<?= (int)$chantier['quantite'] ?>)</div>
                 <?php endforeach; ?>
-            </tbody>
-        </table>
-    </div>
+              <?php else: ?>
+                <span class="text-muted">Aucun</span>
+              <?php endif; ?>
+            </td>
+            <td>
+              <button
+                class="btn btn-sm btn-primary transfer-btn"
+                data-stock-id="<?= $stockId ?>"
+                data-stock-nom="<?= $nom ?>">
+                <i class="bi bi-arrow-left-right"></i> Transférer
+              </button>
+            </td>
+          </tr>
+        <?php endforeach; ?>
+      </tbody>
+    </table>
+  </div>
 </div>
 
-<!-- Toast Bootstrap pour confirmation -->
-<div class="position-fixed bottom-0 end-0 p-3" style="z-index: 9999">
-    <div id="transferToast" class="toast align-items-center text-bg-success border-0" role="alert" aria-live="assertive" aria-atomic="true">
-        <div class="d-flex">
-            <div class="toast-body">✅ Transfert effectué avec succès !</div>
-            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Fermer"></button>
-        </div>
-    </div>
-</div>
-
-<!-- Modal de transfert -->
+<!-- Modal Transfert vers chantier -->
 <div class="modal fade" id="transferModal" tabindex="-1" aria-labelledby="transferModalLabel" aria-hidden="true">
   <div class="modal-dialog">
     <div class="modal-content">
@@ -107,9 +129,7 @@ $stocks = $stmt->fetchAll(PDO::FETCH_ASSOC);
             <label for="destination" class="form-label">Destination (chantier)</label>
             <select class="form-select" id="destination" required>
               <option value="" disabled selected>Choisir le chantier</option>
-              <?php
-              $chantiers = $pdo->query("SELECT id, nom FROM chantiers ORDER BY nom")->fetchAll(PDO::FETCH_ASSOC);
-              foreach ($chantiers as $chantier): ?>
+              <?php foreach ($chantiers as $chantier): ?>
                 <option value="<?= $chantier['id'] ?>"><?= htmlspecialchars($chantier['nom']) ?></option>
               <?php endforeach; ?>
             </select>
@@ -126,32 +146,22 @@ $stocks = $stmt->fetchAll(PDO::FETCH_ASSOC);
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
         <button type="submit" class="btn btn-primary" id="confirmTransfer">OK</button>
       </div>
+
     </div>
   </div>
 </div>
 
-
-
-<!-- Toast de confirmation pour un transfert réussi -->
+<!-- Toasts -->
 <div class="position-fixed bottom-0 end-0 p-3" style="z-index: 9999">
-    <div id="transferToast" class="toast align-items-center text-bg-success border-0" role="alert" aria-live="assertive" aria-atomic="true">
-        <div class="d-flex">
-            <div class="toast-body">
-                ✅ Transfert effectué avec succès !
-            </div>
-            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Fermer"></button>
-        </div>
+  <div id="transferToast" class="toast align-items-center text-bg-success border-0" role="alert" aria-live="assertive" aria-atomic="true">
+    <div class="d-flex">
+      <div class="toast-body">✅ Transfert effectué avec succès !</div>
+      <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Fermer"></button>
     </div>
-</div>
-
-
-<!-- Toast d'erreur -->
-<div class="position-fixed bottom-0 end-0 p-3" style="z-index: 9999">
+  </div>
   <div id="errorToast" class="toast align-items-center text-bg-danger border-0" role="alert" aria-live="assertive" aria-atomic="true">
     <div class="d-flex">
-      <div class="toast-body" id="errorToastMessage">
-        ❌ Une erreur est survenue.
-      </div>
+      <div class="toast-body" id="errorToastMessage">❌ Une erreur est survenue.</div>
       <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Fermer"></button>
     </div>
   </div>

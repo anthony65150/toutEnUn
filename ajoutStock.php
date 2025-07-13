@@ -16,8 +16,6 @@ if (isset($_GET['action']) && $_GET['action'] === 'getSousCategories' && !empty(
 require_once __DIR__ . '/templates/header.php';
 require_once __DIR__ . '/templates/navigation/navigation.php';
 
-
-
 // === Vérification connexion + rôle admin ===
 if (!isset($_SESSION['utilisateurs']) || $_SESSION['utilisateurs']['fonction'] !== 'administrateur') {
     header("Location: connexion.php");
@@ -70,13 +68,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         try {
             $pdo->beginTransaction();
+
+            // Insertion dans la table 'stock'
             $stmt = $pdo->prepare("INSERT INTO stock (nom, quantite_totale, categorie, sous_categorie, photo) VALUES (?, ?, ?, ?, ?)");
             $stmt->execute([$nom, $quantite, $categorie, $sous_categorie ?: null, $nom_fichier]);
 
             $stockId = $pdo->lastInsertId();
 
+            // Insertion dans stock_depots pour le dépôt 1 (à adapter si besoin)
+            $depotId = 1;
             $stmtDepot = $pdo->prepare("INSERT INTO stock_depots (stock_id, depot_id, quantite) VALUES (?, ?, ?)");
-            $stmtDepot->execute([$stockId, 1, $quantite]);
+            $stmtDepot->execute([$stockId, $depotId, $quantite]);
+
+            // Mettre à jour quantite_disponible dans stock
+            $stmtUpdateDispo = $pdo->prepare("
+                UPDATE stock s
+                SET quantite_disponible = (
+                    SELECT COALESCE(SUM(quantite), 0) FROM stock_depots WHERE stock_id = s.id
+                )
+                WHERE s.id = ?
+            ");
+            $stmtUpdateDispo->execute([$stockId]);
 
             $pdo->commit();
             $success = true;
@@ -103,7 +115,6 @@ if ($categorieSelectionnee !== '') {
 <body
     <?php if (!empty($_POST['nouvelleCategorie'])): ?>data-nouvelle-categorie="1" <?php endif; ?>
     <?php if (!empty($_POST['nouvelleSousCategorie'])): ?> data-nouvelle-sous-categorie="1" <?php endif; ?>>
-
     <div class="fond-gris">
         <div class="p-5">
             <div class="container mt-1">
@@ -180,9 +191,9 @@ if ($categorieSelectionnee !== '') {
         </div>
     </div>
 
-    <script src="/js/ajoutStock.js"></script>
+<script src="/js/ajoutStock.js"></script>
 
-    <?php
-    require_once __DIR__ . '/templates/footer.php';
-    ob_end_flush();
-    ?>
+<?php
+require_once __DIR__ . '/templates/footer.php';
+ob_end_flush();
+?>

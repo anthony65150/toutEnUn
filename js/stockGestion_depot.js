@@ -28,27 +28,41 @@ document.addEventListener("DOMContentLoaded", () => {
                 return;
             }
 
-            // Pas de mise à jour directe → juste fermer le modal et afficher le toast
+            // Mise à jour de la quantité disponible dans le tableau
+            const stockId = modalStockIdInput.value;
+            const rows = document.querySelectorAll('tbody tr');
+            rows.forEach(row => {
+                const btn = row.querySelector('.transfer-btn');
+                if (btn && btn.getAttribute('data-stock-id') === stockId) {
+                    const dispoSpan = row.querySelector('.quantite-disponible');
+                    if (dispoSpan) {
+                        dispoSpan.textContent = data.quantiteDispo;
+                        dispoSpan.className = 'badge quantite-disponible ' + (data.quantiteDispo < 10 ? 'bg-danger' : 'bg-success');
+                    }
+                }
+            });
+
             bootstrap.Modal.getInstance(transferModal)?.hide();
             showToast("transferToast");
         })
         .catch(error => {
-            console.error("❌ Erreur réseau :", error);
+            console.error("Erreur réseau :", error);
             showErrorToast("Erreur réseau ou serveur.");
         });
     }
 
     confirmButton.addEventListener("click", () => {
         const qty = parseInt(transferQtyInput.value, 10);
-        const destination = destinationSelect.value;
+        const destinationId = destinationSelect.value;
         const stockId = modalStockIdInput.value;
 
-        if (!qty || !destination || qty < 1) {
+        if (!qty || !destinationId || qty < 1) {
             showErrorToast("Veuillez remplir tous les champs.");
             return;
         }
 
-        sendTransfer({ stockId, destination, qty });
+        sendTransfer({ stockId, destination: destinationId, qty });
+        // Ou mieux : sendTransfer({ stockId, destinationId, qty });
     });
 
     document.querySelectorAll(".transfer-btn").forEach(button => {

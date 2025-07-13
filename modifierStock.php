@@ -34,7 +34,6 @@ try {
             throw new Exception('Format de photo non autorisé.');
         }
 
-        // Nom de fichier basé sur l'id du stock pour écraser l'ancienne photo
         $photoFilename = $stockId . '.' . $ext;
         $photoPath = $uploadDir . $photoFilename;
 
@@ -44,16 +43,36 @@ try {
 
         $newPhotoUrl = '/uploads/photos/' . $photoFilename;
 
-        // Mise à jour du champ photo dans la base
         $stmt = $pdo->prepare("UPDATE stock SET photo = ? WHERE id = ?");
         $stmt->execute([$photoFilename, $stockId]);
     }
 
-    // Mise à jour du nom et quantité totale
-    $stmt = $pdo->prepare("UPDATE stock SET nom = ?, quantite_totale = ?, quantite_disponible = quantite_disponible + (? - quantite_totale) WHERE id = ?");
-    // On ajuste quantite_disponible en fonction de la différence entre nouvelle et ancienne quantite_totale
-    // Cette requête suppose que la quantité disponible est ajustée automatiquement.
-    $stmt->execute([$nom, $quantite, $quantite, $stockId]);
+    // Récupérer l'ancienne quantité totale
+    $stmt = $pdo->prepare("SELECT quantite_totale FROM stock WHERE id = ?");
+    $stmt->execute([$stockId]);
+    $ancienneQuantite = (int)$stmt->fetchColumn();
+
+    // Calculer la différence
+    $diff = $quantite - $ancienneQuantite;
+
+    // Mettre à jour nom, quantite_totale et ajuster quantite_disponible dans stock
+    $stmt = $pdo->prepare("UPDATE stock SET nom = ?, quantite_totale = ?, quantite_disponible = quantite_disponible + ? WHERE id = ?");
+    $stmt->execute([$nom, $quantite, $diff, $stockId]);
+
+    // Mettre à jour la quantité dans stock_depots (ajuste la quantité en fonction de la différence)
+    // On considère ici depot_id = 1, adapte si besoin
+    $stmtDepotCheck = $pdo->prepare("SELECT COUNT(*) FROM stock_depots WHERE stock_id = ? AND depot_id = 1");
+    $stmtDepotCheck->execute([$stockId]);
+    $existsDepot = (int)$stmtDepotCheck->fetchColumn();
+
+    if ($existsDepot) {
+        $stmtDepotUpdate = $pdo->prepare("UPDATE stock_depots SET quantite = quantite + ? WHERE stock_id = ? AND depot_id = 1");
+        $stmtDepotUpdate->execute([$diff, $stockId]);
+    } else {
+        // Si jamais pas d'entrée dans stock_depots, on l'insère
+        $stmtDepotInsert = $pdo->prepare("INSERT INTO stock_depots (stock_id, depot_id, quantite) VALUES (?, 1, ?)");
+        $stmtDepotInsert->execute([$stockId, $quantite]);
+    }
 
     $pdo->commit();
 
