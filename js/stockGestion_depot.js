@@ -28,7 +28,6 @@ document.addEventListener("DOMContentLoaded", () => {
                 return;
             }
 
-            // Mise à jour de la quantité disponible dans le tableau
             const stockId = modalStockIdInput.value;
             const rows = document.querySelectorAll('tbody tr');
             rows.forEach(row => {
@@ -62,7 +61,6 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         sendTransfer({ stockId, destination: destinationId, qty });
-        // Ou mieux : sendTransfer({ stockId, destinationId, qty });
     });
 
     document.querySelectorAll(".transfer-btn").forEach(button => {
@@ -73,4 +71,28 @@ document.addEventListener("DOMContentLoaded", () => {
             new bootstrap.Modal(transferModal).show();
         });
     });
+
+    // ✅ AJOUT : gestion AJAX validation réception
+document.querySelectorAll(".validate-reception-btn").forEach(button => {
+    button.addEventListener("click", () => {
+        const transfertId = button.getAttribute("data-transfert-id");
+
+        fetch("validerReception_depot.php", {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: "transfert_id=" + encodeURIComponent(transfertId)
+        })
+        .then(res => res.text())
+        .then(() => {
+            const row = button.closest("tr");
+            if (row) row.remove();
+            showToast("transferToast");
+        })
+        .catch(error => {
+            console.error("Erreur réseau :", error);
+            showErrorToast("Erreur lors de la validation.");
+        });
+    });
+});
+
 });

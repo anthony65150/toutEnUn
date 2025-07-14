@@ -25,7 +25,6 @@ if (!in_array($destinationType, ['depot', 'chantier'])) {
     exit;
 }
 
-// Interdire transfert vers le même chantier
 if ($destinationType === 'chantier' && $destinationId === $chantierId) {
     echo json_encode(["success" => false, "message" => "Destination identique au chantier source."]);
     exit;
@@ -57,6 +56,14 @@ try {
         $qty,
         $chefId
     ]);
+
+    // 🔻 Retirer du chantier
+    $stmt = $pdo->prepare("UPDATE stock_chantiers SET quantite = quantite - :qte WHERE chantier_id = :chantier AND stock_id = :article");
+    $stmt->execute(['qte' => $qty, 'chantier' => $chantierId, 'article' => $stockId]);
+
+    // 🔻 Retirer du stock global dispo
+    $stmt = $pdo->prepare("UPDATE stock SET quantite_disponible = quantite_disponible - :qte WHERE id = :article");
+    $stmt->execute(['qte' => $qty, 'article' => $stockId]);
 
     $pdo->commit();
 

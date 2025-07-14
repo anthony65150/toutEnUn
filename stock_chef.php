@@ -32,6 +32,17 @@ $stocks = $stmt->fetchAll(PDO::FETCH_ASSOC);
 // Récupérer dépôts et chantiers (hors chantier du chef) pour sélection destination
 $depots = $pdo->query("SELECT id, nom FROM depots ORDER BY nom")->fetchAll(PDO::FETCH_ASSOC);
 $chantiers = $pdo->query("SELECT id, nom FROM chantiers ORDER BY nom")->fetchAll(PDO::FETCH_ASSOC);
+
+// Récupérer les transferts en attente pour ce chantier
+$stmt = $pdo->prepare("
+    SELECT t.id AS transfert_id, s.nom AS article_nom, t.quantite, u.nom AS demandeur_nom, u.prenom AS demandeur_prenom
+    FROM transferts_en_attente t
+    JOIN stock s ON t.article_id = s.id
+    JOIN utilisateurs u ON t.demandeur_id = u.id
+    WHERE t.destination_type = 'chantier' AND t.destination_id = ? AND t.statut = 'en_attente'
+");
+$stmt->execute([$utilisateurChantierId]);
+$transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
 ?>
 
 <div class="container py-5">
@@ -54,14 +65,16 @@ $chantiers = $pdo->query("SELECT id, nom FROM chantiers ORDER BY nom")->fetchAll
                     $nom = htmlspecialchars($stock['nom']);
                     $total = (int)$stock['total'];
                     $dispo = (int)$stock['disponible'];
-                    $surChantier = $total - $dispo;
+                    
+                    // ✅ Correction : calculer uniquement à partir de stock_chantiers
+                    $surChantier = 0;
                     $quantite = 0;
 
                     if (!empty($chantierAssoc[$stockId])) {
                         foreach ($chantierAssoc[$stockId] as $chantier) {
+                            $surChantier += (int)$chantier['quantite'];
                             if ($chantier['id'] == $utilisateurChantierId) {
                                 $quantite = (int)$chantier['quantite'];
-                                break;
                             }
                         }
                     }
@@ -69,13 +82,11 @@ $chantiers = $pdo->query("SELECT id, nom FROM chantiers ORDER BY nom")->fetchAll
                     <tr>
                         <td><?= $nom ?> (<?= $total ?>)</td>
                         <td class="text-center"><img src="uploads/photos/<?= $stockId ?>.jpg" style="height: 40px;" /></td>
-                        <td class="text-center quantite-col">
+                        <td class="text-center">
                             <span class="badge bg-success"><?= $dispo ?> dispo</span>
                             <span class="badge bg-warning text-dark"><?= $surChantier ?> sur chantier</span>
                         </td>
-                        <td class="text-center chantier-col" data-stock-id="<?= $stockId ?>" data-chantier-id="<?= $utilisateurChantierId ?>">
-                            <?= $quantite ?>
-                        </td>
+                        <td class="text-center"><?= $quantite ?></td>
                         <td class="text-center">
                             <button class="btn btn-sm btn-primary transfer-btn" data-stock-id="<?= $stockId ?>" data-stock-nom="<?= $nom ?>">
                                 <i class="bi bi-arrow-left-right"></i> Transférer
@@ -86,9 +97,44 @@ $chantiers = $pdo->query("SELECT id, nom FROM chantiers ORDER BY nom")->fetchAll
             </tbody>
         </table>
     </div>
+
+    <!-- Section transferts à valider -->
+    <h3 class="mt-5">Transferts à valider</h3>
+    <?php if ($transfertsEnAttente): ?>
+        <table class="table table-bordered">
+            <thead class="table-info">
+                <tr>
+                    <th>Article</th>
+                    <th>Quantité</th>
+                    <th>Envoyé par</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach ($transfertsEnAttente as $t): ?>
+                    <tr>
+                        <td><?= htmlspecialchars($t['article_nom']) ?></td>
+                        <td><?= $t['quantite'] ?></td>
+                        <td><?= htmlspecialchars($t['demandeur_prenom'] . ' ' . $t['demandeur_nom']) ?></td>
+                        <td>
+<form method="post" action="validerReception_chef.php" style="display:inline;">
+    <input type="hidden" name="transfert_id" value="<?= $t['transfert_id'] ?>">
+    <button type="submit" class="btn btn-success btn-sm">
+        ✅ Valider réception
+    </button>
+</form>
+
+                        </td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+    <?php else: ?>
+        <p class="text-muted">Aucun transfert en attente de validation.</p>
+    <?php endif; ?>
 </div>
 
-<!-- Modal -->
+<!-- MODAL TRANSFERT -->
 <div class="modal fade" id="transferModal" tabindex="-1" aria-labelledby="transferModalLabel" aria-hidden="true">
   <div class="modal-dialog">
     <div class="modal-content">
@@ -103,20 +149,17 @@ $chantiers = $pdo->query("SELECT id, nom FROM chantiers ORDER BY nom")->fetchAll
             <label for="destination" class="form-label">Destination</label>
             <select class="form-select" id="destination" required>
               <option value="" disabled selected>Choisir la destination</option>
-
               <optgroup label="Dépôts">
                 <?php foreach ($depots as $depot): ?>
                   <option value="depot_<?= $depot['id'] ?>"><?= htmlspecialchars($depot['nom']) ?></option>
                 <?php endforeach; ?>
               </optgroup>
-
               <optgroup label="Chantiers">
                 <?php foreach ($chantiers as $chantier):
                     if ($chantier['id'] == $utilisateurChantierId) continue; ?>
                   <option value="chantier_<?= $chantier['id'] ?>"><?= htmlspecialchars($chantier['nom']) ?></option>
                 <?php endforeach; ?>
               </optgroup>
-
             </select>
           </div>
           <div class="mb-3">
@@ -129,30 +172,6 @@ $chantiers = $pdo->query("SELECT id, nom FROM chantiers ORDER BY nom")->fetchAll
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
         <button type="submit" class="btn btn-primary" id="confirmTransfer">OK</button>
       </div>
-    </div>
-  </div>
-</div>
-
-<!-- Toast Bootstrap pour confirmation -->
-<div class="position-fixed bottom-0 end-0 p-3" style="z-index: 9999">
-  <div id="transferToast" class="toast align-items-center text-bg-success border-0" role="alert" aria-live="assertive" aria-atomic="true">
-    <div class="d-flex">
-      <div class="toast-body">
-        ✅ Transfert effectué avec succès !
-      </div>
-      <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Fermer"></button>
-    </div>
-  </div>
-</div>
-
-<!-- Toast d’erreur -->
-<div class="position-fixed bottom-0 end-0 p-3" style="z-index: 9999">
-  <div id="errorToast" class="toast align-items-center text-bg-danger border-0" role="alert" aria-live="assertive" aria-atomic="true">
-    <div class="d-flex">
-      <div class="toast-body" id="errorToastMessage">
-        ❌ Une erreur est survenue.
-      </div>
-      <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Fermer"></button>
     </div>
   </div>
 </div>
