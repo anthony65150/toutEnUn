@@ -4,8 +4,8 @@ require_once __DIR__ . '/templates/header.php';
 require_once __DIR__ . '/templates/navigation/navigation.php';
 
 if (!isset($_SESSION['utilisateurs']) || $_SESSION['utilisateurs']['fonction'] !== 'depot') {
-    header('Location: ../index.php');
-    exit;
+  header('Location: ../index.php');
+  exit;
 }
 
 // Récupérer l'id du dépôt lié à l'utilisateur connecté
@@ -15,17 +15,17 @@ $stmtDepot->execute([$userId]);
 $depot = $stmtDepot->fetch(PDO::FETCH_ASSOC);
 $depotId = $depot ? (int)$depot['id'] : null;
 if (!$depotId) {
-    die("Dépôt non trouvé pour cet utilisateur.");
+  die("Dépôt non trouvé pour cet utilisateur.");
 }
 
 // Récupérer les associations stock ↔ chantiers (quantité sur chantier)
 $stmt = $pdo->query("SELECT sc.stock_id, c.nom AS chantier_nom, sc.quantite FROM stock_chantiers sc JOIN chantiers c ON sc.chantier_id = c.id");
 $chantierAssoc = [];
 foreach ($stmt as $row) {
-    $chantierAssoc[$row['stock_id']][] = [
-        'nom' => $row['chantier_nom'],
-        'quantite' => $row['quantite']
-    ];
+  $chantierAssoc[$row['stock_id']][] = [
+    'nom' => $row['chantier_nom'],
+    'quantite' => $row['quantite']
+  ];
 }
 
 // Récupérer le stock total et dispo pour le dépôt courant (d'après depot_id)
@@ -129,9 +129,11 @@ $chantiers = $pdo->query("SELECT id, nom FROM chantiers ORDER BY nom")->fetchAll
             <label for="destination" class="form-label">Destination (chantier)</label>
             <select class="form-select" id="destination" required>
               <option value="" disabled selected>Choisir le chantier</option>
-              <?php foreach ($chantiers as $chantier): ?>
-                <option value="<?= $chantier['id'] ?>"><?= htmlspecialchars($chantier['nom']) ?></option>
-              <?php endforeach; ?>
+              <optgroup label="Chantiers">
+                <?php foreach ($chantiers as $chantier): ?>
+                  <option value="<?= $chantier['id'] ?>"><?= htmlspecialchars($chantier['nom']) ?></option>
+                <?php endforeach; ?>
+              </optgroup>
             </select>
           </div>
 

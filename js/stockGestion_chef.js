@@ -43,16 +43,18 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   confirmButton.addEventListener('click', () => {
-    const destination = destinationSelect.value;
+    const destinationValue = destinationSelect.value;
     const qty = parseInt(qtyInput.value, 10);
     const stockId = modalStockIdInput.value;
 
-    if (!destination || isNaN(qty) || qty < 1) {
+    if (!destinationValue || isNaN(qty) || qty < 1) {
       showErrorToast("Veuillez remplir tous les champs.");
       return;
     }
 
-    const payload = { stockId, destination, qty };
+    const [destinationType, destinationId] = destinationValue.split('_');
+
+    const payload = { stockId, destinationType, destinationId: parseInt(destinationId, 10), qty };
     sendTransfer(payload);
   });
 

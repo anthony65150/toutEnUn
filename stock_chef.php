@@ -25,8 +25,13 @@ foreach ($stmt as $row) {
     ];
 }
 
+// Récupérer stock global
 $stmt = $pdo->query("SELECT id, nom, quantite_totale AS total, quantite_disponible AS disponible, categorie, sous_categorie FROM stock ORDER BY nom");
 $stocks = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Récupérer dépôts et chantiers (hors chantier du chef) pour sélection destination
+$depots = $pdo->query("SELECT id, nom FROM depots ORDER BY nom")->fetchAll(PDO::FETCH_ASSOC);
+$chantiers = $pdo->query("SELECT id, nom FROM chantiers ORDER BY nom")->fetchAll(PDO::FETCH_ASSOC);
 ?>
 
 <div class="container py-5">
@@ -98,14 +103,20 @@ $stocks = $stmt->fetchAll(PDO::FETCH_ASSOC);
             <label for="destination" class="form-label">Destination</label>
             <select class="form-select" id="destination" required>
               <option value="" disabled selected>Choisir la destination</option>
-              <option value="depot">Dépôt</option>
-              <?php
-              $chantiers = $pdo->query("SELECT id, nom FROM chantiers ORDER BY nom")->fetchAll(PDO::FETCH_ASSOC);
-              foreach ($chantiers as $chantier):
-                  if ($chantier['id'] == $utilisateurChantierId) continue;
-              ?>
-                  <option value="<?= $chantier['id'] ?>"><?= htmlspecialchars($chantier['nom']) ?></option>
-              <?php endforeach; ?>
+
+              <optgroup label="Dépôts">
+                <?php foreach ($depots as $depot): ?>
+                  <option value="depot_<?= $depot['id'] ?>"><?= htmlspecialchars($depot['nom']) ?></option>
+                <?php endforeach; ?>
+              </optgroup>
+
+              <optgroup label="Chantiers">
+                <?php foreach ($chantiers as $chantier):
+                    if ($chantier['id'] == $utilisateurChantierId) continue; ?>
+                  <option value="chantier_<?= $chantier['id'] ?>"><?= htmlspecialchars($chantier['nom']) ?></option>
+                <?php endforeach; ?>
+              </optgroup>
+
             </select>
           </div>
           <div class="mb-3">
@@ -145,7 +156,6 @@ $stocks = $stmt->fetchAll(PDO::FETCH_ASSOC);
     </div>
   </div>
 </div>
-
 
 <script src="/js/stockGestion_chef.js"></script>
 <?php require_once __DIR__ . '/templates/footer.php'; ?>

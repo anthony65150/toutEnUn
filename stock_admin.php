@@ -2,8 +2,8 @@
 require_once "./config/init.php";
 
 if (!isset($_SESSION['utilisateurs']) || $_SESSION['utilisateurs']['fonction'] !== 'administrateur') {
-    header("Location: connexion.php");
-    exit;
+  header("Location: connexion.php");
+  exit;
 }
 require_once __DIR__ . '/templates/header.php';
 require_once __DIR__ . '/templates/navigation/navigation.php';
@@ -17,93 +17,93 @@ $stocks = $stmt->fetchAll(PDO::FETCH_ASSOC);
 $stmt = $pdo->query("SELECT sc.stock_id, c.nom AS chantier_nom, sc.quantite FROM stock_chantiers sc JOIN chantiers c ON sc.chantier_id = c.id");
 $chantierAssoc = [];
 foreach ($stmt as $row) {
-    $chantierAssoc[$row['stock_id']][] = [
-        'nom' => $row['chantier_nom'],
-        'quantite' => $row['quantite']
-    ];
+  $chantierAssoc[$row['stock_id']][] = [
+    'nom' => $row['chantier_nom'],
+    'quantite' => $row['quantite']
+  ];
 }
 
 $categories = $pdo->query("SELECT DISTINCT categorie FROM stock WHERE categorie IS NOT NULL ORDER BY categorie")->fetchAll(PDO::FETCH_COLUMN);
 $subCatRaw = $pdo->query("SELECT categorie, sous_categorie FROM stock WHERE sous_categorie IS NOT NULL")->fetchAll(PDO::FETCH_ASSOC);
 $subCategoriesGrouped = [];
 foreach ($subCatRaw as $row) {
-    $subCategoriesGrouped[$row['categorie']][] = $row['sous_categorie'];
+  $subCategoriesGrouped[$row['categorie']][] = $row['sous_categorie'];
 }
 ?>
 
 <div class="container py-4">
-    <div class="text-center mb-4">
-        <h2 class="mb-3">Gestion de stock</h2>
-        <a href="ajoutStock.php" class="btn btn-success">
-            <i class="bi bi-plus-circle"></i> Ajouter un élément
-        </a>
-    </div>
+  <div class="text-center mb-4">
+    <h2 class="mb-3">Gestion de stock</h2>
+    <a href="ajoutStock.php" class="btn btn-success">
+      <i class="bi bi-plus-circle"></i> Ajouter un élément
+    </a>
+  </div>
 
-    <!-- Boutons catégories -->
-    <div class="d-flex justify-content-center mb-3 flex-wrap gap-2" id="categoriesSlide">
-        <button class="btn btn-outline-primary" onclick="filterByCategory('')">Tous</button>
-        <?php foreach ($categories as $cat): ?>
-            <button class="btn btn-outline-primary" onclick="filterByCategory('<?= htmlspecialchars($cat) ?>')">
-                <?= htmlspecialchars(ucfirst($cat)) ?>
-            </button>
-        <?php endforeach; ?>
-    </div>
+  <!-- Boutons catégories -->
+  <div class="d-flex justify-content-center mb-3 flex-wrap gap-2" id="categoriesSlide">
+    <button class="btn btn-outline-primary" onclick="filterByCategory('')">Tous</button>
+    <?php foreach ($categories as $cat): ?>
+      <button class="btn btn-outline-primary" onclick="filterByCategory('<?= htmlspecialchars($cat) ?>')">
+        <?= htmlspecialchars(ucfirst($cat)) ?>
+      </button>
+    <?php endforeach; ?>
+  </div>
 
-    <!-- Conteneur pour sous-catégories, rempli dynamiquement par JS -->
-    <div id="subCategoriesSlide" class="d-flex justify-content-center mb-2 flex-wrap gap-2"></div>
+  <!-- Conteneur pour sous-catégories, rempli dynamiquement par JS -->
+  <div id="subCategoriesSlide" class="d-flex justify-content-center mb-2 flex-wrap gap-2"></div>
 
-    <input type="text" id="searchInput" class="form-control mb-4" placeholder="Rechercher un article...">
+  <input type="text" id="searchInput" class="form-control mb-4" placeholder="Rechercher un article...">
 
-    <div class="table-responsive">
-        <table class="table table-bordered table-hover text-center align-middle">
-            <thead class="table-dark">
-                <tr>
-                    <th>Nom</th>
-                    <th>Photo</th>
-                    <th>Chantiers</th>
-                    <th>Actions</th>
-                </tr>
-            </thead>
-            <tbody id="stockTableBody">
-                <?php foreach ($stocks as $stock): ?>
-                    <?php $stockId = $stock['id']; ?>
-                    <tr data-cat="<?= htmlspecialchars($stock['categorie']) ?>" data-subcat="<?= htmlspecialchars($stock['sous_categorie']) ?>">
-                        <td>
-                            <a href="article.php?id=<?= $stockId ?>">
-                                <?= htmlspecialchars($stock['nom']) ?> (<?= $stock['quantite_totale'] ?>)
-                            </a>
-                        </td>
-                        <td><img src="uploads/photos/<?= $stockId ?>.jpg" alt="photo" style="height: 40px;"></td>
-                        <td>
-                            <?php if (!empty($chantierAssoc[$stockId])): ?>
-                                <?php foreach ($chantierAssoc[$stockId] as $c): ?>
-                                    <div><?= htmlspecialchars($c['nom']) ?> (<?= $c['quantite'] ?>)</div>
-                                <?php endforeach; ?>
-                            <?php else: ?>
-                                <span class="text-muted">Aucun</span>
-                            <?php endif; ?>
-                        </td>
-                        <td>
-                            <button class="btn btn-sm btn-primary transfer-btn" data-stock-id="<?= $stockId ?>">
-                                <i class="bi bi-arrow-left-right"></i>
-                            </button>
-                            <button class="btn btn-sm btn-warning edit-btn"
-                                    data-stock-id="<?= $stockId ?>"
-                                    data-stock-nom="<?= htmlspecialchars($stock['nom']) ?>">
-                                <i class="bi bi-pencil"></i>
-                            </button>
-                            <button type="button"
-                                    class="btn btn-sm btn-danger delete-btn"
-                                    data-stock-id="<?= $stockId ?>"
-                                    data-stock-nom="<?= htmlspecialchars($stock['nom']) ?>">
-                                <i class="bi bi-trash"></i>
-                            </button>
-                        </td>
-                    </tr>
+  <div class="table-responsive">
+    <table class="table table-bordered table-hover text-center align-middle">
+      <thead class="table-dark">
+        <tr>
+          <th>Nom</th>
+          <th>Photo</th>
+          <th>Chantiers</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="stockTableBody">
+        <?php foreach ($stocks as $stock): ?>
+          <?php $stockId = $stock['id']; ?>
+          <tr data-cat="<?= htmlspecialchars($stock['categorie']) ?>" data-subcat="<?= htmlspecialchars($stock['sous_categorie']) ?>">
+            <td>
+              <a href="article.php?id=<?= $stockId ?>">
+                <?= htmlspecialchars($stock['nom']) ?> (<?= $stock['quantite_totale'] ?>)
+              </a>
+            </td>
+            <td><img src="uploads/photos/<?= $stockId ?>.jpg" alt="photo" style="height: 40px;"></td>
+            <td>
+              <?php if (!empty($chantierAssoc[$stockId])): ?>
+                <?php foreach ($chantierAssoc[$stockId] as $c): ?>
+                  <div><?= htmlspecialchars($c['nom']) ?> (<?= $c['quantite'] ?>)</div>
                 <?php endforeach; ?>
-            </tbody>
-        </table>
-    </div>
+              <?php else: ?>
+                <span class="text-muted">Aucun</span>
+              <?php endif; ?>
+            </td>
+            <td>
+              <button class="btn btn-sm btn-primary transfer-btn" data-stock-id="<?= $stockId ?>">
+                <i class="bi bi-arrow-left-right"></i>
+              </button>
+              <button class="btn btn-sm btn-warning edit-btn"
+                data-stock-id="<?= $stockId ?>"
+                data-stock-nom="<?= htmlspecialchars($stock['nom']) ?>">
+                <i class="bi bi-pencil"></i>
+              </button>
+              <button type="button"
+                class="btn btn-sm btn-danger delete-btn"
+                data-stock-id="<?= $stockId ?>"
+                data-stock-nom="<?= htmlspecialchars($stock['nom']) ?>">
+                <i class="bi bi-trash"></i>
+              </button>
+            </td>
+          </tr>
+        <?php endforeach; ?>
+      </tbody>
+    </table>
+  </div>
 </div>
 
 <!-- Modal Transfert -->
@@ -121,24 +121,32 @@ foreach ($subCatRaw as $row) {
             <label for="sourceChantier" class="form-label">Source</label>
             <select class="form-select" id="sourceChantier" required>
               <option value="" disabled selected>Choisir la source</option>
-              <?php foreach ($allDepots as $id => $nom): ?>
-                <option value="depot_<?= $id ?>">[Dépôt] <?= htmlspecialchars($nom) ?></option>
-              <?php endforeach; ?>
-              <?php foreach ($allChantiers as $id => $nom): ?>
-                <option value="chantier_<?= $id ?>">[Chantier] <?= htmlspecialchars($nom) ?></option>
-              <?php endforeach; ?>
+              <optgroup label="Dépôts">
+                <?php foreach ($allDepots as $id => $nom): ?>
+                  <option value="depot_<?= $id ?>"><?= htmlspecialchars($nom) ?></option>
+                <?php endforeach; ?>
+              </optgroup>
+              <optgroup label="Chantiers">
+                <?php foreach ($allChantiers as $id => $nom): ?>
+                  <option value="chantier_<?= $id ?>"><?= htmlspecialchars($nom) ?></option>
+                <?php endforeach; ?>
+              </optgroup>
             </select>
           </div>
           <div class="mb-3">
             <label for="destinationChantier" class="form-label">Destination</label>
             <select class="form-select" id="destinationChantier" required>
               <option value="" disabled selected>Choisir la destination</option>
-              <?php foreach ($allDepots as $id => $nom): ?>
-                <option value="depot_<?= $id ?>">[Dépôt] <?= htmlspecialchars($nom) ?></option>
-              <?php endforeach; ?>
-              <?php foreach ($allChantiers as $id => $nom): ?>
-                <option value="chantier_<?= $id ?>">[Chantier] <?= htmlspecialchars($nom) ?></option>
-              <?php endforeach; ?>
+              <optgroup label="Dépôts">
+                <?php foreach ($allDepots as $id => $nom): ?>
+                  <option value="depot_<?= $id ?>"><?= htmlspecialchars($nom) ?></option>
+                <?php endforeach; ?>
+              </optgroup>
+              <optgroup label="Chantiers">
+                <?php foreach ($allChantiers as $id => $nom): ?>
+                  <option value="chantier_<?= $id ?>"><?= htmlspecialchars($nom) ?></option>
+                <?php endforeach; ?>
+              </optgroup>
             </select>
           </div>
           <div class="mb-3">
@@ -228,7 +236,7 @@ foreach ($subCatRaw as $row) {
 </div>
 
 <script>
-const subCategories = <?= json_encode($subCategoriesGrouped) ?>;
+  const subCategories = <?= json_encode($subCategoriesGrouped) ?>;
 </script>
 <script src="/js/stock.js"></script>
 <script src="/js/stockGestion_admin.js"></script>
