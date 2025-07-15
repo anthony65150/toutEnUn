@@ -48,14 +48,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['transfert_id'])) {
                 $stmtInsert->execute(['chantier' => $chantierId, 'article' => $articleId, 'qte' => $quantite]);
             }
 
-            // ✅ Si ça vient d’un chantier (transfert chantier → chantier), on ajuste le stock global
-            if ($sourceType === 'chantier') {
-                $stmtUpdateStock = $pdo->prepare("
-                    UPDATE stock SET quantite_disponible = quantite_disponible + :qte 
-                    WHERE id = :article
-                ");
-                $stmtUpdateStock->execute(['qte' => $quantite, 'article' => $articleId]);
-            }
+            // ❌ SUPPRIMÉ : mise à jour de quantite_disponible (calculée dynamiquement à l'affichage)
 
             // ✅ Supprimer le transfert en attente
             $stmtDelete = $pdo->prepare("DELETE FROM transferts_en_attente WHERE id = ?");

@@ -58,9 +58,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['transfert_id'])) {
                 $stmtUpdateChantier = $pdo->prepare("UPDATE stock_chantiers SET quantite = GREATEST(quantite - :qte, 0) WHERE chantier_id = :chantier AND stock_id = :article");
                 $stmtUpdateChantier->execute(['qte' => $quantite, 'chantier' => $sourceId, 'article' => $articleId]);
 
-                // ✅ AJOUT : remettre au stock global disponible
-                $stmtUpdateStock = $pdo->prepare("UPDATE stock SET quantite_disponible = quantite_disponible + :qte WHERE id = :article");
-                $stmtUpdateStock->execute(['qte' => $quantite, 'article' => $articleId]);
+                // ❌ SUPPRIMÉ : mise à jour de quantite_disponible (calculée dynamiquement à l'affichage)
             }
 
             // ✅ Supprimer le transfert en attente

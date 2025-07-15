@@ -18,7 +18,6 @@ if (!$stockId || !$qty || !$destinationId || !$userId) {
     exit;
 }
 
-// Récupérer l'id du dépôt lié à cet utilisateur
 $stmtDepot = $pdo->prepare("SELECT id FROM depots WHERE responsable_id = ?");
 $stmtDepot->execute([$userId]);
 $depot = $stmtDepot->fetch(PDO::FETCH_ASSOC);
@@ -33,7 +32,6 @@ $depotId = (int)$depot['id'];
 try {
     $pdo->beginTransaction();
 
-    // Vérifier stock disponible dans stock_depots pour ce dépôt
     $stmt = $pdo->prepare("SELECT quantite FROM stock_depots WHERE stock_id = ? AND depot_id = ?");
     $stmt->execute([$stockId, $depotId]);
     $dispo = (int)$stmt->fetchColumn();
@@ -42,26 +40,11 @@ try {
         throw new Exception("Stock insuffisant au dépôt.");
     }
 
-    // Insérer transfert en attente
     $stmt = $pdo->prepare("
         INSERT INTO transferts_en_attente (article_id, source_type, source_id, destination_type, destination_id, quantite, demandeur_id, statut)
         VALUES (?, 'depot', ?, 'chantier', ?, ?, ?, 'en_attente')
     ");
-    $stmt->execute([
-        $stockId,
-        $depotId,
-        $destinationId,
-        $qty,
-        $userId
-    ]);
-
-    // 🔻 Retirer du dépôt
-    $stmt = $pdo->prepare("UPDATE stock_depots SET quantite = quantite - :qte WHERE depot_id = :depot AND stock_id = :article");
-    $stmt->execute(['qte' => $qty, 'depot' => $depotId, 'article' => $stockId]);
-
-    // 🔻 Retirer du stock global dispo
-    $stmt = $pdo->prepare("UPDATE stock SET quantite_disponible = quantite_disponible - :qte WHERE id = :article");
-    $stmt->execute(['qte' => $qty, 'article' => $stockId]);
+    $stmt->execute([$stockId, $depotId, $destinationId, $qty, $userId]);
 
     $pdo->commit();
 
@@ -70,6 +53,7 @@ try {
         "message" => "Transfert enregistré, en attente de validation.",
         "quantiteDispo" => $dispo - $qty
     ]);
+
 } catch (Exception $e) {
     $pdo->rollBack();
     echo json_encode(["success" => false, "message" => $e->getMessage()]);

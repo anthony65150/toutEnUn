@@ -1,226 +1,196 @@
 document.addEventListener('DOMContentLoaded', () => {
-  const transferModalEl = document.getElementById('transferModal');
-  const modifyModalEl = document.getElementById('modifyModal');
-  const deleteModalEl = document.getElementById('confirmDeleteModal');
-
-  const transferModal = new bootstrap.Modal(transferModalEl);
-  const modifyModal = new bootstrap.Modal(modifyModalEl);
-  const deleteModal = new bootstrap.Modal(deleteModalEl);
-
-  const confirmTransferButton = document.getElementById('confirmTransfer');
-  const confirmModifyButton = document.getElementById('confirmModify');
-  const confirmDeleteButton = document.getElementById('confirmDeleteButton');
-  const sourceSelect = document.getElementById('sourceChantier');
-  const destinationSelect = document.getElementById('destinationChantier');
-  const qtyInput = document.getElementById('transferQty');
-  const modalStockIdInput = document.getElementById('modalStockId');
-  const deleteItemName = document.getElementById('deleteItemName');
+  const transferModal = new bootstrap.Modal(document.getElementById('transferModal'));
+  const modifyModal = new bootstrap.Modal(document.getElementById('modifyModal'));
+  const deleteModal = new bootstrap.Modal(document.getElementById('confirmDeleteModal'));
 
   let currentRow = null;
   let currentDeleteId = null;
-  let currentRowToDelete = null;
 
-  
-
-  function showToast(id) {
+  // Toasts
+  const showToast = (id) => {
     const toastEl = document.getElementById(id);
-    if (toastEl) {
-      const toast = new bootstrap.Toast(toastEl);
-      toast.show();
-    }
-  }
+    if (toastEl) new bootstrap.Toast(toastEl).show();
+  };
 
-  function showErrorToast(message) {
+  const showErrorToast = (message) => {
     const errorMsg = document.getElementById('errorToastMessage');
-    if(errorMsg) errorMsg.textContent = message;
+    if (errorMsg) errorMsg.textContent = message;
     showToast('errorToast');
-  }
+  };
 
-  // ---------- TRANSFERT ----------
-  confirmTransferButton.addEventListener('click', () => {
-    const sourceValue = sourceSelect.value;
-    const destinationValue = destinationSelect.value;
-    const qty = parseInt(qtyInput.value, 10);
-    const stockId = modalStockIdInput.value;
+  // ----- TRANSFERT -----
+  document.querySelectorAll('.transfer-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.getElementById('modalStockId').value = btn.dataset.stockId;
+      document.getElementById('sourceChantier').value = '';
+      document.getElementById('destinationChantier').value = '';
+      document.getElementById('transferQty').value = '';
+      transferModal.show();
+    });
+  });
 
-    if (!sourceValue || !destinationValue || isNaN(qty) || qty < 1) {
+  document.getElementById('confirmTransfer').addEventListener('click', () => {
+    const stockId = document.getElementById('modalStockId').value;
+    const [sourceType, sourceId] = document.getElementById('sourceChantier').value.split('_');
+    const [destinationType, destinationId] = document.getElementById('destinationChantier').value.split('_');
+    const qty = parseInt(document.getElementById('transferQty').value, 10);
+
+    if (!sourceType || !destinationType || isNaN(qty) || qty < 1) {
       showErrorToast('Veuillez remplir tous les champs.');
       return;
     }
-
-    const [sourceType, sourceId] = sourceValue.split('_');
-    const [destinationType, destinationId] = destinationValue.split('_');
-
     if (sourceType === destinationType && sourceId === destinationId) {
       showErrorToast('Source et destination doivent être différentes.');
       return;
     }
 
-    const payload = {
-      stockId,
-      sourceType,
-      sourceId: parseInt(sourceId, 10),
-      destinationType,
-      destinationId: parseInt(destinationId, 10),
-      qty
-    };
-
     fetch('transferStock_admin.php', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    })
-    .then(res => res.json())
-    .then(data => {
-      if (!data.success) {
-        showErrorToast(data.message || 'Erreur lors du transfert.');
-      } else {
-        transferModal.hide();
-        showToast('transferToast');
-      }
-    })
-    .catch(err => {
-      console.error(err);
-      showErrorToast('Erreur réseau ou serveur.');
-    });
-  });
-
-  document.querySelectorAll('.transfer-btn').forEach(button => {
-    button.addEventListener('click', () => {
-      modalStockIdInput.value = button.getAttribute('data-stock-id');
-      qtyInput.value = '';
-      sourceSelect.value = '';
-      destinationSelect.value = '';
-      transferModal.show();
-    });
-  });
-
-  // ---------- MODIFIER ----------
-  document.querySelectorAll('.edit-btn').forEach(button => {
-    button.addEventListener('click', () => {
-      const stockId = button.getAttribute('data-stock-id');
-      const stockNom = button.getAttribute('data-stock-nom');
-      currentRow = button.closest('tr');
-
-      document.getElementById('modifyStockId').value = stockId;
-      document.getElementById('modifyNom').value = stockNom;
-
-      const quantiteCellText = currentRow.querySelector('td:first-child a').textContent;
-      const quantiteMatch = quantiteCellText.match(/\((\d+)\)$/);
-      if (quantiteMatch) {
-        document.getElementById('modifyQty').value = quantiteMatch[1];
-      } else {
-        document.getElementById('modifyQty').value = '';
-      }
-
-      document.getElementById('modifyPhoto').value = '';
-
-      modifyModal.show();
-    });
-  });
-
-  confirmModifyButton.addEventListener('click', () => {
-    const stockId = document.getElementById('modifyStockId').value;
-    const nom = document.getElementById('modifyNom').value.trim();
-    const quantite = document.getElementById('modifyQty').value;
-    const photoFile = document.getElementById('modifyPhoto').files[0];
-
-    if (!nom || (quantite && isNaN(quantite))) {
-      showErrorToast('Veuillez remplir tous les champs correctement.');
-      return;
-    }
-
-    const formData = new FormData();
-    formData.append('stockId', stockId);
-    formData.append('nom', nom);
-    if(quantite) formData.append('quantite', quantite);
-    if(photoFile) formData.append('photo', photoFile);
-
-    fetch('modifierStock.php', {
-      method: 'POST',
-      body: formData
+      body: JSON.stringify({ stockId, sourceType, sourceId, destinationType, destinationId, qty })
     })
     .then(res => res.json())
     .then(data => {
       if (data.success) {
-        currentRow.querySelector('td:first-child a').textContent = `${data.newNom} (${data.newQuantiteTotale})`;
-        if (data.newPhotoUrl) {
+        transferModal.hide();
+        showToast('modifyToast');
+      } else {
+        showErrorToast(data.message);
+      }
+    })
+    .catch(() => showErrorToast('Erreur réseau ou serveur.'));
+  });
+
+  // ----- MODIFIER -----
+  document.querySelectorAll('.edit-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      currentRow = btn.closest('tr');
+      document.getElementById('modifyStockId').value = btn.dataset.stockId;
+      document.getElementById('modifyNom').value = btn.dataset.stockNom;
+      document.getElementById('modifyQty').value = '';
+      document.getElementById('modifyPhoto').value = '';
+      modifyModal.show();
+    });
+  });
+
+  document.getElementById('confirmModify').addEventListener('click', () => {
+    const formData = new FormData();
+    formData.append('stockId', document.getElementById('modifyStockId').value);
+    formData.append('nom', document.getElementById('modifyNom').value);
+    formData.append('quantite', document.getElementById('modifyQty').value);
+    const photoFile = document.getElementById('modifyPhoto').files[0];
+    if (photoFile) formData.append('photo', photoFile);
+
+    fetch('modifierStock.php', { method: 'POST', body: formData })
+    .then(res => res.json())
+    .then(data => {
+      if (data.success) {
+        if (currentRow) {
+          // Mettre à jour le nom (quantité totale NE CHANGE PAS sauf si admin le modifie)
+          currentRow.querySelector('td:first-child').textContent = `${data.newNom} (${data.newQuantiteTotale})`;
+
+          // Mettre à jour badge dépôt 1
+          const depotDivs = currentRow.querySelectorAll('td:nth-child(3) div');
+          depotDivs.forEach(div => {
+            if (div.textContent.includes('1')) {
+              const badge = div.querySelector('span');
+              if (badge) {
+                badge.textContent = `(${data.quantiteDispo})`;
+                badge.className = `badge ${data.quantiteDispo < 10 ? 'bg-danger' : 'bg-success'}`;
+              }
+            }
+          });
+
+          // Mettre à jour photo si changée
           const img = currentRow.querySelector('td:nth-child(2) img');
-          if (img) {
+          if (img && data.newPhotoUrl) {
             img.src = data.newPhotoUrl + '?t=' + Date.now();
           }
         }
         modifyModal.hide();
         showToast('modifyToast');
       } else {
-        showErrorToast(data.message || 'Erreur lors de la modification.');
+        showErrorToast(data.message);
       }
     })
-    .catch(err => {
-      console.error(err);
-      showErrorToast('Erreur réseau.');
-    });
+    .catch(() => showErrorToast('Erreur réseau.'));
   });
 
-  // ---------- SUPPRIMER ----------
-  document.querySelectorAll('.delete-btn').forEach(button => {
-    button.addEventListener('click', () => {
-      currentDeleteId = button.getAttribute('data-stock-id');
-      deleteItemName.textContent = button.getAttribute('data-stock-nom');
-      currentRowToDelete = button.closest('tr');
+  // ----- SUPPRIMER -----
+  document.querySelectorAll('.delete-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      currentDeleteId = btn.dataset.stockId;
+      document.getElementById('deleteItemName').textContent = btn.dataset.stockNom;
+      currentRow = btn.closest('tr');
       deleteModal.show();
     });
   });
 
-  confirmDeleteButton.addEventListener('click', () => {
-    if (!currentDeleteId) return;
-
+  document.getElementById('confirmDeleteButton').addEventListener('click', () => {
     fetch(`supprimerStock.php?id=${currentDeleteId}`)
-      .then(res => res.json())
-      .then(data => {
-        if (data.success) {
-          deleteModal.hide();
-          if (currentRowToDelete) {
-            currentRowToDelete.remove();
-          }
-          showToast('deleteToast');
-        } else {
-          alert(data.message || "Erreur lors de la suppression.");
-        }
-      })
-      .catch(() => {
-        alert("Erreur réseau ou serveur.");
-      });
+    .then(res => res.json())
+    .then(data => {
+      if (data.success) {
+        if (currentRow) currentRow.remove();
+        deleteModal.hide();
+        showToast('modifyToast');
+      } else {
+        showErrorToast(data.message);
+      }
+    })
+    .catch(() => showErrorToast('Erreur réseau.'));
   });
-});
 
-document.addEventListener('DOMContentLoaded', () => {
-  const subCatContainer = document.getElementById('subCategoriesSlide');
-  if (!subCatContainer) return;
+  // ----- FILTRAGE -----
+  const searchInput = document.getElementById("searchInput");
+  const tableRows = document.querySelectorAll("#stockTableBody tr");
+  const subCategoriesSlide = document.getElementById("subCategoriesSlide");
+  let currentCategory = "";
 
-  // Vider avant d'ajouter
-  subCatContainer.innerHTML = '';
+  window.filterByCategory = (cat) => {
+    currentCategory = cat;
+    document.querySelectorAll("#categoriesSlide button").forEach(b => b.classList.remove("active"));
+    [...document.querySelectorAll("#categoriesSlide button")]
+      .find(b => b.textContent.toLowerCase().includes(cat.toLowerCase()))
+      ?.classList.add("active");
 
-  // Créer un bouton par sous-catégorie
-  Object.entries(subCategories).forEach(([categorie, subCats]) => {
-    subCats.forEach(subCat => {
-      const btn = document.createElement('button');
-      btn.classList.add('btn', 'btn-outline-secondary');
-      btn.textContent = subCat.charAt(0).toUpperCase() + subCat.slice(1);
-      btn.addEventListener('click', () => filterBySubCategory(subCat));
-      subCatContainer.appendChild(btn);
+    updateSubCategories(cat);
+    filterRows();
+  };
+
+  function updateSubCategories(cat) {
+    subCategoriesSlide.innerHTML = '';
+    const subs = subCategories[cat] || [];
+    subs.forEach(sub => {
+      const btn = document.createElement("button");
+      btn.className = "btn btn-outline-secondary";
+      btn.textContent = sub;
+      btn.onclick = () => {
+        document.querySelectorAll("#subCategoriesSlide button").forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        filterRows(sub);
+      };
+      subCategoriesSlide.appendChild(btn);
+    });
+  }
+
+  function filterRows(subCat = '') {
+    tableRows.forEach(row => {
+      const rowCat = row.dataset.cat;
+      const rowSub = row.dataset.subcat;
+      const matchCat = !currentCategory || rowCat === currentCategory;
+      const matchSub = !subCat || rowSub === subCat;
+      row.style.display = (matchCat && matchSub) ? "" : "none";
+    });
+  }
+
+  searchInput.addEventListener("input", () => {
+    const search = searchInput.value.toLowerCase();
+    tableRows.forEach(row => {
+      const name = row.querySelector("td:first-child").textContent.toLowerCase();
+      row.style.display = name.includes(search) ? "" : "none";
     });
   });
+
+  filterByCategory('');
 });
-
-function filterBySubCategory(subCat) {
-  const rows = document.querySelectorAll('#stockTableBody tr');
-  rows.forEach(row => {
-    if (!subCat || row.dataset.subcat === subCat) {
-      row.style.display = '';
-    } else {
-      row.style.display = 'none';
-    }
-  });
-}
-

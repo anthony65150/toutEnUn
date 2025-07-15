@@ -28,25 +28,30 @@ foreach ($stmt as $row) {
   ];
 }
 
-// Récupérer le stock total et dispo pour le dépôt
+// Récupérer le stock total recalculé (dépôt + chantiers)
 $stmt = $pdo->prepare("
     SELECT 
         s.id, 
         s.nom, 
-        s.quantite_totale AS total, 
-        sd.quantite AS quantite_stock_depot,
+        COALESCE(sd.quantite, 0) + COALESCE(sc.total_chantier, 0) AS total_recalculé,
+        COALESCE(sd.quantite, 0) AS quantite_stock_depot,
         COALESCE(sd.quantite, 0) - COALESCE((
             SELECT SUM(te.quantite) 
             FROM transferts_en_attente te 
             WHERE te.article_id = s.id 
               AND te.source_type = 'depot' 
-              AND te.source_id = ? 
+              AND te.source_id = ?
               AND te.statut = 'en_attente'
-        ), 0) AS disponible,
+        ), 0) AS disponible_depot,
         s.categorie, 
         s.sous_categorie
     FROM stock s
     LEFT JOIN stock_depots sd ON s.id = sd.stock_id AND sd.depot_id = ?
+    LEFT JOIN (
+        SELECT stock_id, SUM(quantite) AS total_chantier 
+        FROM stock_chantiers 
+        GROUP BY stock_id
+    ) sc ON s.id = sc.stock_id
     ORDER BY s.nom
 ");
 $stmt->execute([$depotId, $depotId]);
@@ -77,7 +82,8 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
         <tr>
           <th>Nom</th>
           <th>Photo</th>
-          <th>Disponible</th>
+          <th>Disponible total</th>
+          <th>Disponible dépôt</th>
           <th>Chantiers</th>
           <th>Actions</th>
         </tr>
@@ -85,8 +91,8 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
       <tbody>
         <?php foreach ($stocks as $stock):
           $stockId = $stock['id'];
-          $total = (int)$stock['total'];
-          $dispo = (int)$stock['disponible'];
+          $total = (int)$stock['total_recalculé'];
+          $dispoDepot = (int)$stock['disponible_depot'];
           $nom = htmlspecialchars($stock['nom']);
           $chantierList = $chantierAssoc[$stockId] ?? [];
         ?>
@@ -96,8 +102,13 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
               <img src="uploads/photos/<?= $stockId ?>.jpg" alt="<?= $nom ?>" style="height: 40px;">
             </td>
             <td>
-              <span class="badge quantite-disponible <?= $dispo < 10 ? 'bg-danger' : 'bg-success' ?>">
-                <?= $dispo ?>
+              <span class="badge bg-primary">
+                <?= $total ?>
+              </span>
+            </td>
+            <td>
+              <span class="badge quantite-disponible <?= $dispoDepot < 10 ? 'bg-danger' : 'bg-success' ?>">
+                <?= $dispoDepot ?>
               </span>
             </td>
             <td>
@@ -140,14 +151,12 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
               <td><?= $t['quantite'] ?></td>
               <td><?= htmlspecialchars($t['demandeur_prenom'] . ' ' . $t['demandeur_nom']) ?></td>
               <td>
-<form method="post" action="validerReception_depot.php" style="display:inline;">
-    <input type="hidden" name="transfert_id" value="<?= $t['transfert_id'] ?>">
-    <button type="submit" class="btn btn-success btn-sm">
-        ✅ Valider réception
-    </button>
-</form>
-
-
+                <form method="post" action="validerReception_depot.php" style="display:inline;">
+                  <input type="hidden" name="transfert_id" value="<?= $t['transfert_id'] ?>">
+                  <button type="submit" class="btn btn-success btn-sm">
+                      ✅ Valider réception
+                  </button>
+                </form>
               </td>
             </tr>
           <?php endforeach; ?>

@@ -32,7 +32,7 @@ document.addEventListener('DOMContentLoaded', () => {
           return;
         }
 
-        // Pas de mise à jour directe des colonnes → juste le toast
+        // ✅ Pas de mise à jour directe des quantités → tout sera recalculé et affiché proprement au prochain chargement
         bootstrap.Modal.getInstance(transferModal)?.hide();
         showToast("transferToast");
       })

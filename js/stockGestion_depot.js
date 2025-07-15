@@ -72,27 +72,26 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     });
 
-    // ✅ AJOUT : gestion AJAX validation réception
-document.querySelectorAll(".validate-reception-btn").forEach(button => {
-    button.addEventListener("click", () => {
-        const transfertId = button.getAttribute("data-transfert-id");
+    // ✅ Gestion AJAX validation réception
+    document.querySelectorAll(".validate-reception-btn").forEach(button => {
+        button.addEventListener("click", () => {
+            const transfertId = button.getAttribute("data-transfert-id");
 
-        fetch("validerReception_depot.php", {
-            method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: "transfert_id=" + encodeURIComponent(transfertId)
-        })
-        .then(res => res.text())
-        .then(() => {
-            const row = button.closest("tr");
-            if (row) row.remove();
-            showToast("transferToast");
-        })
-        .catch(error => {
-            console.error("Erreur réseau :", error);
-            showErrorToast("Erreur lors de la validation.");
+            fetch("validerReception_depot.php", {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: "transfert_id=" + encodeURIComponent(transfertId)
+            })
+            .then(res => res.text())
+            .then(() => {
+                const row = button.closest("tr");
+                if (row) row.remove();
+                showToast("transferToast");
+            })
+            .catch(error => {
+                console.error("Erreur réseau :", error);
+                showErrorToast("Erreur lors de la validation.");
+            });
         });
     });
-});
-
 });

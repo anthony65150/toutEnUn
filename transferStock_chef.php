@@ -33,7 +33,6 @@ if ($destinationType === 'chantier' && $destinationId === $chantierId) {
 try {
     $pdo->beginTransaction();
 
-    // Vérifier stock disponible sur chantier du chef
     $stmt = $pdo->prepare("SELECT quantite FROM stock_chantiers WHERE stock_id = ? AND chantier_id = ?");
     $stmt->execute([$stockId, $chantierId]);
     $dispo = (int)$stmt->fetchColumn();
@@ -42,32 +41,17 @@ try {
         throw new Exception("Stock insuffisant sur ton chantier.");
     }
 
-    // Insérer transfert en attente
     $stmt = $pdo->prepare("
         INSERT INTO transferts_en_attente 
         (article_id, source_type, source_id, destination_type, destination_id, quantite, demandeur_id, statut)
         VALUES (?, 'chantier', ?, ?, ?, ?, ?, 'en_attente')
     ");
-    $stmt->execute([
-        $stockId,
-        $chantierId,
-        $destinationType,
-        $destinationId,
-        $qty,
-        $chefId
-    ]);
-
-    // 🔻 Retirer du chantier
-    $stmt = $pdo->prepare("UPDATE stock_chantiers SET quantite = quantite - :qte WHERE chantier_id = :chantier AND stock_id = :article");
-    $stmt->execute(['qte' => $qty, 'chantier' => $chantierId, 'article' => $stockId]);
-
-    // 🔻 Retirer du stock global dispo
-    $stmt = $pdo->prepare("UPDATE stock SET quantite_disponible = quantite_disponible - :qte WHERE id = :article");
-    $stmt->execute(['qte' => $qty, 'article' => $stockId]);
+    $stmt->execute([$stockId, $chantierId, $destinationType, $destinationId, $qty, $chefId]);
 
     $pdo->commit();
 
     echo json_encode(["success" => true, "message" => "Transfert enregistré, en attente de validation."]);
+
 } catch (Exception $e) {
     $pdo->rollBack();
     echo json_encode(["success" => false, "message" => $e->getMessage()]);

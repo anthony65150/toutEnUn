@@ -25,8 +25,19 @@ foreach ($stmt as $row) {
     ];
 }
 
-// Récupérer stock global
-$stmt = $pdo->query("SELECT id, nom, quantite_totale AS total, quantite_disponible AS disponible, categorie, sous_categorie FROM stock ORDER BY nom");
+// Récupère stock_depots pour additionner plus tard
+$stmt = $pdo->query("
+    SELECT stock_id, SUM(quantite) AS quantite_depot
+    FROM stock_depots
+    GROUP BY stock_id
+");
+$depotAssoc = [];
+foreach ($stmt as $row) {
+    $depotAssoc[$row['stock_id']] = (int)$row['quantite_depot'];
+}
+
+// Récupérer stock global (sans quantite_totale ni quantite_disponible)
+$stmt = $pdo->query("SELECT id, nom, categorie, sous_categorie FROM stock ORDER BY nom");
 $stocks = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 // Récupérer dépôts et chantiers (hors chantier du chef) pour sélection destination
@@ -53,7 +64,7 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 <tr>
                     <th>Nom</th>
                     <th>Photo</th>
-                    <th>Quantité</th>
+                    <th>Quantité totale</th>
                     <th>Mon chantier</th>
                     <th>Actions</th>
                 </tr>
@@ -63,30 +74,30 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
                     <?php
                     $stockId = $stock['id'];
                     $nom = htmlspecialchars($stock['nom']);
-                    $total = (int)$stock['total'];
-                    $dispo = (int)$stock['disponible'];
-                    
-                    // ✅ Correction : calculer uniquement à partir de stock_chantiers
-                    $surChantier = 0;
-                    $quantite = 0;
+
+                    $quantiteDepot = $depotAssoc[$stockId] ?? 0;
+                    $quantiteChantiers = 0;
+                    $quantiteMonChantier = 0;
 
                     if (!empty($chantierAssoc[$stockId])) {
                         foreach ($chantierAssoc[$stockId] as $chantier) {
-                            $surChantier += (int)$chantier['quantite'];
+                            $quantiteChantiers += (int)$chantier['quantite'];
                             if ($chantier['id'] == $utilisateurChantierId) {
-                                $quantite = (int)$chantier['quantite'];
+                                $quantiteMonChantier = (int)$chantier['quantite'];
                             }
                         }
                     }
+
+                    $quantiteTotale = $quantiteDepot + $quantiteChantiers;
                     ?>
                     <tr>
-                        <td><?= $nom ?> (<?= $total ?>)</td>
+                        <td><?= $nom ?> (<?= $quantiteTotale ?>)</td>
                         <td class="text-center"><img src="uploads/photos/<?= $stockId ?>.jpg" style="height: 40px;" /></td>
                         <td class="text-center">
-                            <span class="badge bg-success"><?= $dispo ?> dispo</span>
-                            <span class="badge bg-warning text-dark"><?= $surChantier ?> sur chantier</span>
+                            <span class="badge bg-primary"><?= $quantiteDepot ?> dépôt</span>
+                            <span class="badge bg-warning text-dark"><?= $quantiteChantiers ?> chantiers</span>
                         </td>
-                        <td class="text-center"><?= $quantite ?></td>
+                        <td class="text-center"><?= $quantiteMonChantier ?></td>
                         <td class="text-center">
                             <button class="btn btn-sm btn-primary transfer-btn" data-stock-id="<?= $stockId ?>" data-stock-nom="<?= $nom ?>">
                                 <i class="bi bi-arrow-left-right"></i> Transférer
