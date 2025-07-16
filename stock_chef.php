@@ -10,7 +10,7 @@ if (!isset($_SESSION['utilisateurs'])) {
 
 $utilisateurChantierId = $_SESSION['utilisateurs']['chantier_id'] ?? null;
 
-// Récupère les associations stock ↔ chantiers
+// Associations stock ↔ chantiers
 $stmt = $pdo->query("
     SELECT sc.stock_id, c.id AS chantier_id, c.nom AS chantier_nom, sc.quantite
     FROM stock_chantiers sc
@@ -25,26 +25,39 @@ foreach ($stmt as $row) {
     ];
 }
 
-// Récupère stock_depots pour additionner plus tard
+// Dépôts
 $stmt = $pdo->query("
-    SELECT stock_id, SUM(quantite) AS quantite_depot
-    FROM stock_depots
-    GROUP BY stock_id
+    SELECT sd.stock_id, d.id AS depot_id, d.nom AS depot_nom, sd.quantite
+    FROM stock_depots sd
+    JOIN depots d ON sd.depot_id = d.id
 ");
-$depotAssoc = [];
+$depotAssocDetail = [];
+$depotAssocSum = [];
 foreach ($stmt as $row) {
-    $depotAssoc[$row['stock_id']] = (int)$row['quantite_depot'];
+    $depotAssocDetail[$row['stock_id']][] = [
+        'id' => $row['depot_id'],
+        'nom' => $row['depot_nom'],
+        'quantite' => $row['quantite']
+    ];
+    $depotAssocSum[$row['stock_id']] = ($depotAssocSum[$row['stock_id']] ?? 0) + (int)$row['quantite'];
 }
 
-// Récupérer stock global (sans quantite_totale ni quantite_disponible)
-$stmt = $pdo->query("SELECT id, nom, categorie, sous_categorie FROM stock ORDER BY nom");
-$stocks = $stmt->fetchAll(PDO::FETCH_ASSOC);
+// Stock global organisé par catégorie/sous-catégorie
+$stmt = $pdo->query("
+    SELECT id, nom, categorie, sous_categorie
+    FROM stock
+    ORDER BY categorie, sous_categorie, nom
+");
+$stocksOrganized = [];
+foreach ($stmt as $stock) {
+    $stocksOrganized[$stock['categorie']][$stock['sous_categorie']][] = $stock;
+}
 
-// Récupérer dépôts et chantiers (hors chantier du chef) pour sélection destination
+// Dépôts et chantiers pour modal
 $depots = $pdo->query("SELECT id, nom FROM depots ORDER BY nom")->fetchAll(PDO::FETCH_ASSOC);
 $chantiers = $pdo->query("SELECT id, nom FROM chantiers ORDER BY nom")->fetchAll(PDO::FETCH_ASSOC);
 
-// Récupérer les transferts en attente pour ce chantier
+// Transferts en attente
 $stmt = $pdo->prepare("
     SELECT t.id AS transfert_id, s.nom AS article_nom, t.quantite, u.nom AS demandeur_nom, u.prenom AS demandeur_prenom
     FROM transferts_en_attente t
@@ -57,59 +70,79 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
 ?>
 
 <div class="container py-5">
-    <h2 class="text-center mb-5">Stock</h2>
-    <div class="table-responsive">
-        <table class="table table-bordered table-hover align-middle">
-            <thead class="table-dark text-center">
-                <tr>
-                    <th>Nom</th>
-                    <th>Photo</th>
-                    <th>Quantité totale</th>
-                    <th>Mon chantier</th>
-                    <th>Actions</th>
-                </tr>
-            </thead>
-            <tbody>
-                <?php foreach ($stocks as $stock): ?>
-                    <?php
-                    $stockId = $stock['id'];
-                    $nom = htmlspecialchars($stock['nom']);
+    <h2 class="text-center mb-5">Stock - Chef de chantier</h2>
 
-                    $quantiteDepot = $depotAssoc[$stockId] ?? 0;
-                    $quantiteChantiers = 0;
-                    $quantiteMonChantier = 0;
+    <?php foreach ($stocksOrganized as $categorie => $sousCats): ?>
+        <h3 class="mt-4">🔷 Catégorie : <?= htmlspecialchars($categorie) ?></h3>
+        <?php foreach ($sousCats as $sousCat => $articles): ?>
+            <h5 class="mt-3">🔹 Sous-catégorie : <?= htmlspecialchars($sousCat) ?></h5>
+            <div class="table-responsive mb-4">
+                <table class="table table-bordered table-hover align-middle">
+                    <thead class="table-dark text-center">
+                        <tr>
+                            <th>Nom (Total)</th>
+                            <th>Photo</th>
+                            <th>Dépôts</th>
+                            <th>Chantiers</th>
+                            <th>Mon chantier</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($articles as $stock): ?>
+                            <?php
+                            $stockId = $stock['id'];
+                            $nom = htmlspecialchars($stock['nom']);
 
-                    if (!empty($chantierAssoc[$stockId])) {
-                        foreach ($chantierAssoc[$stockId] as $chantier) {
-                            $quantiteChantiers += (int)$chantier['quantite'];
-                            if ($chantier['id'] == $utilisateurChantierId) {
-                                $quantiteMonChantier = (int)$chantier['quantite'];
+                            $quantiteDepot = $depotAssocSum[$stockId] ?? 0;
+                            $quantiteChantiers = 0;
+                            $quantiteMonChantier = 0;
+
+                            $depotsList = '';
+                            if (!empty($depotAssocDetail[$stockId])) {
+                                foreach ($depotAssocDetail[$stockId] as $d) {
+                                    $depotsList .= $d['nom'] . ' (' . $d['quantite'] . ')<br>';
+                                }
                             }
-                        }
-                    }
 
-                    $quantiteTotale = $quantiteDepot + $quantiteChantiers;
-                    ?>
-                    <tr>
-                        <td><?= $nom ?> (<?= $quantiteTotale ?>)</td>
-                        <td class="text-center"><img src="uploads/photos/<?= $stockId ?>.jpg" style="height: 40px;" /></td>
-                        <td class="text-center">
-                            <span class="badge bg-primary"><?= $quantiteDepot ?> dépôt</span>
-                            <span class="badge bg-warning text-dark"><?= $quantiteChantiers ?> chantiers</span>
-                        </td>
-                        <td class="text-center"><?= $quantiteMonChantier ?></td>
-                        <td class="text-center">
-                            <button class="btn btn-sm btn-primary transfer-btn" data-stock-id="<?= $stockId ?>" data-stock-nom="<?= $nom ?>">
-                                <i class="bi bi-arrow-left-right"></i> Transférer
-                            </button>
-                        </td>
-                    </tr>
-                <?php endforeach; ?>
-            </tbody>
-        </table>
-    </div>
+                            $chantiersList = '';
+                            if (!empty($chantierAssoc[$stockId])) {
+                                foreach ($chantierAssoc[$stockId] as $c) {
+                                    $quantiteChantiers += (int)$c['quantite'];
+                                    $chantiersList .= $c['nom'] . ' (' . $c['quantite'] . ')<br>';
+                                    if ($c['id'] == $utilisateurChantierId) {
+                                        $quantiteMonChantier = (int)$c['quantite'];
+                                    }
+                                }
+                            }
 
-    <!-- Section transferts à valider -->
+                            $quantiteTotale = $quantiteDepot + $quantiteChantiers;
+                            $badge = $quantiteMonChantier > 0
+                                ? '<span class="badge bg-success">' . $quantiteMonChantier . '</span>'
+                                : '<span class="badge bg-danger">0</span>';
+                            ?>
+                            <tr>
+                                <td><?= $nom ?> (<?= $quantiteTotale ?>)</td>
+                                <td class="text-center"><img src="uploads/photos/<?= $stockId ?>.jpg" style="height: 40px;" /></td>
+                                <td><?= $depotsList ?: '<span class="text-muted">-</span>' ?></td>
+                                <td><?= $chantiersList ?: '<span class="text-muted">-</span>' ?></td>
+                                <td class="text-center"><?= $badge ?></td>
+                                <td class="text-center">
+                                    <button class="btn btn-sm btn-primary transfer-btn"
+                                        data-stock-id="<?= $stockId ?>"
+                                        data-stock-nom="<?= $nom ?>"
+                                        data-quantite="<?= $quantiteMonChantier ?>">
+                                        <i class="bi bi-arrow-left-right"></i> Transférer
+                                    </button>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        <?php endforeach; ?>
+    <?php endforeach; ?>
+
     <h3 class="mt-5">Transferts à valider</h3>
     <?php if ($transfertsEnAttente): ?>
         <table class="table table-bordered">
@@ -128,13 +161,12 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
                         <td><?= $t['quantite'] ?></td>
                         <td><?= htmlspecialchars($t['demandeur_prenom'] . ' ' . $t['demandeur_nom']) ?></td>
                         <td>
-<form method="post" action="validerReception_chef.php" style="display:inline;">
-    <input type="hidden" name="transfert_id" value="<?= $t['transfert_id'] ?>">
-    <button type="submit" class="btn btn-success btn-sm">
-        ✅ Valider réception
-    </button>
-</form>
-
+                            <form method="post" action="validerReception_chef.php" style="display:inline;">
+                                <input type="hidden" name="transfert_id" value="<?= $t['transfert_id'] ?>">
+                                <button type="submit" class="btn btn-success btn-sm">
+                                    ✅ Valider réception
+                                </button>
+                            </form>
                         </td>
                     </tr>
                 <?php endforeach; ?>

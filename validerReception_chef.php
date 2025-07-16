@@ -14,6 +14,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['transfert_id'])) {
         FROM transferts_en_attente t
         JOIN stock s ON t.article_id = s.id
         WHERE t.id = ? AND t.destination_type = 'chantier' AND t.destination_id = ? AND t.statut = 'en_attente'
+        FOR UPDATE
     ");
     $stmt->execute([$transfertId, $_SESSION['utilisateurs']['chantier_id']]);
     $transfert = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -23,7 +24,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['transfert_id'])) {
         $quantite = (int)$transfert['quantite'];
         $chantierId = $transfert['destination_id'];
         $demandeurId = $transfert['demandeur_id'];
-        $sourceType = $transfert['source_type'];
+        $articleNom = htmlspecialchars($transfert['article_nom']); // protection affichage
 
         try {
             $pdo->beginTransaction();
@@ -48,14 +49,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['transfert_id'])) {
                 $stmtInsert->execute(['chantier' => $chantierId, 'article' => $articleId, 'qte' => $quantite]);
             }
 
-            // ❌ SUPPRIMÉ : mise à jour de quantite_disponible (calculée dynamiquement à l'affichage)
-
             // ✅ Supprimer le transfert en attente
             $stmtDelete = $pdo->prepare("DELETE FROM transferts_en_attente WHERE id = ?");
             $stmtDelete->execute([$transfertId]);
 
+            // 🔒 (optionnel) Log historique de validation
+            /*
+            $stmtLog = $pdo->prepare("
+                INSERT INTO transferts_historique (transfert_id, validateur_id, date_validation)
+                VALUES (?, ?, NOW())
+            ");
+            $stmtLog->execute([$transfertId, $_SESSION['utilisateurs']['id']]);
+            */
+
             // ➕ Notifier le demandeur
-            $message = "✅ Le transfert de {$quantite} x {$transfert['article_nom']} a été validé par le chantier.";
+            $message = "✅ Le transfert de {$quantite} x {$articleNom} a été validé par le chantier.";
             $stmtNotif = $pdo->prepare("
                 INSERT INTO notifications (utilisateur_id, message) 
                 VALUES (?, ?)

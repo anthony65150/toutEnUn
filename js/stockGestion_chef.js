@@ -31,14 +31,15 @@ document.addEventListener('DOMContentLoaded', () => {
           showErrorToast(data.message || "Erreur lors du transfert.");
           return;
         }
-
-        // ✅ Pas de mise à jour directe des quantités → tout sera recalculé et affiché proprement au prochain chargement
         bootstrap.Modal.getInstance(transferModal)?.hide();
         showToast("transferToast");
       })
       .catch(error => {
         console.error("❌ Erreur réseau :", error);
         showErrorToast("Erreur réseau ou serveur.");
+      })
+      .finally(() => {
+        confirmButton.disabled = false;
       });
   }
 
@@ -52,6 +53,7 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
+    confirmButton.disabled = true;
     const [destinationType, destinationId] = destinationValue.split('_');
 
     const payload = { stockId, destinationType, destinationId: parseInt(destinationId, 10), qty };

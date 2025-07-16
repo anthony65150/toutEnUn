@@ -35,7 +35,8 @@ try {
 
     $stmt = $pdo->prepare("SELECT quantite FROM stock_chantiers WHERE stock_id = ? AND chantier_id = ?");
     $stmt->execute([$stockId, $chantierId]);
-    $dispo = (int)$stmt->fetchColumn();
+    $dispo = $stmt->fetchColumn();
+    $dispo = $dispo !== false ? (int)$dispo : 0;
 
     if ($dispo < $qty) {
         throw new Exception("Stock insuffisant sur ton chantier.");
@@ -54,5 +55,6 @@ try {
 
 } catch (Exception $e) {
     $pdo->rollBack();
-    echo json_encode(["success" => false, "message" => $e->getMessage()]);
+    // Optionnel : logger $e->getMessage() dans un fichier log
+    echo json_encode(["success" => false, "message" => "Erreur serveur, contactez l’administrateur."]);
 }
