@@ -78,6 +78,8 @@ function verifyUserLoginPassword(PDO $pdo, string $email, string $motDePasse): b
 
     $utilisateurs = $query->fetch(PDO::FETCH_ASSOC);
 
+
+
     if ($utilisateurs && password_verify($motDePasse, $utilisateurs["motDePasse"])) {
         unset($utilisateurs["motDePasse"]);
         return $utilisateurs;
