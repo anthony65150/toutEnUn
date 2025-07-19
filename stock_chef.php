@@ -12,6 +12,7 @@ if (!isset($_SESSION['utilisateurs'])) {
 $allChantiers = $pdo->query("SELECT id, nom FROM chantiers")->fetchAll(PDO::FETCH_KEY_PAIR);
 $allDepots = $pdo->query("SELECT id, nom FROM depots")->fetchAll(PDO::FETCH_KEY_PAIR);
 
+
 $utilisateurChantierId = $_SESSION['utilisateurs']['chantier_id'] ?? null;
 
 $stmt = $pdo->query("SELECT sc.stock_id, c.id AS chantier_id, c.nom AS chantier_nom, sc.quantite FROM stock_chantiers sc JOIN chantiers c ON sc.chantier_id = c.id");
@@ -166,12 +167,9 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
                             </optgroup>
                             <optgroup label="Chantiers">
                                 <?php foreach ($allChantiers as $id => $nom): ?>
-                                    <?php if ($id != $utilisateurChantierId): ?>
-                                        <option value="chantier_<?= $id ?>"><?= htmlspecialchars($nom) ?></option>
-                                    <?php endif; ?>
+                                    <option value="chantier_<?= $id ?>"><?= htmlspecialchars($nom) ?></option>
                                 <?php endforeach; ?>
                             </optgroup>
-
                         </select>
                     </div>
                     <div class="mb-3">
@@ -198,10 +196,12 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
 </div>
 
 
+
 <script>
 window.isChef = true;
 window.chefChantierId = <?= $utilisateurChantierId ?>;
 </script>
+
 
 
 <script>
