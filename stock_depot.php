@@ -8,6 +8,10 @@ if (!isset($_SESSION['utilisateurs']) || $_SESSION['utilisateurs']['fonction'] !
   exit;
 }
 
+// Dépôts et chantiers
+$allChantiers = $pdo->query("SELECT id, nom FROM chantiers")->fetchAll(PDO::FETCH_KEY_PAIR);
+$allDepots = $pdo->query("SELECT id, nom FROM depots")->fetchAll(PDO::FETCH_KEY_PAIR);
+
 $userId = $_SESSION['utilisateurs']['id'];
 $stmtDepot = $pdo->prepare("SELECT id FROM depots WHERE responsable_id = ?");
 $stmtDepot->execute([$userId]);
@@ -170,6 +174,61 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
   <?php endif; ?>
 </div>
 
+<!-- Modal Transfert -->
+<div class="modal fade" id="transferModal" tabindex="-1" aria-labelledby="transferModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="transferModalLabel">Transférer du stock</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
+      </div>
+      <div class="modal-body">
+        <form id="transferForm">
+          <input type="hidden" id="articleId" name="article_id">
+          <input type="hidden" id="sourceDepotId" name="source_depot_id" value="<?= $depotId ?>">
+          <div class="mb-3">
+            <label>Destination</label>
+            <select class="form-select" id="destinationChantier">
+              <option value="" disabled selected>Choisir la destination</option>
+              <optgroup label="Dépôts">
+                <?php foreach ($allDepots as $id => $nom): ?>
+                  <?php if ($id != $depotId): ?>
+                    <option value="depot_<?= $id ?>"><?= htmlspecialchars($nom) ?></option>
+                  <?php endif; ?>
+                <?php endforeach; ?>
+              </optgroup>
+
+              <optgroup label="Chantiers">
+                <?php foreach ($allChantiers as $id => $nom): ?>
+                  <option value="chantier_<?= $id ?>"><?= htmlspecialchars($nom) ?></option>
+                <?php endforeach; ?>
+              </optgroup>
+            </select>
+          </div>
+          <div class="mb-3">
+            <label for="quantity" class="form-label">Quantité</label>
+            <input type="number" class="form-control" id="quantity" name="quantity" min="1" required>
+          </div>
+          <button type="submit" class="btn btn-primary">Envoyer</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index: 1100">
+  <div id="toastMessage" class="toast align-items-center text-bg-primary border-0" role="alert" aria-live="assertive" aria-atomic="true">
+    <div class="d-flex">
+      <div class="toast-body">
+        <!-- Message inséré en JS -->
+      </div>
+      <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Fermer"></button>
+    </div>
+  </div>
+</div>
+<script>
+window.isChef = false;
+</script>
 <script>
   const subCategories = <?= json_encode($subCategoriesGrouped) ?>;
 </script>

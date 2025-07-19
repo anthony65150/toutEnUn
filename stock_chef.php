@@ -8,6 +8,10 @@ if (!isset($_SESSION['utilisateurs'])) {
     exit;
 }
 
+// Dépôts et chantiers
+$allChantiers = $pdo->query("SELECT id, nom FROM chantiers")->fetchAll(PDO::FETCH_KEY_PAIR);
+$allDepots = $pdo->query("SELECT id, nom FROM depots")->fetchAll(PDO::FETCH_KEY_PAIR);
+
 $utilisateurChantierId = $_SESSION['utilisateurs']['chantier_id'] ?? null;
 
 $stmt = $pdo->query("SELECT sc.stock_id, c.id AS chantier_id, c.nom AS chantier_nom, sc.quantite FROM stock_chantiers sc JOIN chantiers c ON sc.chantier_id = c.id");
@@ -139,6 +143,66 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
         <p class="text-muted">Aucun transfert en attente de validation.</p>
     <?php endif; ?>
 </div>
+
+<!-- Modal Transfert Chef -->
+<div class="modal fade" id="transferModal" tabindex="-1" aria-labelledby="transferModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="transferModalLabel">Transférer du stock</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
+            </div>
+            <div class="modal-body">
+                <form id="transferForm">
+                    <input type="hidden" id="articleId" name="article_id">
+                    <div class="mb-3">
+                        <label>Destination</label>
+                        <select class="form-select" id="destinationChantier">
+                            <option value="" disabled selected>Choisir la destination</option>
+                            <optgroup label="Dépôts">
+                                <?php foreach ($allDepots as $id => $nom): ?>
+                                    <option value="depot_<?= $id ?>"><?= htmlspecialchars($nom) ?></option>
+                                <?php endforeach; ?>
+                            </optgroup>
+                            <optgroup label="Chantiers">
+                                <?php foreach ($allChantiers as $id => $nom): ?>
+                                    <?php if ($id != $utilisateurChantierId): ?>
+                                        <option value="chantier_<?= $id ?>"><?= htmlspecialchars($nom) ?></option>
+                                    <?php endif; ?>
+                                <?php endforeach; ?>
+                            </optgroup>
+
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="quantity" class="form-label">Quantité</label>
+                        <input type="number" class="form-control" id="quantity" name="quantity" min="1" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Envoyer</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Toast message -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index: 1100">
+    <div id="toastMessage" class="toast align-items-center text-bg-primary border-0" role="alert" aria-live="assertive" aria-atomic="true">
+        <div class="d-flex">
+            <div class="toast-body">
+                <!-- Message toast -->
+            </div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Fermer"></button>
+        </div>
+    </div>
+</div>
+
+
+<script>
+window.isChef = true;
+window.chefChantierId = <?= $utilisateurChantierId ?>;
+</script>
+
 
 <script>
     const subCategories = <?= json_encode($subCategoriesGrouped) ?>;

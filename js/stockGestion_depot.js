@@ -2,6 +2,17 @@ document.addEventListener("DOMContentLoaded", () => {
     const searchInput = document.getElementById("searchInput");
     const tableRows = document.querySelectorAll("#stockTableBody tbody tr");
     const subCategoriesSlide = document.getElementById("subCategoriesSlide");
+    const toastElement = document.getElementById('toastMessage');
+const toastBootstrap = new bootstrap.Toast(toastElement);
+const toastBody = toastElement.querySelector('.toast-body');
+
+function showToast(message, isSuccess = true) {
+    toastElement.classList.remove('text-bg-success', 'text-bg-danger');
+    toastElement.classList.add(isSuccess ? 'text-bg-success' : 'text-bg-danger');
+    toastBody.textContent = message;
+    toastBootstrap.show();
+}
+
 
     let currentCategory = "";
     let currentSubCategory = "";
@@ -61,4 +72,70 @@ document.addEventListener("DOMContentLoaded", () => {
 
     searchInput.addEventListener("input", filterRows);
     filterByCategory('');
+
+
+    // ouvrir le modal et gérer le transfert
+const transferModal = new bootstrap.Modal(document.getElementById('transferModal'));
+
+document.querySelectorAll('.transfer-btn').forEach(button => {
+    button.addEventListener('click', () => {
+        const stockId = button.dataset.stockId;
+        const stockNom = button.dataset.stockNom;
+
+        document.getElementById('articleId').value = stockId;
+        document.getElementById('transferModalLabel').textContent = `Transférer : ${stockNom}`;
+
+        transferModal.show();
+    });
 });
+document.getElementById('transferForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+
+    const stockId = document.getElementById('articleId').value;
+    const sourceDepotId = document.getElementById('sourceDepotId')?.value; // null pour chef
+    const destinationRaw = document.getElementById('destinationChantier').value;
+    const quantity = document.getElementById('quantity').value;
+
+    let sourceType = 'depot';
+    let sourceId = sourceDepotId;
+
+    if (window.isChef) {  // tu peux définir window.isChef = true dans le fichier chef
+        sourceType = 'chantier';
+        sourceId = window.chefChantierId;  // tu mets ça au chargement PHP
+    }
+
+    const [destinationType, destinationId] = destinationRaw.split('_');
+
+    const data = {
+        stockId: parseInt(stockId),
+        sourceType: sourceType,
+        sourceId: parseInt(sourceId),
+        destinationType: destinationType,
+        destinationId: parseInt(destinationId),
+        qty: parseInt(quantity)
+    };
+
+    fetch('transferStock_depot.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.success) {
+            showToast('✅ ' + data.message, true);
+            setTimeout(() => location.reload(), 1500);
+        } else {
+            showToast('❌ ' + (data.message || 'Échec du transfert'), false);
+        }
+    })
+    .catch(err => {
+        console.error(err);
+        showToast('❌ Erreur lors de la requête', false);
+    });
+});
+
+});
+
+
+

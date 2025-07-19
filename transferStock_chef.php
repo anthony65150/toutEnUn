@@ -9,52 +9,67 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 
 $data = json_decode(file_get_contents("php://input"), true);
 $stockId = (int)($data['stockId'] ?? 0);
+$sourceType = $data['sourceType'] ?? null;
+$sourceId = (int)($data['sourceId'] ?? 0);
 $destinationType = $data['destinationType'] ?? null;
 $destinationId = (int)($data['destinationId'] ?? 0);
 $qty = (int)($data['qty'] ?? 0);
-$chefId = $_SESSION['utilisateurs']['id'] ?? null;
-$chantierId = $_SESSION['utilisateurs']['chantier_id'] ?? null;
+$userId = $_SESSION['utilisateurs']['id'] ?? null;
 
-if (!$stockId || !$qty || !$destinationType || !$destinationId || !$chefId || !$chantierId) {
+$allowedTypes = ['depot', 'chantier'];
+
+if (!$stockId || !$qty || !$sourceType || !$destinationType || !$userId) {
     echo json_encode(["success" => false, "message" => "Données invalides."]);
     exit;
 }
-
-if (!in_array($destinationType, ['depot', 'chantier'])) {
-    echo json_encode(["success" => false, "message" => "Type de destination invalide."]);
+if (!in_array($sourceType, $allowedTypes) || !in_array($destinationType, $allowedTypes)) {
+    echo json_encode(["success" => false, "message" => "Type source/destination invalide."]);
     exit;
 }
-
-if ($destinationType === 'chantier' && $destinationId === $chantierId) {
-    echo json_encode(["success" => false, "message" => "Destination identique au chantier source."]);
+if ($sourceType === $destinationType && $sourceId === $destinationId) {
+    echo json_encode(["success" => false, "message" => "Source et destination identiques."]);
     exit;
 }
 
 try {
     $pdo->beginTransaction();
 
-    $stmt = $pdo->prepare("SELECT quantite FROM stock_chantiers WHERE stock_id = ? AND chantier_id = ?");
-    $stmt->execute([$stockId, $chantierId]);
-    $dispo = $stmt->fetchColumn();
-    $dispo = $dispo !== false ? (int)$dispo : 0;
+    if ($sourceType === 'depot') {
+        $stmt = $pdo->prepare("SELECT quantite FROM stock_depots WHERE stock_id = ? AND depot_id = ?");
+    } else {
+        $stmt = $pdo->prepare("SELECT quantite FROM stock_chantiers WHERE stock_id = ? AND chantier_id = ?");
+    }
+    $stmt->execute([$stockId, $sourceId]);
+    $quantiteSource = (int)$stmt->fetchColumn();
 
-    if ($dispo < $qty) {
-        throw new Exception("Stock insuffisant sur ton chantier.");
+    if ($quantiteSource < $qty) {
+        throw new Exception("Stock insuffisant à la source. Disponible : $quantiteSource.");
+    }
+
+    $stmt = $pdo->prepare("
+        SELECT COALESCE(SUM(quantite),0) 
+        FROM transferts_en_attente
+        WHERE article_id = ? AND source_type = ? AND source_id = ? AND statut = 'en_attente'
+    ");
+    $stmt->execute([$stockId, $sourceType, $sourceId]);
+    $enAttente = (int)$stmt->fetchColumn();
+
+    $disponibleApresAttente = $quantiteSource - $enAttente;
+    if ($disponibleApresAttente < $qty) {
+        throw new Exception("Stock insuffisant (après prise en compte des transferts en attente). Disponible : $disponibleApresAttente.");
     }
 
     $stmt = $pdo->prepare("
         INSERT INTO transferts_en_attente 
         (article_id, source_type, source_id, destination_type, destination_id, quantite, demandeur_id, statut)
-        VALUES (?, 'chantier', ?, ?, ?, ?, ?, 'en_attente')
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'en_attente')
     ");
-    $stmt->execute([$stockId, $chantierId, $destinationType, $destinationId, $qty, $chefId]);
+    $stmt->execute([$stockId, $sourceType, $sourceId, $destinationType, $destinationId, $qty, $userId]);
 
     $pdo->commit();
-
-    echo json_encode(["success" => true, "message" => "Transfert enregistré, en attente de validation."]);
+    echo json_encode(["success" => true, "message" => "Transfert enregistré et en attente de validation."]);
 
 } catch (Exception $e) {
     $pdo->rollBack();
-    // Optionnel : logger $e->getMessage() dans un fichier log
-    echo json_encode(["success" => false, "message" => "Erreur serveur, contactez l’administrateur."]);
+    echo json_encode(["success" => false, "message" => $e->getMessage()]);
 }
