@@ -29,6 +29,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['transfert_id'])) {
         try {
             $pdo->beginTransaction();
 
+            // ➖ Décrémenter source
+            if ($transfert['source_type'] === 'depot') {
+                $stmt = $pdo->prepare("
+            UPDATE stock_depots
+            SET quantite = quantite - :qte
+            WHERE depot_id = :source AND stock_id = :article
+        ");
+                $stmt->execute(['qte' => $quantite, 'source' => $transfert['source_id'], 'article' => $articleId]);
+            } elseif ($transfert['source_type'] === 'chantier') {
+                $stmt = $pdo->prepare("
+            UPDATE stock_chantiers
+            SET quantite = quantite - :qte
+            WHERE chantier_id = :source AND stock_id = :article
+        ");
+                $stmt->execute(['qte' => $quantite, 'source' => $transfert['source_id'], 'article' => $articleId]);
+            }
+
             // ➕ Ajouter au chantier
             $stmtCheck = $pdo->prepare("SELECT COUNT(*) FROM stock_chantiers WHERE chantier_id = ? AND stock_id = ?");
             $stmtCheck->execute([$chantierId, $articleId]);
@@ -36,16 +53,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['transfert_id'])) {
 
             if ($exists) {
                 $stmtUpdate = $pdo->prepare("
-                    UPDATE stock_chantiers 
-                    SET quantite = quantite + :qte 
-                    WHERE chantier_id = :chantier AND stock_id = :article
-                ");
+            UPDATE stock_chantiers 
+            SET quantite = quantite + :qte 
+            WHERE chantier_id = :chantier AND stock_id = :article
+        ");
                 $stmtUpdate->execute(['qte' => $quantite, 'chantier' => $chantierId, 'article' => $articleId]);
             } else {
                 $stmtInsert = $pdo->prepare("
-                    INSERT INTO stock_chantiers (chantier_id, stock_id, quantite) 
-                    VALUES (:chantier, :article, :qte)
-                ");
+            INSERT INTO stock_chantiers (chantier_id, stock_id, quantite) 
+            VALUES (:chantier, :article, :qte)
+        ");
                 $stmtInsert->execute(['chantier' => $chantierId, 'article' => $articleId, 'qte' => $quantite]);
             }
 
@@ -53,25 +70,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['transfert_id'])) {
             $stmtDelete = $pdo->prepare("DELETE FROM transferts_en_attente WHERE id = ?");
             $stmtDelete->execute([$transfertId]);
 
-            // 🔒 (optionnel) Log historique de validation
-            /*
-            $stmtLog = $pdo->prepare("
-                INSERT INTO transferts_historique (transfert_id, validateur_id, date_validation)
-                VALUES (?, ?, NOW())
-            ");
-            $stmtLog->execute([$transfertId, $_SESSION['utilisateurs']['id']]);
-            */
-
             // ➕ Notifier le demandeur
             $message = "✅ Le transfert de {$quantite} x {$articleNom} a été validé par le chantier.";
             $stmtNotif = $pdo->prepare("
-                INSERT INTO notifications (utilisateur_id, message) 
-                VALUES (?, ?)
-            ");
+        INSERT INTO notifications (utilisateur_id, message) 
+        VALUES (?, ?)
+    ");
             $stmtNotif->execute([$demandeurId, $message]);
 
             $pdo->commit();
-
             $_SESSION['success_message'] = "Transfert validé avec succès.";
         } catch (Exception $e) {
             $pdo->rollBack();

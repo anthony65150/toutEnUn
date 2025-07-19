@@ -1,71 +1,64 @@
-document.addEventListener('DOMContentLoaded', () => {
-  const transferModal = document.getElementById('transferModal');
-  const confirmButton = document.getElementById('confirmTransfer');
-  const destinationSelect = document.getElementById('destination');
-  const qtyInput = document.getElementById('transferQty');
-  const modalStockIdInput = document.getElementById('modalStockId');
+document.addEventListener("DOMContentLoaded", () => {
+    const searchInput = document.getElementById("searchInput");
+    const tableRows = document.querySelectorAll(".stockTableBody tr");
+    const subCategoriesSlide = document.getElementById("subCategoriesSlide");
 
-  function showToast(id) {
-    const toastElement = document.getElementById(id);
-    if (toastElement) {
-      const toast = new bootstrap.Toast(toastElement);
-      toast.show();
-    }
-  }
+    let currentCategory = "";
+    let currentSubCategory = "";
 
-  function showErrorToast(message) {
-    const msgElem = document.getElementById("errorToastMessage");
-    if (msgElem) msgElem.textContent = message;
-    showToast("errorToast");
-  }
+    window.filterByCategory = (cat) => {
+        currentCategory = (cat || "").toLowerCase().trim();
+        currentSubCategory = "";
 
-  function sendTransfer(payload) {
-    fetch('transferStock_chef.php', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    })
-      .then(res => res.json())
-      .then(data => {
-        if (!data.success) {
-          showErrorToast(data.message || "Erreur lors du transfert.");
-          return;
-        }
-        bootstrap.Modal.getInstance(transferModal)?.hide();
-        showToast("transferToast");
-      })
-      .catch(error => {
-        console.error("❌ Erreur réseau :", error);
-        showErrorToast("Erreur réseau ou serveur.");
-      })
-      .finally(() => {
-        confirmButton.disabled = false;
-      });
-  }
+        document.querySelectorAll("#categoriesSlide button").forEach(b => b.classList.remove("active"));
+        [...document.querySelectorAll("#categoriesSlide button")]
+            .find(b => b.textContent.toLowerCase().trim() === currentCategory)
+            ?.classList.add("active");
 
-  confirmButton.addEventListener('click', () => {
-    const destinationValue = destinationSelect.value;
-    const qty = parseInt(qtyInput.value, 10);
-    const stockId = modalStockIdInput.value;
+        updateSubCategories(currentCategory);
+        filterRows();
+    };
 
-    if (!destinationValue || isNaN(qty) || qty < 1) {
-      showErrorToast("Veuillez remplir tous les champs.");
-      return;
+    function updateSubCategories(cat) {
+        subCategoriesSlide.innerHTML = '';
+        if (!cat) return;
+
+        const subs = subCategories[cat] || [];
+        subs.forEach(sub => {
+            const subNormalized = sub.toLowerCase().trim();
+            const btn = document.createElement("button");
+            btn.className = "btn btn-outline-secondary";
+            btn.textContent = sub;
+            btn.onclick = () => {
+                currentSubCategory = subNormalized;
+                document.querySelectorAll("#subCategoriesSlide button").forEach(b => b.classList.remove("active"));
+                btn.classList.add("active");
+                filterRows();
+            };
+            subCategoriesSlide.appendChild(btn);
+        });
     }
 
-    confirmButton.disabled = true;
-    const [destinationType, destinationId] = destinationValue.split('_');
+    function filterRows() {
+        const search = searchInput.value.toLowerCase().trim();
 
-    const payload = { stockId, destinationType, destinationId: parseInt(destinationId, 10), qty };
-    sendTransfer(payload);
-  });
+        tableRows.forEach(row => {
+            const rowCat = (row.dataset.cat || "").toLowerCase().trim();
+            const rowSub = (row.dataset.subcat || "").toLowerCase().trim();
+            const name = row.querySelector("td:first-child").textContent.toLowerCase();
 
-  document.querySelectorAll('.transfer-btn').forEach(button => {
-    button.addEventListener('click', () => {
-      modalStockIdInput.value = button.getAttribute('data-stock-id');
-      qtyInput.value = '';
-      destinationSelect.value = '';
-      new bootstrap.Modal(transferModal).show();
+            const matchCat = !currentCategory || rowCat === currentCategory;
+            const matchSub = !currentSubCategory || rowSub === currentSubCategory;
+            const matchSearch = !search || name.includes(search);
+
+            row.style.display = (matchCat && matchSub && matchSearch) ? "" : "none";
+        });
+    }
+
+    searchInput.addEventListener("input", () => {
+        filterRows();
     });
-  });
+
+    filterByCategory('');
 });
+

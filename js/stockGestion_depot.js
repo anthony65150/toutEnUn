@@ -1,97 +1,64 @@
 document.addEventListener("DOMContentLoaded", () => {
-    const transferModal = document.getElementById("transferModal");
-    const confirmButton = document.getElementById("confirmTransfer");
-    const transferQtyInput = document.getElementById("transferQty");
-    const destinationSelect = document.getElementById("destination");
-    const modalStockIdInput = document.getElementById("modalStockId");
+    const searchInput = document.getElementById("searchInput");
+    const tableRows = document.querySelectorAll("#stockTableBody tbody tr");
+    const subCategoriesSlide = document.getElementById("subCategoriesSlide");
 
-    function showToast(id) {
-        const toast = new bootstrap.Toast(document.getElementById(id));
-        toast.show();
+    let currentCategory = "";
+    let currentSubCategory = "";
+
+    function normalize(str) {
+        return (str || "").toLowerCase().trim();
     }
 
-    function showErrorToast(message) {
-        document.getElementById("errorToastMessage").textContent = message;
-        showToast("errorToast");
-    }
+    window.filterByCategory = (cat) => {
+        currentCategory = normalize(cat);
+        currentSubCategory = "";
 
-    function sendTransfer(payload) {
-        fetch("transferStock_depot.php", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload)
-        })
-        .then(res => res.json())
-        .then(data => {
-            if (!data.success) {
-                showErrorToast(data.message || "Erreur lors du transfert.");
-                return;
-            }
+        document.querySelectorAll("#categoriesSlide button").forEach(btn => btn.classList.remove("active"));
+        [...document.querySelectorAll("#categoriesSlide button")]
+            .find(b => normalize(b.textContent) === currentCategory)
+            ?.classList.add("active");
 
-            const stockId = modalStockIdInput.value;
-            const rows = document.querySelectorAll('tbody tr');
-            rows.forEach(row => {
-                const btn = row.querySelector('.transfer-btn');
-                if (btn && btn.getAttribute('data-stock-id') === stockId) {
-                    const dispoSpan = row.querySelector('.quantite-disponible');
-                    if (dispoSpan) {
-                        dispoSpan.textContent = data.quantiteDispo;
-                        dispoSpan.className = 'badge quantite-disponible ' + (data.quantiteDispo < 10 ? 'bg-danger' : 'bg-success');
-                    }
-                }
-            });
+        updateSubCategories(currentCategory);
+        filterRows();
+    };
 
-            bootstrap.Modal.getInstance(transferModal)?.hide();
-            showToast("transferToast");
-        })
-        .catch(error => {
-            console.error("Erreur réseau :", error);
-            showErrorToast("Erreur réseau ou serveur.");
+    function updateSubCategories(cat) {
+        subCategoriesSlide.innerHTML = '';
+        if (!cat) return;
+
+        const subs = subCategories[cat] || [];
+        subs.forEach(sub => {
+            const subNormalized = normalize(sub);
+            const btn = document.createElement("button");
+            btn.className = "btn btn-outline-secondary";
+            btn.textContent = sub;
+            btn.onclick = () => {
+                currentSubCategory = subNormalized;
+                document.querySelectorAll("#subCategoriesSlide button").forEach(b => b.classList.remove("active"));
+                btn.classList.add("active");
+                filterRows();
+            };
+            subCategoriesSlide.appendChild(btn);
         });
     }
 
-    confirmButton.addEventListener("click", () => {
-        const qty = parseInt(transferQtyInput.value, 10);
-        const destinationId = destinationSelect.value;
-        const stockId = modalStockIdInput.value;
+    function filterRows() {
+        const search = normalize(searchInput.value);
 
-        if (!qty || !destinationId || qty < 1) {
-            showErrorToast("Veuillez remplir tous les champs.");
-            return;
-        }
+        tableRows.forEach(row => {
+            const rowCat = normalize(row.dataset.cat);
+            const rowSub = normalize(row.dataset.subcat);
+            const name = normalize(row.querySelector(".nom-article")?.textContent || "");
 
-        sendTransfer({ stockId, destination: destinationId, qty });
-    });
+            const matchCat = !currentCategory || rowCat === currentCategory;
+            const matchSub = !currentSubCategory || rowSub === currentSubCategory;
+            const matchSearch = !search || name.includes(search);
 
-    document.querySelectorAll(".transfer-btn").forEach(button => {
-        button.addEventListener("click", () => {
-            modalStockIdInput.value = button.getAttribute("data-stock-id");
-            destinationSelect.value = '';
-            transferQtyInput.value = '';
-            new bootstrap.Modal(transferModal).show();
+            row.style.display = (matchCat && matchSub && matchSearch) ? "" : "none";
         });
-    });
+    }
 
-    // ✅ Gestion AJAX validation réception
-    document.querySelectorAll(".validate-reception-btn").forEach(button => {
-        button.addEventListener("click", () => {
-            const transfertId = button.getAttribute("data-transfert-id");
-
-            fetch("validerReception_depot.php", {
-                method: "POST",
-                headers: { "Content-Type": "application/x-www-form-urlencoded" },
-                body: "transfert_id=" + encodeURIComponent(transfertId)
-            })
-            .then(res => res.text())
-            .then(() => {
-                const row = button.closest("tr");
-                if (row) row.remove();
-                showToast("transferToast");
-            })
-            .catch(error => {
-                console.error("Erreur réseau :", error);
-                showErrorToast("Erreur lors de la validation.");
-            });
-        });
-    });
+    searchInput.addEventListener("input", filterRows);
+    filterByCategory('');
 });

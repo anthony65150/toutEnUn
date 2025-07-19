@@ -8,7 +8,6 @@ if (!isset($_SESSION['utilisateurs']) || $_SESSION['utilisateurs']['fonction'] !
   exit;
 }
 
-// Récupérer l'id du dépôt lié à l'utilisateur connecté
 $userId = $_SESSION['utilisateurs']['id'];
 $stmtDepot = $pdo->prepare("SELECT id FROM depots WHERE responsable_id = ?");
 $stmtDepot->execute([$userId]);
@@ -18,33 +17,26 @@ if (!$depotId) {
   die("Dépôt non trouvé pour cet utilisateur.");
 }
 
-// Récupérer les associations stock ↔ chantiers
 $stmt = $pdo->query("SELECT sc.stock_id, c.nom AS chantier_nom, sc.quantite FROM stock_chantiers sc JOIN chantiers c ON sc.chantier_id = c.id");
 $chantierAssoc = [];
 foreach ($stmt as $row) {
-  $chantierAssoc[$row['stock_id']][] = [
-    'nom' => $row['chantier_nom'],
-    'quantite' => $row['quantite']
-  ];
+  $chantierAssoc[$row['stock_id']][] = ['nom' => $row['chantier_nom'], 'quantite' => $row['quantite']];
 }
 
-// Récupérer le stock total recalculé (dépôt + chantiers)
 $stmt = $pdo->prepare("
     SELECT 
-        s.id, 
-        s.nom, 
-        COALESCE(sd.quantite, 0) + COALESCE(sc.total_chantier, 0) AS total_recalculé,
-        COALESCE(sd.quantite, 0) AS quantite_stock_depot,
-        COALESCE(sd.quantite, 0) - COALESCE((
+        s.id, s.nom, 
+        COALESCE(sd.quantite,0)+COALESCE(sc.total_chantier,0) AS total_recalculé,
+        COALESCE(sd.quantite,0) AS quantite_stock_depot,
+        COALESCE(sd.quantite,0) - COALESCE((
             SELECT SUM(te.quantite) 
             FROM transferts_en_attente te 
             WHERE te.article_id = s.id 
-              AND te.source_type = 'depot' 
-              AND te.source_id = ?
-              AND te.statut = 'en_attente'
-        ), 0) AS disponible_depot,
-        s.categorie, 
-        s.sous_categorie
+            AND te.source_type = 'depot' 
+            AND te.source_id = ? 
+            AND te.statut = 'en_attente'
+        ),0) AS disponible_depot,
+        s.categorie, s.sous_categorie
     FROM stock s
     LEFT JOIN stock_depots sd ON s.id = sd.stock_id AND sd.depot_id = ?
     LEFT JOIN (
@@ -57,10 +49,21 @@ $stmt = $pdo->prepare("
 $stmt->execute([$depotId, $depotId]);
 $stocks = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Récupérer liste des chantiers
+$categories = $pdo->query("SELECT DISTINCT categorie FROM stock WHERE categorie IS NOT NULL ORDER BY categorie")->fetchAll(PDO::FETCH_COLUMN);
+$subCatRaw = $pdo->query("SELECT categorie, sous_categorie FROM stock WHERE sous_categorie IS NOT NULL")->fetchAll(PDO::FETCH_ASSOC);
+$subCategoriesGrouped = [];
+foreach ($subCatRaw as $row) {
+  $catKey = strtolower(trim($row['categorie']));
+  $subKey = strtolower(trim($row['sous_categorie']));
+  $subCategoriesGrouped[$catKey][] = $subKey;
+}
+foreach ($subCategoriesGrouped as &$subs) {
+  $subs = array_unique($subs);
+}
+unset($subs);
+
 $chantiers = $pdo->query("SELECT id, nom FROM chantiers ORDER BY nom")->fetchAll(PDO::FETCH_ASSOC);
 
-// Récupérer les transferts en attente vers ce dépôt
 $stmt = $pdo->prepare("
     SELECT t.id AS transfert_id, s.nom AS article_nom, t.quantite, u.nom AS demandeur_nom, u.prenom AS demandeur_prenom
     FROM transferts_en_attente t
@@ -73,17 +76,27 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
 ?>
 
 <div class="container py-5">
-  <h2 class="text-center mb-5">Stock dépôt</h2>
+  <h2 class="text-center mb-4">Stock dépôt</h2>
 
-  <!-- Tableau stock -->
+  <div class="d-flex justify-content-center mb-3 flex-wrap gap-2" id="categoriesSlide">
+    <button class="btn btn-outline-primary" onclick="filterByCategory('')">Tous</button>
+    <?php foreach ($categories as $cat): ?>
+      <button class="btn btn-outline-primary" onclick="filterByCategory('<?= strtolower(trim(htmlspecialchars($cat))) ?>')">
+        <?= htmlspecialchars(ucfirst($cat)) ?>
+      </button>
+    <?php endforeach; ?>
+  </div>
+  <div id="subCategoriesSlide" class="d-flex justify-content-center mb-4 flex-wrap gap-2"></div>
+
+  <input type="text" id="searchInput" class="form-control mb-4" placeholder="Rechercher un article...">
+
   <div class="table-responsive">
-    <table class="table table-bordered table-hover align-middle text-center">
+    <table class="table table-bordered table-hover align-middle text-center" id="stockTableBody">
       <thead class="table-dark">
         <tr>
           <th>Nom</th>
           <th>Photo</th>
-          <th>Disponible total</th>
-          <th>Disponible dépôt</th>
+          <th>Disponible au dépôt</th>
           <th>Chantiers</th>
           <th>Actions</th>
         </tr>
@@ -94,23 +107,17 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
           $total = (int)$stock['total_recalculé'];
           $dispoDepot = (int)$stock['disponible_depot'];
           $nom = htmlspecialchars($stock['nom']);
+          $cat = strtolower(trim($stock['categorie']));
+          $subcat = strtolower(trim($stock['sous_categorie']));
           $chantierList = $chantierAssoc[$stockId] ?? [];
         ?>
-          <tr>
-            <td><?= "$nom ($total)" ?></td>
+          <tr data-cat="<?= $cat ?>" data-subcat="<?= $subcat ?>">
             <td>
-              <img src="uploads/photos/<?= $stockId ?>.jpg" alt="<?= $nom ?>" style="height: 40px;">
+              <span class="nom-article"><?= $nom ?></span>
+              <span class="article-total"> (<?= $total ?>)</span>
             </td>
-            <td>
-              <span class="badge bg-primary">
-                <?= $total ?>
-              </span>
-            </td>
-            <td>
-              <span class="badge quantite-disponible <?= $dispoDepot < 10 ? 'bg-danger' : 'bg-success' ?>">
-                <?= $dispoDepot ?>
-              </span>
-            </td>
+            <td><img src="uploads/photos/<?= $stockId ?>.jpg" alt="<?= $nom ?>" style="height:40px;"></td>
+            <td><span class="badge quantite-disponible <?= $dispoDepot < 10 ? 'bg-danger' : 'bg-success' ?>"><?= $dispoDepot ?></span></td>
             <td>
               <?php if (count($chantierList)): ?>
                 <?php foreach ($chantierList as $chantier): ?>
@@ -131,82 +138,40 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
     </table>
   </div>
 
-  <!-- Section transferts à valider -->
   <h3 class="mt-5">Transferts à valider</h3>
   <?php if ($transfertsEnAttente): ?>
-    <div class="table-responsive">
-      <table class="table table-bordered align-middle text-center">
-        <thead class="table-info">
+    <table class="table table-bordered align-middle text-center">
+      <thead class="table-info">
+        <tr>
+          <th>Article</th>
+          <th>Quantité</th>
+          <th>Envoyé par</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        <?php foreach ($transfertsEnAttente as $t): ?>
           <tr>
-            <th>Article</th>
-            <th>Quantité</th>
-            <th>Envoyé par</th>
-            <th>Action</th>
+            <td><?= htmlspecialchars($t['article_nom']) ?></td>
+            <td><?= $t['quantite'] ?></td>
+            <td><?= htmlspecialchars($t['demandeur_prenom'] . ' ' . $t['demandeur_nom']) ?></td>
+            <td>
+              <form method="post" action="validerReception_depot.php" style="display:inline;">
+                <input type="hidden" name="transfert_id" value="<?= $t['transfert_id'] ?>">
+                <button type="submit" class="btn btn-success btn-sm">✅ Valider réception</button>
+              </form>
+            </td>
           </tr>
-        </thead>
-        <tbody>
-          <?php foreach ($transfertsEnAttente as $t): ?>
-            <tr>
-              <td><?= htmlspecialchars($t['article_nom']) ?></td>
-              <td><?= $t['quantite'] ?></td>
-              <td><?= htmlspecialchars($t['demandeur_prenom'] . ' ' . $t['demandeur_nom']) ?></td>
-              <td>
-                <form method="post" action="validerReception_depot.php" style="display:inline;">
-                  <input type="hidden" name="transfert_id" value="<?= $t['transfert_id'] ?>">
-                  <button type="submit" class="btn btn-success btn-sm">
-                      ✅ Valider réception
-                  </button>
-                </form>
-              </td>
-            </tr>
-          <?php endforeach; ?>
-        </tbody>
-      </table>
-    </div>
+        <?php endforeach; ?>
+      </tbody>
+    </table>
   <?php else: ?>
     <p class="text-muted">Aucun transfert en attente de validation.</p>
   <?php endif; ?>
 </div>
 
-<!-- MODAL TRANSFERT -->
-<div class="modal fade" id="transferModal" tabindex="-1" aria-labelledby="transferModalLabel" aria-hidden="true">
-  <div class="modal-dialog">
-    <div class="modal-content">
-
-      <div class="modal-header">
-        <h5 class="modal-title" id="transferModalLabel">Transfert vers un chantier</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
-      </div>
-
-      <div class="modal-body">
-        <form id="transferForm">
-          <input type="hidden" id="modalStockId">
-
-          <div class="mb-3">
-            <label for="destination" class="form-label">Destination (chantier)</label>
-            <select class="form-select" id="destination" required>
-              <option value="" disabled selected>Choisir le chantier</option>
-              <?php foreach ($chantiers as $chantier): ?>
-                <option value="<?= $chantier['id'] ?>"><?= htmlspecialchars($chantier['nom']) ?></option>
-              <?php endforeach; ?>
-            </select>
-          </div>
-
-          <div class="mb-3">
-            <label for="transferQty" class="form-label">Quantité à transférer</label>
-            <input type="number" min="1" class="form-control" id="transferQty" required>
-          </div>
-        </form>
-      </div>
-
-      <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
-        <button type="submit" class="btn btn-primary" id="confirmTransfer">OK</button>
-      </div>
-
-    </div>
-  </div>
-</div>
-
+<script>
+  const subCategories = <?= json_encode($subCategoriesGrouped) ?>;
+</script>
 <script src="/js/stockGestion_depot.js"></script>
 <?php require_once __DIR__ . '/templates/footer.php'; ?>
