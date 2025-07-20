@@ -63,7 +63,7 @@ foreach ($subCatRaw as $row) {
             <thead class="table-dark">
                 <tr>
                     <th>Nom (Total)</th>
-                    <th>Photo</th>
+                    <th class="col-photo">Photo</th>
                     <th>Dépôts</th>
                     <th>Chantiers</th>
                     <th>Actions</th>
@@ -79,7 +79,7 @@ foreach ($subCatRaw as $row) {
                     ?>
                     <tr data-cat="<?= htmlspecialchars($stock['categorie']) ?>" data-subcat="<?= htmlspecialchars($stock['sous_categorie']) ?>">
                         <td><?= htmlspecialchars($stock['nom']) ?> (<?= $quantiteTotale ?>)</td>
-                        <td><img src="uploads/photos/<?= $stockId ?>.jpg" alt="photo" style="height: 40px;"></td>
+                        <td class="col-photo"><img src="uploads/photos/<?= $stockId ?>.jpg" alt="photo" style="height: 40px;"></td>
                         <td>
                             <?php if ($depotsList): foreach ($depotsList as $d): ?>
                                 <div><?= htmlspecialchars($d['nom']) ?> <span class="badge <?= $d['quantite'] < 10 ? 'bg-danger' : 'bg-success' ?>">(<?= $d['quantite'] ?>)</span></div>

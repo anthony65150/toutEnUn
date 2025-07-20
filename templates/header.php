@@ -118,7 +118,7 @@ $drapeau = $drapeaux[$langue] ?? $drapeaux['Français'];
                                 class="rounded-circle"
                                 style="width: 40px; height: 40px; object-fit: cover;">
                         </a>
-                        <span class="fw-bold fs-6 text-nowrap">
+                        <span class="fw-bold fs-6 text-nowrap bonjour-texte">
                             Bonjour <?= htmlspecialchars($_SESSION['utilisateurs']['prenom']) ?>
                         </span>
                     </div>

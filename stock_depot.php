@@ -131,10 +131,10 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
       <thead class="table-dark">
         <tr>
           <th>Nom</th>
-          <th>Photo</th>
+          <th class="col-photo">Photo</th>
           <th>Disponible au dépôt</th>
           <th>Chantiers</th>
-          <th>Actions</th>
+          <th>Action</th>
         </tr>
       </thead>
       <tbody>
@@ -152,7 +152,7 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
               <span class="nom-article"><?= $nom ?></span>
               <span class="article-total"> (<?= $total ?>)</span>
             </td>
-            <td><img src="uploads/photos/<?= $stockId ?>.jpg" alt="<?= $nom ?>" style="height:40px;"></td>
+            <td class="col-photo"><img src="uploads/photos/<?= $stockId ?>.jpg" alt="<?= $nom ?>" style="height:40px;"></td>
             <td><span class="badge quantite-disponible <?= $dispoDepot < 10 ? 'bg-danger' : 'bg-success' ?>"><?= $dispoDepot ?></span></td>
             <td>
               <?php if (count($chantierList)): ?>
@@ -164,7 +164,7 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
               <?php endif; ?>
             </td>
             <td>
-              <button class="btn btn-sm btn-primary transfer-btn" data-stock-id="<?= $stockId ?>" data-stock-nom="<?= $nom ?>">
+              <button class="btn btn-sm btn-primary btn-transfer transfer-btn" data-stock-id="<?= $stockId ?>" data-stock-nom="<?= $nom ?>">
                 <i class="bi bi-arrow-left-right"></i> Transférer
               </button>
             </td>
