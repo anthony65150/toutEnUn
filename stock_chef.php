@@ -60,6 +60,38 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
     <div id="subCategoriesSlide" class="d-flex justify-content-center mb-4 flex-wrap gap-2"></div>
     <input type="text" id="searchInput" class="form-control mb-4" placeholder="Rechercher un article...">
 
+    <?php if ($transfertsEnAttente): ?>
+  <div class="mb-4">
+    <h3>Transferts à valider</h3>
+    <table class="table table-bordered align-middle text-center">
+      <thead class="table-info">
+        <tr>
+          <th>Article</th>
+          <th>Quantité</th>
+          <th>Envoyé par</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        <?php foreach ($transfertsEnAttente as $t): ?>
+          <tr>
+            <td><?= htmlspecialchars($t['article_nom']) ?></td>
+            <td><?= $t['quantite'] ?></td>
+            <td><?= htmlspecialchars($t['demandeur_prenom'] . ' ' . $t['demandeur_nom']) ?></td>
+            <td>
+              <form method="post" action="validerReception_chef.php" style="display:inline;">
+                <input type="hidden" name="transfert_id" value="<?= $t['transfert_id'] ?>">
+                <button type="submit" class="btn btn-success btn-sm">✅ Valider réception</button>
+              </form>
+            </td>
+          </tr>
+        <?php endforeach; ?>
+      </tbody>
+    </table>
+  </div>
+<?php endif; ?>
+
+
     <div class="table-responsive mb-4">
         <table class="table table-bordered table-hover text-center align-middle">
             <thead class="table-dark">
@@ -112,38 +144,7 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
             </tbody>
         </table>
     </div>
-
-    <h3 class="mt-5">Transferts à valider</h3>
-    <?php if ($transfertsEnAttente): ?>
-        <table class="table table-bordered">
-            <thead class="table-info">
-                <tr>
-                    <th>Article</th>
-                    <th>Quantité</th>
-                    <th>Envoyé par</th>
-                    <th>Action</th>
-                </tr>
-            </thead>
-            <tbody>
-                <?php foreach ($transfertsEnAttente as $t): ?>
-                    <tr>
-                        <td><?= htmlspecialchars($t['article_nom']) ?></td>
-                        <td><?= $t['quantite'] ?></td>
-                        <td><?= htmlspecialchars($t['demandeur_prenom'] . ' ' . $t['demandeur_nom']) ?></td>
-                        <td>
-                            <form method="post" action="validerReception_chef.php" style="display:inline;">
-                                <input type="hidden" name="transfert_id" value="<?= $t['transfert_id'] ?>">
-                                <button type="submit" class="btn btn-success btn-sm">✅ Valider réception</button>
-                            </form>
-                        </td>
-                    </tr>
-                <?php endforeach; ?>
-            </tbody>
-        </table>
-    <?php else: ?>
-        <p class="text-muted">Aucun transfert en attente de validation.</p>
-    <?php endif; ?>
-</div>
+   </div>
 
 <!-- Modal Transfert Chef -->
 <div class="modal fade" id="transferModal" tabindex="-1" aria-labelledby="transferModalLabel" aria-hidden="true">
