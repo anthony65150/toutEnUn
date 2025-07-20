@@ -7,7 +7,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
     <div class="container d-flex justify-content-center">
         <ul class="nav nav-pills">
             <li class="nav-item p-2">
-                <a href="/index.php" class="nav-link <?php echo ($current_page == 'index.php') ? 'active' : ''; ?>">
+                <a href="/accueil.php" class="nav-link <?php echo ($current_page == 'accueil.php') ? 'active' : ''; ?>">
                     Accueil
                 </a>
             </li>

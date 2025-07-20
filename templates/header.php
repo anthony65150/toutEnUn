@@ -65,7 +65,7 @@ $drapeau = $drapeaux[$langue] ?? $drapeaux['Français'];
         <div class="container-fluid d-flex justify-content-between align-items-center">
 
             <!-- Logo -->
-            <a class="navbar-brand d-flex align-items-center" href="/connexion.php">
+            <a class="navbar-brand d-flex align-items-center" href="/index.php">
                 <img src="/images/simpliz-trans.png" alt="logo" width="100" height="100" />
             </a>
 
@@ -127,7 +127,7 @@ $drapeau = $drapeaux[$langue] ?? $drapeaux['Français'];
 
             <!-- Bouton burger (mobile) -->
             <?php $currentPage = basename($_SERVER['PHP_SELF']); ?>
-            <?php if ($currentPage !== 'connexion.php') : ?>
+            <?php if ($currentPage !== 'index.php') : ?>
                 <button class="navbar-toggler d-md-none" type="button" data-bs-toggle="collapse" data-bs-target="#navbarBurgerMenu" aria-controls="navbarBurgerMenu" aria-expanded="false" aria-label="Toggle navigation">
                     <span class="navbar-toggler-icon"></span>
                 </button>

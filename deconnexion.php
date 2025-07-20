@@ -10,5 +10,5 @@ if (isset($_SESSION["utilisateurs"])) {
     header("Expires: 0");
 }
 
-header("Location: connexion.php?logout=1");
+header("Location: index.php?logout=1");
 exit;

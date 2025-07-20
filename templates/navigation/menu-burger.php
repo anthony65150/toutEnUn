@@ -8,7 +8,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
     <div class="collapse navbar-collapse d-md-none fond-gris text-center" id="navbarBurgerMenu">
         <ul class="navbar-nav ms-auto mb-2 mb-md-0 d-md-none">
             <li class="nav-item p-2">
-                <a href="/index.php" class="nav-link <?= ($current_page == 'index.php') ? 'active' : '' ?>">
+                <a href="/accueil.php" class="nav-link <?= ($current_page == 'accueil.php') ? 'active' : '' ?>">
                     Accueil
                 </a>
             </li>
