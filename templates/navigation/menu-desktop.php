@@ -4,72 +4,59 @@ $current_page = basename($_SERVER['PHP_SELF']);
 
 <!-- Menu complet affiché uniquement au-dessus de md -->
 <nav class="d-none d-md-block fond-gris border-bottom">
-    <div class="container d-flex justify-content-center">
+    <div class="container d-flex justify-content-between align-items-center">
         <ul class="nav nav-pills">
             <li class="nav-item p-2">
-                <a href="/accueil.php" class="nav-link <?php echo ($current_page == 'accueil.php') ? 'active' : ''; ?>">
-                    Accueil
-                </a>
+                <a href="/accueil.php" class="nav-link <?php echo ($current_page == 'accueil.php') ? 'active' : ''; ?>">Accueil</a>
             </li>
-            <li class="p-2">
-                <a href="/mes_documents.php" class="nav-link <?php echo ($current_page == 'mes_documents.php') ? 'active' : ''; ?> text-center">
-                    Mes documents
-                </a>
+            <li class="nav-item p-2">
+                <a href="/mes_documents.php" class="nav-link <?php echo ($current_page == 'mes_documents.php') ? 'active' : ''; ?>">Mes documents</a>
             </li>
-            <li class="p-2">
-                <a href="/mes_conges.php" class="nav-link <?php echo ($current_page == 'mes_conges.php') ? 'active' : ''; ?> text-center">
-                    Mes congés
-                </a>
+            <li class="nav-item p-2">
+                <a href="/mes_conges.php" class="nav-link <?php echo ($current_page == 'mes_conges.php') ? 'active' : ''; ?>">Mes congés</a>
             </li>
-            <li class="p-2">
-                <a href="/mon_pointage.php" class="nav-link <?php echo ($current_page == 'mon_pointage.php') ? 'active' : ''; ?> text-center">
-                    Mon pointage
-                </a>
+            <li class="nav-item p-2">
+                <a href="/mon_pointage.php" class="nav-link <?php echo ($current_page == 'mon_pointage.php') ? 'active' : ''; ?>">Mon pointage</a>
             </li>
-            <li class="p-2">
-                <a href="/autres_demandes.php" class="nav-link <?php echo ($current_page == 'autres_demandes.php') ? 'active' : ''; ?> text-center">
-                    Autres demandes
-                </a>
+            <li class="nav-item p-2">
+                <a href="/autres_demandes.php" class="nav-link <?php echo ($current_page == 'autres_demandes.php') ? 'active' : ''; ?>">Autres demandes</a>
             </li>
 
             <?php if (isset($_SESSION['utilisateurs']['fonction']) && in_array($_SESSION['utilisateurs']['fonction'], ['administrateur', 'chef'])) : ?>
-                <li class="p-2">
-                    <a href="/admin/pointage.php" class="nav-link <?php echo ($current_page == 'pointage.php') ? 'active' : ''; ?> text-center">
-                        Pointage
-                    </a>
+                <li class="nav-item p-2">
+                    <a href="/admin/pointage.php" class="nav-link <?php echo ($current_page == 'pointage.php') ? 'active' : ''; ?>">Pointage</a>
                 </li>
             <?php endif; ?>
 
             <?php if (isset($_SESSION['utilisateurs']['fonction']) && $_SESSION['utilisateurs']['fonction'] === 'administrateur') : ?>
-                <li class="p-2">
-                    <a href="/ajoutEmploye.php" class="nav-link <?php echo ($current_page == 'ajoutEmploye.php') ? 'active' : ''; ?> text-center">
-                        Ajout employés
-                    </a>
+                <li class="nav-item p-2">
+                    <a href="/ajoutEmploye.php" class="nav-link <?php echo ($current_page == 'ajoutEmploye.php') ? 'active' : ''; ?>">Ajout employés</a>
+                </li>
+                <li class="nav-item p-2">
+                    <a href="/chantiers_admin.php" class="nav-link <?php echo ($current_page == 'chantiers_admin.php') ? 'active' : ''; ?>">Chantiers</a>
                 </li>
             <?php endif; ?>
 
             <?php
-                $fonction = $_SESSION['utilisateurs']['fonction'] ?? '';
-                $stockPage = match ($fonction) {
-                    'administrateur' => 'stock_admin.php',
-                    'chef' => 'stock_chef.php',
-                    'depot' => 'stock_depot.php',
-                    default => null
-                };
+            $fonction = $_SESSION['utilisateurs']['fonction'] ?? '';
+            $stockPage = match ($fonction) {
+                'administrateur' => 'stock_admin.php',
+                'chef' => 'stock_chef.php',
+                'depot' => 'stock_depot.php',
+                default => null
+            };
             ?>
             <?php if ($stockPage): ?>
-                <li class="p-2">
-                    <a href="/<?= $stockPage ?>" class="nav-link <?php echo ($current_page == $stockPage) ? 'active' : ''; ?> text-center">
-                        Stock
-                    </a>
-                </li>
-            <?php endif; ?>
-
-            <?php if (isset($_SESSION["utilisateurs"])) : ?>
-                <li class="p-2">
-                    <a class="nav-link text-danger" href="/deconnexion.php">Déconnexion</a>
+                <li class="nav-item p-2">
+                    <a href="/<?= $stockPage ?>" class="nav-link <?php echo ($current_page == $stockPage) ? 'active' : ''; ?>">Stock</a>
                 </li>
             <?php endif; ?>
         </ul>
+
+        <?php if (isset($_SESSION["utilisateurs"])) : ?>
+            <div class="p-2">
+                <a class="nav-link text-danger" href="/deconnexion.php">Déconnexion</a>
+            </div>
+        <?php endif; ?>
     </div>
 </nav>

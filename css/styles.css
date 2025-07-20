@@ -177,3 +177,64 @@ html, body {
         white-space: normal;     /* autorise retour à la ligne pour le bloc, mais pas à l’intérieur des mots */
     }
 }
+
+body.dark-mode {
+    background-color: #121212;
+    color: #f1f1f1;
+}
+
+.dark-mode .card {
+    background-color: #1e1e1e;
+    color: #f1f1f1;
+}
+
+.dark-mode .navbar, .dark-mode .footer {
+    background-color: #1a1a1a;
+}
+
+/* Cible le menu burger */
+#navbarBurgerMenu {
+    background-color: #121212; /* fond noir */
+    color: #ffffff; /* texte blanc */
+}
+
+/* Forcer les liens du menu burger en blanc */
+#navbarBurgerMenu a.nav-link {
+    color: #ffffff;
+}
+
+/* Optionnel : rendre le lien actif plus visible */
+#navbarBurgerMenu a.nav-link.active {
+    color: #f1c40f; /* jaune/orange par exemple */
+    font-weight: bold;
+}
+#navbarBurgerMenu a.nav-link:hover {
+    background-color: #1e1e1e;
+}
+
+/* Mode clair : pas besoin de toucher, garde fond-gris comme avant */
+
+/* Mode dark : appliquer SEULEMENT quand dark-mode est activé sur le body */
+body.dark-mode nav.fond-gris {
+    background-color: #121212;
+}
+
+body.dark-mode nav.fond-gris .nav-link {
+    color: #ffffff;
+}
+
+body.dark-mode nav.fond-gris .nav-link.active {
+    color: #f1c40f;
+    font-weight: bold;
+}
+
+body.dark-mode nav.fond-gris .nav-link:hover {
+    background-color: #1e1e1e;
+    color: #f1c40f;
+}
+
+/* Mode dark pour le menu burger */
+body.dark-mode .navbar-toggler-icon {
+    filter: invert(1);
+}
+

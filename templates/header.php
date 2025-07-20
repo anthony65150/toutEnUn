@@ -91,6 +91,11 @@ $drapeau = $drapeaux[$langue] ?? $drapeaux['Français'];
                         </ul>
                     </div>
                 <?php } ?>
+                <button id="toggleDarkMode" style="font-size: 1.5rem; border: none; background: none; cursor: pointer;">
+    🌙
+</button>
+
+
             </form>
 
             <!-- Bonjour + prénom centré -->

@@ -53,6 +53,14 @@ $current_page = basename($_SERVER['PHP_SELF']);
                 </li>
             <?php endif; ?>
 
+                        <?php if ($_SESSION['utilisateurs']['fonction'] ?? '' === 'administrateur') : ?>
+                <li class="p-2">
+                    <a href="/chantiers_admin.php" class="nav-link <?= ($current_page == 'chantiers_admin.php') ? 'active' : '' ?> text-center">
+                       Chantiers
+                    </a>
+                </li>
+            <?php endif; ?>
+
             <?php
                 $fonction = $_SESSION['utilisateurs']['fonction'] ?? '';
                 $stockPage = match ($fonction) {
