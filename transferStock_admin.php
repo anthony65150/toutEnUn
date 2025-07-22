@@ -78,6 +78,14 @@ try {
         $adminId
     ]);
 
+// Décrémenter immédiatement SEULEMENT si source = depot
+if ($sourceType === 'depot') {
+    $update = $pdo->prepare("UPDATE stock_depots SET quantite = quantite - ? WHERE stock_id = ? AND depot_id = ?");
+    $update->execute([$qty, $stockId, $sourceId]);
+}
+// Si source = chantier, NE RIEN FAIRE ici → ça sera décrémenté à la validation
+
+
     $pdo->commit();
     echo json_encode(["success" => true, "message" => "Transfert enregistré et en attente de validation."]);
 

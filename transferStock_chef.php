@@ -31,6 +31,18 @@ if ($sourceType === $destinationType && $sourceId === $destinationId) {
     exit;
 }
 
+// 🔒 Vérification spéciale pour les chefs de chantier
+if ($sourceType === 'chantier') {
+    $stmtChef = $pdo->prepare("SELECT id FROM chantiers WHERE responsable_id = ?");
+    $stmtChef->execute([$userId]);
+    $chantierIdsChef = $stmtChef->fetchAll(PDO::FETCH_COLUMN);
+
+    if (!in_array($sourceId, $chantierIdsChef)) {
+        echo json_encode(["success" => false, "message" => "Vous ne pouvez transférer que depuis vos propres chantiers."]);
+        exit;
+    }
+}
+
 try {
     $pdo->beginTransaction();
 

@@ -59,14 +59,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['transfert_id'])) {
             }
         }
 
-        // 🔻 Retirer de la source
-        if ($sourceType === 'depot') {
-            $stmtUpdate = $pdo->prepare("UPDATE stock_depots SET quantite = GREATEST(quantite - :qte, 0) WHERE depot_id = :src AND stock_id = :article");
-            $stmtUpdate->execute(['qte' => $quantite, 'src' => $sourceId, 'article' => $articleId]);
-        } else {
-            $stmtUpdate = $pdo->prepare("UPDATE stock_chantiers SET quantite = GREATEST(quantite - :qte, 0) WHERE chantier_id = :src AND stock_id = :article");
-            $stmtUpdate->execute(['qte' => $quantite, 'src' => $sourceId, 'article' => $articleId]);
-        }
+      // 🔻 Retirer de la source
+if ($sourceType === 'chantier') {
+    $stmtUpdate = $pdo->prepare("UPDATE stock_chantiers SET quantite = GREATEST(quantite - :qte, 0) WHERE chantier_id = :src AND stock_id = :article");
+    $stmtUpdate->execute(['qte' => $quantite, 'src' => $sourceId, 'article' => $articleId]);
+}
+// Si source = dépôt, ne rien faire ici (déjà décrémenté à l’envoi)
+
+
 
         // ✅ Supprimer le transfert en attente
         $stmtDelete = $pdo->prepare("DELETE FROM transferts_en_attente WHERE id = ?");

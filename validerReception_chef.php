@@ -6,17 +6,34 @@ if (!isset($_SESSION['utilisateurs'])) {
     exit;
 }
 
+$chefId = $_SESSION['utilisateurs']['id'];
+
+// Récupérer tous les chantiers associés au chef
+$stmtChefChantiers = $pdo->prepare("SELECT id FROM chantiers WHERE responsable_id = ?");
+$stmtChefChantiers->execute([$chefId]);
+$chantierIds = $stmtChefChantiers->fetchAll(PDO::FETCH_COLUMN);
+
+if (empty($chantierIds)) {
+    $_SESSION['error_message'] = "Aucun chantier associé à ce chef.";
+    header("Location: stock_chef.php");
+    exit;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['transfert_id'])) {
     $transfertId = (int)$_POST['transfert_id'];
+
+    $placeholders = implode(',', array_fill(0, count($chantierIds), '?'));
 
     $stmt = $pdo->prepare("
         SELECT t.*, s.nom AS article_nom
         FROM transferts_en_attente t
         JOIN stock s ON t.article_id = s.id
-        WHERE t.id = ? AND t.destination_type = 'chantier' AND t.destination_id = ? AND t.statut = 'en_attente'
+        WHERE t.id = ? AND t.destination_type = 'chantier' 
+        AND t.destination_id IN ($placeholders)
+        AND t.statut = 'en_attente'
         FOR UPDATE
     ");
-    $stmt->execute([$transfertId, $_SESSION['utilisateurs']['chantier_id']]);
+    $stmt->execute(array_merge([$transfertId], $chantierIds));
     $transfert = $stmt->fetch(PDO::FETCH_ASSOC);
 
     if ($transfert) {
@@ -30,21 +47,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['transfert_id'])) {
             $pdo->beginTransaction();
 
             // ➖ Décrémenter source
-            if ($transfert['source_type'] === 'depot') {
-                $stmt = $pdo->prepare("
-            UPDATE stock_depots
-            SET quantite = quantite - :qte
-            WHERE depot_id = :source AND stock_id = :article
-        ");
-                $stmt->execute(['qte' => $quantite, 'source' => $transfert['source_id'], 'article' => $articleId]);
-            } elseif ($transfert['source_type'] === 'chantier') {
-                $stmt = $pdo->prepare("
-            UPDATE stock_chantiers
-            SET quantite = quantite - :qte
-            WHERE chantier_id = :source AND stock_id = :article
-        ");
-                $stmt->execute(['qte' => $quantite, 'source' => $transfert['source_id'], 'article' => $articleId]);
-            }
+           if ($transfert['source_type'] === 'chantier') {
+    $stmt = $pdo->prepare("
+        UPDATE stock_chantiers
+        SET quantite = GREATEST(quantite - :qte, 0)
+        WHERE chantier_id = :source AND stock_id = :article
+    ");
+    $stmt->execute(['qte' => $quantite, 'source' => $transfert['source_id'], 'article' => $articleId]);
+} 
+
+
 
             // ➕ Ajouter au chantier
             $stmtCheck = $pdo->prepare("SELECT COUNT(*) FROM stock_chantiers WHERE chantier_id = ? AND stock_id = ?");
@@ -53,16 +65,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['transfert_id'])) {
 
             if ($exists) {
                 $stmtUpdate = $pdo->prepare("
-            UPDATE stock_chantiers 
-            SET quantite = quantite + :qte 
-            WHERE chantier_id = :chantier AND stock_id = :article
-        ");
+                    UPDATE stock_chantiers 
+                    SET quantite = quantite + :qte 
+                    WHERE chantier_id = :chantier AND stock_id = :article
+                ");
                 $stmtUpdate->execute(['qte' => $quantite, 'chantier' => $chantierId, 'article' => $articleId]);
             } else {
                 $stmtInsert = $pdo->prepare("
-            INSERT INTO stock_chantiers (chantier_id, stock_id, quantite) 
-            VALUES (:chantier, :article, :qte)
-        ");
+                    INSERT INTO stock_chantiers (chantier_id, stock_id, quantite) 
+                    VALUES (:chantier, :article, :qte)
+                ");
                 $stmtInsert->execute(['chantier' => $chantierId, 'article' => $articleId, 'qte' => $quantite]);
             }
 
@@ -73,9 +85,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['transfert_id'])) {
             // ➕ Notifier le demandeur
             $message = "✅ Le transfert de {$quantite} x {$articleNom} a été validé par le chantier.";
             $stmtNotif = $pdo->prepare("
-        INSERT INTO notifications (utilisateur_id, message) 
-        VALUES (?, ?)
-    ");
+                INSERT INTO notifications (utilisateur_id, message) 
+                VALUES (?, ?)
+            ");
             $stmtNotif->execute([$demandeurId, $message]);
 
             $pdo->commit();

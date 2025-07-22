@@ -58,17 +58,25 @@ try {
     if ($disponibleApresAttente < $qty) {
         throw new Exception("Stock insuffisant (après prise en compte des transferts en attente). Disponible : $disponibleApresAttente.");
     }
+  // Insérer le transfert en attente
+$stmt = $pdo->prepare("
+    INSERT INTO transferts_en_attente 
+    (article_id, source_type, source_id, destination_type, destination_id, quantite, demandeur_id, statut)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'en_attente')
+");
+$stmt->execute([$stockId, $sourceType, $sourceId, $destinationType, $destinationId, $qty, $userId]);
 
-    $stmt = $pdo->prepare("
-        INSERT INTO transferts_en_attente 
-        (article_id, source_type, source_id, destination_type, destination_id, quantite, demandeur_id, statut)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'en_attente')
-    ");
-    $stmt->execute([$stockId, $sourceType, $sourceId, $destinationType, $destinationId, $qty, $userId]);
+// Décrémenter immédiatement si source = depot
+if ($sourceType === 'depot') {
+    $update = $pdo->prepare("UPDATE stock_depots SET quantite = quantite - :qte WHERE stock_id = :article AND depot_id = :source");
+    $update->execute(['qte' => $qty, 'article' => $stockId, 'source' => $sourceId]);
+}
+
+
+
 
     $pdo->commit();
     echo json_encode(["success" => true, "message" => "Transfert enregistré et en attente de validation."]);
-
 } catch (Exception $e) {
     $pdo->rollBack();
     echo json_encode(["success" => false, "message" => $e->getMessage()]);

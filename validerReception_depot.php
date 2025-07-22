@@ -40,38 +40,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['transfert_id'])) {
         try {
             $pdo->beginTransaction();
 
-            // ➕ Ajouter au dépôt
-            $stmtCheck = $pdo->prepare("SELECT COUNT(*) FROM stock_depots WHERE depot_id = ? AND stock_id = ?");
-            $stmtCheck->execute([$depotId, $articleId]);
-            $exists = $stmtCheck->fetchColumn();
-
-            if ($exists) {
-                $stmtUpdate = $pdo->prepare("UPDATE stock_depots SET quantite = quantite + :qte WHERE depot_id = :depot AND stock_id = :article");
-                $stmtUpdate->execute(['qte' => $quantite, 'depot' => $depotId, 'article' => $articleId]);
-            } else {
-                $stmtInsert = $pdo->prepare("INSERT INTO stock_depots (depot_id, stock_id, quantite) VALUES (:depot, :article, :qte)");
-                $stmtInsert->execute(['depot' => $depotId, 'article' => $articleId, 'qte' => $quantite]);
-            }
-
             if ($sourceType === 'chantier') {
-                // 🔻 Retirer du chantier source
+                // Ajouter au dépôt (uniquement si source = chantier)
+                $stmtCheck = $pdo->prepare("SELECT COUNT(*) FROM stock_depots WHERE depot_id = ? AND stock_id = ?");
+                $stmtCheck->execute([$depotId, $articleId]);
+                $exists = $stmtCheck->fetchColumn();
+
+                if ($exists) {
+                    $stmtUpdate = $pdo->prepare("UPDATE stock_depots SET quantite = quantite + :qte WHERE depot_id = :depot AND stock_id = :article");
+                    $stmtUpdate->execute(['qte' => $quantite, 'depot' => $depotId, 'article' => $articleId]);
+                } else {
+                    $stmtInsert = $pdo->prepare("INSERT INTO stock_depots (depot_id, stock_id, quantite) VALUES (:depot, :article, :qte)");
+                    $stmtInsert->execute(['depot' => $depotId, 'article' => $articleId, 'qte' => $quantite]);
+                }
+
+                // Retirer du chantier source
                 $stmtUpdateChantier = $pdo->prepare("UPDATE stock_chantiers SET quantite = GREATEST(quantite - :qte, 0) WHERE chantier_id = :chantier AND stock_id = :article");
                 $stmtUpdateChantier->execute(['qte' => $quantite, 'chantier' => $sourceId, 'article' => $articleId]);
-
-                // ❌ SUPPRIMÉ : mise à jour de quantite_disponible (calculée dynamiquement à l'affichage)
             }
 
-            // ✅ Supprimer le transfert en attente
+            // Supprimer le transfert en attente
             $stmtDelete = $pdo->prepare("DELETE FROM transferts_en_attente WHERE id = ?");
             $stmtDelete->execute([$transfertId]);
 
-            // ➕ Notifier le demandeur
+            // Notifier
             $message = "✅ Le transfert de {$quantite} x {$transfert['article_nom']} a été validé par le dépôt.";
             $stmtNotif = $pdo->prepare("INSERT INTO notifications (utilisateur_id, message) VALUES (?, ?)");
             $stmtNotif->execute([$demandeurId, $message]);
 
             $pdo->commit();
-
             $_SESSION['success_message'] = "Transfert validé avec succès.";
         } catch (Exception $e) {
             $pdo->rollBack();

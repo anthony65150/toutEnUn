@@ -101,7 +101,7 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
                     <th>Dépôts</th>
                     <th>Chantiers</th>
                     <th>Mon chantier</th>
-                    <th>Action</th>
+                    <th>Actions</th>
                 </tr>
             </thead>
             <tbody class="stockTableBody">

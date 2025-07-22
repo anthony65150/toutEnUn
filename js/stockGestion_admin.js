@@ -51,13 +51,23 @@ document.addEventListener('DOMContentLoaded', () => {
     })
     .then(res => res.json())
     .then(data => {
-      if (data.success) {
-        transferModal.hide();
-        showToast('modifyToast');
-      } else {
-        showErrorToast(data.message);
-      }
-    })
+  if (data.success) {
+    transferModal.hide();
+    showToast('modifyToast');
+
+    // ⚡ Mettre à jour la quantité à la source sans recharger
+    const qtyCell = document.querySelector(`#qty-source-${sourceType}-${sourceId}-${stockId}`);
+    if (qtyCell) {
+      const currentQty = parseInt(qtyCell.textContent, 10);
+      const newQty = currentQty - qty;
+      qtyCell.textContent = newQty >= 0 ? newQty : 0;
+    }
+
+  } else {
+    showErrorToast(data.message);
+  }
+})
+
     .catch(() => showErrorToast('Erreur réseau ou serveur.'));
   });
 
