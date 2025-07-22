@@ -32,14 +32,7 @@ $stmt = $pdo->prepare("
         s.id, s.nom, 
         COALESCE(sd.quantite,0)+COALESCE(sc.total_chantier,0) AS total_recalculé,
         COALESCE(sd.quantite,0) AS quantite_stock_depot,
-        COALESCE(sd.quantite,0) - COALESCE((
-            SELECT SUM(te.quantite) 
-            FROM transferts_en_attente te 
-            WHERE te.article_id = s.id 
-            AND te.source_type = 'depot' 
-            AND te.source_id = ? 
-            AND te.statut = 'en_attente'
-        ),0) AS disponible_depot,
+        COALESCE(sd.quantite,0) AS disponible_depot,
         s.categorie, s.sous_categorie
     FROM stock s
     LEFT JOIN stock_depots sd ON s.id = sd.stock_id AND sd.depot_id = ?
@@ -50,7 +43,8 @@ $stmt = $pdo->prepare("
     ) sc ON s.id = sc.stock_id
     ORDER BY s.nom
 ");
-$stmt->execute([$depotId, $depotId]);
+$stmt->execute([$depotId]);
+
 $stocks = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 $categories = $pdo->query("SELECT DISTINCT categorie FROM stock WHERE categorie IS NOT NULL ORDER BY categorie")->fetchAll(PDO::FETCH_COLUMN);
