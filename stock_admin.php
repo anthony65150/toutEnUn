@@ -61,9 +61,25 @@ foreach ($subCatRaw as $row) {
 ?>
 
 <div class="container py-4">
+            <?php if (isset($_SESSION['success_message'])): ?>
+            <div class="alert alert-success alert-dismissible fade show" role="alert">
+                <?= htmlspecialchars($_SESSION['success_message']) ?>
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Fermer"></button>
+            </div>
+            <?php unset($_SESSION['success_message']); ?>
+        <?php endif; ?>
+
+        <?php if (isset($_SESSION['error_message'])): ?>
+            <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                <?= htmlspecialchars($_SESSION['error_message']) ?>
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Fermer"></button>
+            </div>
+            <?php unset($_SESSION['error_message']); ?>
+        <?php endif; ?>
+
     <h2 class="mb-4 text-center">Gestion de stock (Admin)</h2>
     <?php
-$stmt = $pdo->query("
+    $stmt = $pdo->query("
     SELECT t.id AS transfert_id, s.nom AS article_nom, t.quantite, 
            u.prenom, u.nom, t.source_type, t.source_id, t.destination_type, t.destination_id
     FROM transferts_en_attente t
@@ -71,45 +87,53 @@ $stmt = $pdo->query("
     JOIN utilisateurs u ON t.demandeur_id = u.id
     WHERE t.statut = 'en_attente'
 ");
-$transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
-?>
+    $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    ?>
 
-<?php if ($transfertsEnAttente): ?>
-<div class="mb-5">
-    <h4 class="mb-3">Transferts en attente de validation</h4>
-    <table class="table table-bordered text-center align-middle">
-        <thead class="table-info">
-            <tr>
-                <th>Article</th>
-                <th>Quantité</th>
-                <th>Envoyé par</th>
-                <th>Source</th>
-                <th>Destination</th>
-                <th>Action</th>
-            </tr>
-        </thead>
-        <tbody>
-        <?php foreach ($transfertsEnAttente as $t): ?>
-            <tr>
-                <td><?= htmlspecialchars($t['article_nom']) ?></td>
-                <td><?= $t['quantite'] ?></td>
-                <td><?= htmlspecialchars($t['prenom'] . ' ' . $t['nom']) ?></td>
-                <td><?= ucfirst($t['source_type']) ?> <?= $t['source_id'] ?></td>
-                <td><?= ucfirst($t['destination_type']) ?> <?= $t['destination_id'] ?></td>
-                <td>
-                    <form method="post" action="validerReception_admin.php" style="display:inline;">
-                        <input type="hidden" name="transfert_id" value="<?= $t['transfert_id'] ?>">
-                        <button type="submit" class="btn btn-success btn-sm">✅ Valider</button>
-                    </form>
-                </td>
-            </tr>
-        <?php endforeach; ?>
-        </tbody>
-    </table>
-</div>
-<?php endif; ?>
+    <?php if ($transfertsEnAttente): ?>
+        <div class="mb-5">
+            <h4 class="mb-3">Transferts en attente de validation</h4>
+            <table class="table table-bordered text-center align-middle">
+                <thead class="table-info">
+                    <tr>
+                        <th>Article</th>
+                        <th>Quantité</th>
+                        <th>Envoyé par</th>
+                        <th>Source</th>
+                        <th>Destination</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($transfertsEnAttente as $t): ?>
+                        <tr>
+                            <td><?= htmlspecialchars($t['article_nom']) ?></td>
+                            <td><?= $t['quantite'] ?></td>
+                            <td><?= htmlspecialchars($t['prenom'] . ' ' . $t['nom']) ?></td>
+                            <td><?= ucfirst($t['source_type']) ?> <?= $t['source_id'] ?></td>
+                            <td><?= ucfirst($t['destination_type']) ?> <?= $t['destination_id'] ?></td>
+                            <td>
+                                <form method="post" action="validerReception_admin.php" style="display:inline;">
+                                    <input type="hidden" name="transfert_id" value="<?= $t['transfert_id'] ?>">
+                                    <button type="submit" class="btn btn-success btn-sm me-1">✅ Valider</button>
+                                </form>
+
+                                <form method="post" action="annulerTransfert_admin.php" style="display:inline;">
+                                    <input type="hidden" name="transfert_id" value="<?= $t['transfert_id'] ?>">
+                                    <button type="submit" class="btn btn-danger btn-sm">❌ Annuler</button>
+                                </form>
+                            </td>
+
+
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+    <?php endif; ?>
 
     <div class="text-center mb-3">
+
         <a href="ajoutStock.php" class="btn btn-success">
             <i class="bi bi-plus-circle"></i> Ajouter un élément
         </a>

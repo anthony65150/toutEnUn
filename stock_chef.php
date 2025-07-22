@@ -67,6 +67,22 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
 ?>
 
 <div class="container py-4">
+    <?php if (isset($_SESSION['success_message'])): ?>
+    <div class="alert alert-success alert-dismissible fade show" role="alert">
+        <?= htmlspecialchars($_SESSION['success_message']) ?>
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Fermer"></button>
+    </div>
+    <?php unset($_SESSION['success_message']); ?>
+<?php endif; ?>
+
+<?php if (isset($_SESSION['error_message'])): ?>
+    <div class="alert alert-danger alert-dismissible fade show" role="alert">
+        <?= htmlspecialchars($_SESSION['error_message']) ?>
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Fermer"></button>
+    </div>
+    <?php unset($_SESSION['error_message']); ?>
+<?php endif; ?>
+
     <h2 class="text-center mb-4">Stock - Chef de chantier</h2>
 
     <div class="d-flex justify-content-center mb-3 flex-wrap gap-2" id="categoriesSlide">
@@ -81,35 +97,41 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
     <input type="text" id="searchInput" class="form-control mb-4" placeholder="Rechercher un article...">
 
     <?php if ($transfertsEnAttente): ?>
-  <div class="mb-4">
-    <h3>Transferts à valider</h3>
-    <table class="table table-bordered align-middle text-center">
-      <thead class="table-info">
-        <tr>
-          <th>Article</th>
-          <th>Quantité</th>
-          <th>Envoyé par</th>
-          <th>Action</th>
-        </tr>
-      </thead>
-      <tbody>
-        <?php foreach ($transfertsEnAttente as $t): ?>
-          <tr>
-            <td><?= htmlspecialchars($t['article_nom']) ?></td>
-            <td><?= $t['quantite'] ?></td>
-            <td><?= htmlspecialchars($t['demandeur_prenom'] . ' ' . $t['demandeur_nom']) ?></td>
-            <td>
-              <form method="post" action="validerReception_chef.php" style="display:inline;">
-                <input type="hidden" name="transfert_id" value="<?= $t['transfert_id'] ?>">
-                <button type="submit" class="btn btn-success btn-sm">✅ Valider réception</button>
-              </form>
-            </td>
-          </tr>
-        <?php endforeach; ?>
-      </tbody>
-    </table>
-  </div>
-<?php endif; ?>
+        <div class="mb-4">
+            <h3>Transferts à valider</h3>
+            <table class="table table-bordered align-middle text-center">
+                <thead class="table-info">
+                    <tr>
+                        <th>Article</th>
+                        <th>Quantité</th>
+                        <th>Envoyé par</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($transfertsEnAttente as $t): ?>
+                        <tr>
+                            <td><?= htmlspecialchars($t['article_nom']) ?></td>
+                            <td><?= $t['quantite'] ?></td>
+                            <td><?= htmlspecialchars($t['demandeur_prenom'] . ' ' . $t['demandeur_nom']) ?></td>
+                            <td>
+                                <form method="post" action="validerReception_chef.php" style="display:inline;">
+                                    <input type="hidden" name="transfert_id" value="<?= $t['transfert_id'] ?>">
+                                    <button type="submit" class="btn btn-success btn-sm me-1">✅ Valider</button>
+                                </form>
+
+                                <form method="post" action="annulerTransfert_chef.php" style="display:inline;">
+                                    <input type="hidden" name="transfert_id" value="<?= $t['transfert_id'] ?>">
+                                    <button type="submit" class="btn btn-danger btn-sm">❌ Refuser</button>
+                                </form>
+                            </td>
+
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+    <?php endif; ?>
 
 
     <div class="table-responsive mb-4">
@@ -164,7 +186,7 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
             </tbody>
         </table>
     </div>
-   </div>
+</div>
 
 <!-- Modal Transfert Chef -->
 <div class="modal fade" id="transferModal" tabindex="-1" aria-labelledby="transferModalLabel" aria-hidden="true">
@@ -219,8 +241,8 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 
 <script>
-window.isChef = true;
-window.chefChantierId = <?= $utilisateurChantierId ?>;
+    window.isChef = true;
+    window.chefChantierId = <?= $utilisateurChantierId ?>;
 </script>
 
 
