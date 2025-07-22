@@ -23,14 +23,29 @@ foreach ($stmt as $row) {
     ];
 }
 
-// Quantités par chantier (ajout de c.id AS chantier_id)
-$stmt = $pdo->query("SELECT sc.stock_id, c.id AS chantier_id, c.nom AS chantier_nom, sc.quantite FROM stock_chantiers sc JOIN chantiers c ON sc.chantier_id = c.id");
+
+$stmt = $pdo->query("
+    SELECT 
+        sc.stock_id, 
+        c.id AS chantier_id, 
+        c.nom AS chantier_nom, 
+        (sc.quantite - COALESCE((
+            SELECT SUM(te.quantite)
+            FROM transferts_en_attente te
+            WHERE te.article_id = sc.stock_id
+            AND te.source_type = 'chantier'
+            AND te.source_id = sc.chantier_id
+            AND te.statut = 'en_attente'
+        ), 0)) AS quantite
+    FROM stock_chantiers sc
+    JOIN chantiers c ON sc.chantier_id = c.id
+");
 $chantierAssoc = [];
 foreach ($stmt as $row) {
     $chantierAssoc[$row['stock_id']][] = [
         'id' => $row['chantier_id'],
         'nom' => $row['chantier_nom'],
-        'quantite' => (int)$row['quantite']
+        'quantite' => max(0, (int)$row['quantite'])  // pour éviter d’afficher négatif
     ];
 }
 
@@ -47,6 +62,53 @@ foreach ($subCatRaw as $row) {
 
 <div class="container py-4">
     <h2 class="mb-4 text-center">Gestion de stock (Admin)</h2>
+    <?php
+$stmt = $pdo->query("
+    SELECT t.id AS transfert_id, s.nom AS article_nom, t.quantite, 
+           u.prenom, u.nom, t.source_type, t.source_id, t.destination_type, t.destination_id
+    FROM transferts_en_attente t
+    JOIN stock s ON t.article_id = s.id
+    JOIN utilisateurs u ON t.demandeur_id = u.id
+    WHERE t.statut = 'en_attente'
+");
+$transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
+?>
+
+<?php if ($transfertsEnAttente): ?>
+<div class="mb-5">
+    <h4 class="mb-3">Transferts en attente de validation</h4>
+    <table class="table table-bordered text-center align-middle">
+        <thead class="table-info">
+            <tr>
+                <th>Article</th>
+                <th>Quantité</th>
+                <th>Envoyé par</th>
+                <th>Source</th>
+                <th>Destination</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody>
+        <?php foreach ($transfertsEnAttente as $t): ?>
+            <tr>
+                <td><?= htmlspecialchars($t['article_nom']) ?></td>
+                <td><?= $t['quantite'] ?></td>
+                <td><?= htmlspecialchars($t['prenom'] . ' ' . $t['nom']) ?></td>
+                <td><?= ucfirst($t['source_type']) ?> <?= $t['source_id'] ?></td>
+                <td><?= ucfirst($t['destination_type']) ?> <?= $t['destination_id'] ?></td>
+                <td>
+                    <form method="post" action="validerReception_admin.php" style="display:inline;">
+                        <input type="hidden" name="transfert_id" value="<?= $t['transfert_id'] ?>">
+                        <button type="submit" class="btn btn-success btn-sm">✅ Valider</button>
+                    </form>
+                </td>
+            </tr>
+        <?php endforeach; ?>
+        </tbody>
+    </table>
+</div>
+<?php endif; ?>
+
     <div class="text-center mb-3">
         <a href="ajoutStock.php" class="btn btn-success">
             <i class="bi bi-plus-circle"></i> Ajouter un élément

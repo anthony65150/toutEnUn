@@ -204,3 +204,30 @@ document.addEventListener('DOMContentLoaded', () => {
 
   filterByCategory('');
 });
+
+
+  // ----- VALIDATION DES TRANSFERTS -----
+  document.querySelectorAll('.btn-valider-transfert').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const transfertId = btn.dataset.transfertId;
+
+      fetch('validerReception_admin.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `transfert_id=${encodeURIComponent(transfertId)}`
+      })
+      .then(res => {
+        if (!res.ok) throw new Error("Erreur serveur");
+        return res.text(); // car tu rediriges avec header() dans PHP
+      })
+      .then(() => {
+        showToast('modifyToast'); // tu peux ajouter un toast "validation réussie"
+        setTimeout(() => location.reload(), 1000); // recharger pour mettre à jour la liste
+      })
+      .catch(err => {
+        console.error(err);
+        showErrorToast('Erreur lors de la validation du transfert.');
+      });
+    });
+  });
+

@@ -15,11 +15,31 @@ $allDepots = $pdo->query("SELECT id, nom FROM depots")->fetchAll(PDO::FETCH_KEY_
 
 $utilisateurChantierId = $_SESSION['utilisateurs']['chantier_id'] ?? null;
 
-$stmt = $pdo->query("SELECT sc.stock_id, c.id AS chantier_id, c.nom AS chantier_nom, sc.quantite FROM stock_chantiers sc JOIN chantiers c ON sc.chantier_id = c.id");
+$stmt = $pdo->query("
+    SELECT 
+        sc.stock_id, 
+        c.id AS chantier_id, 
+        c.nom AS chantier_nom, 
+        (sc.quantite - COALESCE((
+            SELECT SUM(te.quantite)
+            FROM transferts_en_attente te
+            WHERE te.article_id = sc.stock_id
+            AND te.source_type = 'chantier'
+            AND te.source_id = sc.chantier_id
+            AND te.statut = 'en_attente'
+        ), 0)) AS quantite
+    FROM stock_chantiers sc
+    JOIN chantiers c ON sc.chantier_id = c.id
+");
 $chantierAssoc = [];
 foreach ($stmt as $row) {
-    $chantierAssoc[$row['stock_id']][] = ['id' => $row['chantier_id'], 'nom' => $row['chantier_nom'], 'quantite' => (int)$row['quantite']];
+    $chantierAssoc[$row['stock_id']][] = [
+        'id' => $row['chantier_id'],
+        'nom' => $row['chantier_nom'],
+        'quantite' => max(0, (int)$row['quantite'])  // pour éviter d’afficher négatif
+    ];
 }
+
 
 $stmt = $pdo->query("SELECT sd.stock_id, d.id AS depot_id, d.nom AS depot_nom, sd.quantite FROM stock_depots sd JOIN depots d ON sd.depot_id = d.id");
 $depotAssoc = [];
