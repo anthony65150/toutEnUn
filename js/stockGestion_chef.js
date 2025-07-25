@@ -20,6 +20,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const transferModal = new bootstrap.Modal(document.getElementById('transferModal'));
 
+    // ----- Ouvrir le modal -----
     document.querySelectorAll('.transfer-btn').forEach(button => {
         button.addEventListener('click', () => {
             const stockId = button.dataset.stockId;
@@ -32,53 +33,53 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     });
 
-   document.getElementById('transferForm').addEventListener('submit', (e) => {
-    e.preventDefault();
+    // ----- Soumission du transfert -----
+    document.getElementById('transferForm').addEventListener('submit', (e) => {
+        e.preventDefault();
 
-    const stockId = document.getElementById('articleId').value;
-    const sourceDepotId = document.getElementById('sourceDepotId')?.value; // null pour chef
-    const destinationRaw = document.getElementById('destinationChantier').value;
-    const quantity = document.getElementById('quantity').value;
+        const stockId = document.getElementById('articleId').value;
+        const destinationRaw = document.getElementById('destinationChantier').value;
+        const quantity = document.getElementById('quantity').value;
 
-    let sourceType = 'depot';
-    let sourceId = sourceDepotId;
+        let sourceType = 'depot';
+        let sourceId = null;
 
-    if (window.isChef) {  // tu peux définir window.isChef = true dans le fichier chef
-        sourceType = 'chantier';
-        sourceId = window.chefChantierId;  // tu mets ça au chargement PHP
-    }
-
-    const [destinationType, destinationId] = destinationRaw.split('_');
-
-    const data = {
-        stockId: parseInt(stockId),
-        sourceType: sourceType,
-        sourceId: parseInt(sourceId),
-        destinationType: destinationType,
-        destinationId: parseInt(destinationId),
-        qty: parseInt(quantity)
-    };
-
-    fetch('transferStock_depot.php', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data)
-    })
-    .then(res => res.json())
-    .then(data => {
-        if (data.success) {
-            showToast('✅ ' + data.message, true);
-            setTimeout(() => location.reload(), 1500);
-        } else {
-            showToast('❌ ' + (data.message || 'Échec du transfert'), false);
+        // ✅ Pour chef de chantier : le sourceId est toujours le chantier affiché
+        if (window.isChef) {
+            sourceType = 'chantier';
+            sourceId = parseInt(window.chefChantierActuel);
         }
-    })
-    .catch(err => {
-        console.error(err);
-        showToast('❌ Erreur lors de la requête', false);
-    });
-});
 
+        const [destinationType, destinationId] = destinationRaw.split('_');
+
+        const data = {
+            stockId: parseInt(stockId),
+            sourceType,
+            sourceId: parseInt(sourceId),
+            destinationType,
+            destinationId: parseInt(destinationId),
+            qty: parseInt(quantity)
+        };
+
+        fetch('transferStock_depot.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                showToast('✅ ' + data.message, true);
+                setTimeout(() => location.reload(), 1500);
+            } else {
+                showToast('❌ ' + (data.message || 'Échec du transfert'), false);
+            }
+        })
+        .catch(err => {
+            console.error(err);
+            showToast('❌ Erreur lors de la requête', false);
+        });
+    });
 
     // ----- Filtres catégories / sous-catégories -----
     window.filterByCategory = (cat) => {

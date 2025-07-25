@@ -64,9 +64,8 @@ if (!isset($_SESSION['utilisateurs']) || $_SESSION['utilisateurs']['fonction'] !
                     </div>
 
                     <div class="mb-3">
-                        <label for="chefChantier" class="form-label">Chef de chantier</label>
-                        <select class="form-select" id="chefChantier" name="responsable_id" required>
-                            <option value="">-- Sélectionner --</option>
+                        <label for="chefChantier" class="form-label">Chef(s) de chantier</label>
+                        <select class="form-select" id="chefChantier" name="responsables[]" multiple required>
                             <?php
                             $chefs = $pdo->query("SELECT id, prenom, nom FROM utilisateurs WHERE fonction = 'chef'")->fetchAll(PDO::FETCH_ASSOC);
                             foreach ($chefs as $chef) {
@@ -74,7 +73,9 @@ if (!isset($_SESSION['utilisateurs']) || $_SESSION['utilisateurs']['fonction'] !
                             }
                             ?>
                         </select>
+                        <small class="form-text text-muted">Tu peux sélectionner plusieurs chefs en maintenant Ctrl (ou Cmd sur Mac).</small>
                     </div>
+
 
 
                 </div>

@@ -7,7 +7,11 @@ if (!isset($_SESSION['utilisateurs']) || $_SESSION['utilisateurs']['fonction'] !
     exit;
 }
 
-$chantierId = $_SESSION['utilisateurs']['chantier_id'] ?? null;
+$chefId = $_SESSION['utilisateurs']['id'];
+$stmt = $pdo->prepare("SELECT chantier_id FROM utilisateur_chantiers WHERE utilisateur_id = ?");
+$stmt->execute([$chefId]);
+$chantierIds = $stmt->fetchAll(PDO::FETCH_COLUMN);
+
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['transfert_id']) && $chantierId) {
     $transfertId = (int)$_POST['transfert_id'];

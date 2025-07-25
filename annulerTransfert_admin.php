@@ -10,7 +10,13 @@ if (!isset($_SESSION['utilisateurs']) || $_SESSION['utilisateurs']['fonction'] !
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['transfert_id'])) {
     $transfertId = (int)$_POST['transfert_id'];
 
-    $stmt = $pdo->prepare("SELECT * FROM transferts_en_attente WHERE id = ? AND statut = 'en_attente'");
+    $stmt = $pdo->prepare("
+    SELECT t.*, s.nom AS article_nom
+    FROM transferts_en_attente t
+    JOIN stock s ON t.article_id = s.id
+    WHERE t.id = ? AND t.statut = 'en_attente'
+");
+
     $stmt->execute([$transfertId]);
     $transfert = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -34,7 +40,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['transfert_id'])) {
         $stmt->execute([$transfertId]);
 
         // Notifier le demandeur
-        $message = "❌ Le transfert de {$transfert['quantite']} x article #{$transfert['article_id']} a été annulé par l’administrateur.";
+       $message = "❌ Le transfert de {$transfert['quantite']} x {$transfert['article_nom']} a été annulé par l’administrateur.";
+
         $stmt = $pdo->prepare("INSERT INTO notifications (utilisateur_id, message) VALUES (?, ?)");
         $stmt->execute([$transfert['demandeur_id'], $message]);
 

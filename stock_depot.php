@@ -21,11 +21,20 @@ if (!$depotId) {
   die("Dépôt non trouvé pour cet utilisateur.");
 }
 
-$stmt = $pdo->query("SELECT sc.stock_id, c.nom AS chantier_nom, sc.quantite FROM stock_chantiers sc JOIN chantiers c ON sc.chantier_id = c.id");
+$stmt = $pdo->query("
+  SELECT sc.stock_id, c.id AS chantier_id, c.nom AS chantier_nom, sc.quantite
+  FROM stock_chantiers sc
+  JOIN chantiers c ON sc.chantier_id = c.id
+");
 $chantierAssoc = [];
 foreach ($stmt as $row) {
-  $chantierAssoc[$row['stock_id']][] = ['nom' => $row['chantier_nom'], 'quantite' => $row['quantite']];
+  $chantierAssoc[$row['stock_id']][] = [
+    'id' => $row['chantier_id'],
+    'nom' => $row['chantier_nom'],
+    'quantite' => (int)$row['quantite']
+  ];
 }
+
 
 $stmt = $pdo->prepare("
     SELECT 
@@ -76,19 +85,19 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
 <div class="container py-5">
   <?php if (isset($_SESSION['success_message'])): ?>
     <div class="alert alert-success alert-dismissible fade show" role="alert">
-        <?= htmlspecialchars($_SESSION['success_message']) ?>
-        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Fermer"></button>
+      <?= htmlspecialchars($_SESSION['success_message']) ?>
+      <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Fermer"></button>
     </div>
     <?php unset($_SESSION['success_message']); ?>
-<?php endif; ?>
+  <?php endif; ?>
 
-<?php if (isset($_SESSION['error_message'])): ?>
+  <?php if (isset($_SESSION['error_message'])): ?>
     <div class="alert alert-danger alert-dismissible fade show" role="alert">
-        <?= htmlspecialchars($_SESSION['error_message']) ?>
-        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Fermer"></button>
+      <?= htmlspecialchars($_SESSION['error_message']) ?>
+      <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Fermer"></button>
     </div>
     <?php unset($_SESSION['error_message']); ?>
-<?php endif; ?>
+  <?php endif; ?>
 
   <h2 class="text-center mb-4">Stock dépôt</h2>
 
@@ -171,14 +180,25 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
             <td class="col-photo"><img src="uploads/photos/<?= $stockId ?>.jpg" alt="<?= $nom ?>" style="height:40px;"></td>
             <td><span class="badge quantite-disponible <?= $dispoDepot < 10 ? 'bg-danger' : 'bg-success' ?>"><?= $dispoDepot ?></span></td>
             <td>
-              <?php if (count($chantierList)): ?>
-                <?php foreach ($chantierList as $chantier): ?>
+              <?php
+              // 🔽 Filtrer les chantiers avec quantité > 0
+              $chantiersAvecStock = array_filter($chantierList, fn($c) => $c['quantite'] > 0);
+
+              if (count($chantiersAvecStock)):
+                // 🔽 Trier par quantité décroissante
+                usort($chantiersAvecStock, fn($a, $b) => $b['quantite'] <=> $a['quantite']);
+                foreach ($chantiersAvecStock as $chantier):
+              ?>
                   <div><?= htmlspecialchars($chantier['nom']) ?> (<?= (int)$chantier['quantite'] ?>)</div>
-                <?php endforeach; ?>
-              <?php else: ?>
+                <?php
+                endforeach;
+              else:
+                ?>
                 <span class="text-muted">Aucun</span>
               <?php endif; ?>
             </td>
+
+
             <td>
               <button class="btn btn-sm btn-primary btn-transfer transfer-btn" data-stock-id="<?= $stockId ?>" data-stock-nom="<?= $nom ?>">
                 <i class="bi bi-arrow-left-right"></i> Transférer

@@ -1,8 +1,8 @@
 <?php
-function ajouUtilisateur(PDO $pdo, string $nom, string $prenom, string $email, string $motDePasse, string $fonction, int $chantier_id = null): bool
+function ajouUtilisateur(PDO $pdo, string $nom, string $prenom, string $email, string $motDePasse, string $fonction, ?array $chantiers = []): bool
 {
-    $query = $pdo->prepare("INSERT INTO utilisateurs (nom, prenom, email, motDePasse, fonction, chantier_id) 
-                            VALUES (:nom, :prenom, :email, :motDePasse, :fonction, :chantier_id)");
+    $query = $pdo->prepare("INSERT INTO utilisateurs (nom, prenom, email, motDePasse, fonction) 
+                            VALUES (:nom, :prenom, :email, :motDePasse, :fonction)");
 
     $motDePasse = password_hash($motDePasse, PASSWORD_DEFAULT);
 
@@ -11,27 +11,32 @@ function ajouUtilisateur(PDO $pdo, string $nom, string $prenom, string $email, s
     $query->bindValue(':email', $email);
     $query->bindValue(':motDePasse', $motDePasse);
     $query->bindValue(':fonction', $fonction);
-    $query->bindValue(':chantier_id', $chantier_id, PDO::PARAM_INT);
 
     $success = $query->execute();
 
-    if ($success && $fonction === 'chef' && $chantier_id !== null) {
+    if ($success) {
         $newUserId = $pdo->lastInsertId();
-        $update = $pdo->prepare("UPDATE chantiers SET responsable_id = :id WHERE id = :chantier_id");
-        $update->execute([
-            ':id' => $newUserId,
-            ':chantier_id' => $chantier_id
-        ]);
-    }
 
-    if ($success && $fonction === 'depot') {
-        $utilisateurId = $pdo->lastInsertId();
-        $stmt = $pdo->prepare("UPDATE depots SET responsable_id = ?");
-        $stmt->execute([$utilisateurId]);
+        if ($fonction === 'chef' && !empty($chantiers)) {
+            $stmt = $pdo->prepare("INSERT INTO utilisateur_chantiers (utilisateur_id, chantier_id) VALUES (?, ?)");
+            foreach ($chantiers as $chantier_id) {
+                $stmt->execute([$newUserId, $chantier_id]);
+
+                // Optionnel : tu peux aussi mettre à jour le responsable_id dans chantiers
+                $pdo->prepare("UPDATE chantiers SET responsable_id = :user_id WHERE id = :chantier_id")
+                    ->execute([':user_id' => $newUserId, ':chantier_id' => $chantier_id]);
+            }
+        }
+
+        if ($fonction === 'depot') {
+            $stmt = $pdo->prepare("UPDATE depots SET responsable_id = ? WHERE responsable_id IS NULL LIMIT 1");
+            $stmt->execute([$newUserId]);
+        }
     }
 
     return $success;
 }
+
 
 function verifieUtilisateur(array $utilisateurs): array|bool
 {
@@ -60,8 +65,8 @@ function verifieUtilisateur(array $utilisateurs): array|bool
     }
 
     if ($utilisateurs["fonction"] === "chef") {
-        if (!isset($utilisateurs["chantier_id"]) || $utilisateurs["chantier_id"] === "") {
-            $errors["chantier_id"] = 'Le champ "Chantier" est obligatoire pour un chef de chantier';
+        if (empty($utilisateurs["chantiers"]) || !is_array($utilisateurs["chantiers"])) {
+            $errors["chantiers"] = 'Il faut sélectionner au moins un chantier';
         }
     }
 
@@ -70,9 +75,8 @@ function verifieUtilisateur(array $utilisateurs): array|bool
 
 function verifyUserLoginPassword(PDO $pdo, string $email, string $motDePasse): bool|array
 {
-    $query = $pdo->prepare("SELECT id, nom, prenom, email, photo, motDePasse, fonction, chantier_id 
-                            FROM utilisateurs 
-                            WHERE email = :email");
+    $query = $pdo->prepare("SELECT id, nom, prenom, email, photo, motDePasse, fonction FROM utilisateurs WHERE email = :email");
+
     $query->bindValue(":email", $email);
     $query->execute();
 
@@ -87,4 +91,3 @@ function verifyUserLoginPassword(PDO $pdo, string $email, string $motDePasse): b
         return false;
     }
 }
-?>

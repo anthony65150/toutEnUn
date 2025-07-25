@@ -61,21 +61,21 @@ foreach ($subCatRaw as $row) {
 ?>
 
 <div class="container py-4">
-            <?php if (isset($_SESSION['success_message'])): ?>
-            <div class="alert alert-success alert-dismissible fade show" role="alert">
-                <?= htmlspecialchars($_SESSION['success_message']) ?>
-                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Fermer"></button>
-            </div>
-            <?php unset($_SESSION['success_message']); ?>
-        <?php endif; ?>
+    <?php if (isset($_SESSION['success_message'])): ?>
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+            <?= htmlspecialchars($_SESSION['success_message']) ?>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Fermer"></button>
+        </div>
+        <?php unset($_SESSION['success_message']); ?>
+    <?php endif; ?>
 
-        <?php if (isset($_SESSION['error_message'])): ?>
-            <div class="alert alert-danger alert-dismissible fade show" role="alert">
-                <?= htmlspecialchars($_SESSION['error_message']) ?>
-                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Fermer"></button>
-            </div>
-            <?php unset($_SESSION['error_message']); ?>
-        <?php endif; ?>
+    <?php if (isset($_SESSION['error_message'])): ?>
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            <?= htmlspecialchars($_SESSION['error_message']) ?>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Fermer"></button>
+        </div>
+        <?php unset($_SESSION['error_message']); ?>
+    <?php endif; ?>
 
     <h2 class="mb-4 text-center">Gestion de stock (Admin)</h2>
     <?php
@@ -189,16 +189,28 @@ foreach ($subCatRaw as $row) {
                             <?php endif; ?>
                         </td>
                         <td>
-                            <?php if ($chantiersList): foreach ($chantiersList as $c): ?>
+                            <?php
+                            // 🔽 Filtrer les chantiers avec quantité > 0
+                            $chantiersAvecStock = array_filter($chantiersList, fn($c) => $c['quantite'] > 0);
+
+                            if (count($chantiersAvecStock)):
+                                // 🔽 Trier par quantité décroissante
+                                usort($chantiersAvecStock, fn($a, $b) => $b['quantite'] <=> $a['quantite']);
+                                foreach ($chantiersAvecStock as $c):
+                            ?>
                                     <div>
                                         <?= htmlspecialchars($c['nom']) ?>
                                         (<span id="qty-source-chantier-<?= $c['id'] ?>-<?= $stockId ?>"><?= $c['quantite'] ?></span>)
                                     </div>
-                                <?php endforeach;
-                            else: ?>
+                                <?php
+                                endforeach;
+                            else:
+                                ?>
                                 <span class="text-muted">Aucun</span>
                             <?php endif; ?>
                         </td>
+
+
 
 
                         <td>

@@ -1,26 +1,67 @@
 <?php
 require_once "./config/init.php";
-require_once __DIR__ . '/templates/header.php';
-require_once __DIR__ . '/templates/navigation/navigation.php';
+
 
 if (!isset($_SESSION['utilisateurs'])) {
-    header("Location: connexion.php");
+    header("Location: index.php");
     exit;
 }
 
-// Dépôts et chantiers
+// Chargement des chantiers liés à l'utilisateur
+$utilisateurId = $_SESSION['utilisateurs']['id'];
+
+$stmt = $pdo->prepare("SELECT chantier_id FROM utilisateur_chantiers WHERE utilisateur_id = ?");
+$stmt->execute([$utilisateurId]);
+$chefChantiers = $stmt->fetchAll(PDO::FETCH_COLUMN);
+
+// Mise à jour de la session pour d'autres pages (optionnel mais conseillé)
+$_SESSION['utilisateurs']['chantiers'] = $chefChantiers;
+
+$utilisateurChantierId = isset($_GET['chantier_id']) ? (int)$_GET['chantier_id'] : null;
+if (!$utilisateurChantierId && !empty($_SESSION['utilisateurs']['chantiers'])) {
+    // Choix par défaut si non défini dans l’URL
+    $utilisateurChantierId = $_SESSION['utilisateurs']['chantiers'][0] ?? null;
+    if ($utilisateurChantierId) {
+        header("Location: stock_chef.php?chantier_id=$utilisateurChantierId");
+        exit;
+    }
+}
+
+
+// Si un seul chantier, rediriger automatiquement
+if (!$utilisateurChantierId && count($chefChantiers) === 1) {
+    $chantierId = $chefChantiers[0];
+    header("Location: stock_chef.php?chantier_id=$chantierId");
+    exit;
+}
+
+
+
+// ⛔ Si aucun chantier ou accès non autorisé, on bloque
+if (!$utilisateurChantierId || !in_array($utilisateurChantierId, $chefChantiers)) {
+    $_SESSION['error_message'] = "Accès à ce chantier non autorisé.";
+    header("Location: index.php");
+    exit;
+}
+
+
+// Chantiers disponibles
 $allChantiers = $pdo->query("SELECT id, nom FROM chantiers")->fetchAll(PDO::FETCH_KEY_PAIR);
 $allDepots = $pdo->query("SELECT id, nom FROM depots")->fetchAll(PDO::FETCH_KEY_PAIR);
+$pageTitle = "Stock - " . ($allChantiers[$utilisateurChantierId] ?? "Chantier inconnu");
 
 
-$utilisateurChantierId = $_SESSION['utilisateurs']['chantier_id'] ?? null;
+require_once __DIR__ . '/templates/header.php';
+require_once __DIR__ . '/templates/navigation/navigation.php';
 
+
+$inClause = implode(',', array_map('intval', $chefChantiers));
 $stmt = $pdo->query("
     SELECT 
         sc.stock_id, 
         c.id AS chantier_id, 
         c.nom AS chantier_nom, 
-        (sc.quantite - COALESCE((
+        (sc.quantite - COALESCE(( 
             SELECT SUM(te.quantite)
             FROM transferts_en_attente te
             WHERE te.article_id = sc.stock_id
@@ -31,6 +72,8 @@ $stmt = $pdo->query("
     FROM stock_chantiers sc
     JOIN chantiers c ON sc.chantier_id = c.id
 ");
+
+
 $chantierAssoc = [];
 foreach ($stmt as $row) {
     $chantierAssoc[$row['stock_id']][] = [
@@ -68,22 +111,33 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 <div class="container py-4">
     <?php if (isset($_SESSION['success_message'])): ?>
-    <div class="alert alert-success alert-dismissible fade show" role="alert">
-        <?= htmlspecialchars($_SESSION['success_message']) ?>
-        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Fermer"></button>
-    </div>
-    <?php unset($_SESSION['success_message']); ?>
-<?php endif; ?>
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+            <?= htmlspecialchars($_SESSION['success_message']) ?>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Fermer"></button>
+        </div>
+        <?php unset($_SESSION['success_message']); ?>
+    <?php endif; ?>
 
-<?php if (isset($_SESSION['error_message'])): ?>
-    <div class="alert alert-danger alert-dismissible fade show" role="alert">
-        <?= htmlspecialchars($_SESSION['error_message']) ?>
-        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Fermer"></button>
-    </div>
-    <?php unset($_SESSION['error_message']); ?>
-<?php endif; ?>
+    <?php if (isset($_SESSION['error_message'])): ?>
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            <?= htmlspecialchars($_SESSION['error_message']) ?>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Fermer"></button>
+        </div>
+        <?php unset($_SESSION['error_message']); ?>
+    <?php endif; ?>
 
-    <h2 class="text-center mb-4">Stock - Chef de chantier</h2>
+    <h2 class="text-center mb-4">Stock - <?= htmlspecialchars($allChantiers[$utilisateurChantierId] ?? 'Chantier inconnu') ?></h2>
+
+    <?php if (count($chefChantiers) > 1): ?>
+        <div class="d-flex justify-content-center gap-2 mb-4 flex-wrap">
+            <?php foreach ($chefChantiers as $chantierId): ?>
+                <a href="?chantier_id=<?= $chantierId ?>" class="btn btn-outline-secondary <?= $chantierId == $utilisateurChantierId ? 'active' : '' ?>">
+                    <?= htmlspecialchars($allChantiers[$chantierId] ?? 'Chantier') ?>
+                </a>
+            <?php endforeach; ?>
+        </div>
+    <?php endif; ?>
+
 
     <div class="d-flex justify-content-center mb-3 flex-wrap gap-2" id="categoriesSlide">
         <button class="btn btn-outline-primary" onclick="filterByCategory('')">Tous</button>
@@ -157,14 +211,37 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
                     $depotsHtml = $depotsList ? implode('<br>', array_map(fn($d) => htmlspecialchars($d['nom']) . ' (' . $d['quantite'] . ')', $depotsList)) : '<span class="text-muted">Aucun</span>';
                     $chantiersHtml = '<span class="text-muted">Aucun</span>';
                     if ($chantiersList) {
-                        $chantiersHtml = '';
+                        $quantiteMonChantier = 0;
+
+                        // Séparer le chantier courant et les autres
+                        $autresChantiers = [];
                         foreach ($chantiersList as $c) {
                             if ($c['id'] == $utilisateurChantierId) {
                                 $quantiteMonChantier = $c['quantite'];
-                                continue;
+                            } elseif ($c['quantite'] > 0) {  // ⛔ On ne garde que les chantiers avec stock > 0
+                                $autresChantiers[] = $c;
                             }
-                            $chantiersHtml .= htmlspecialchars($c['nom']) . ' (' . $c['quantite'] . ')<br>';
                         }
+
+                        // 🔽 Trier les autres chantiers par quantité décroissante
+                        usort($autresChantiers, fn($a, $b) => $b['quantite'] <=> $a['quantite']);
+
+                        // Générer le HTML
+                        $chantiersHtml = '';
+                        foreach ($autresChantiers as $chantier) {
+                            $chantiersHtml .= htmlspecialchars($chantier['nom']) . ' (' . $chantier['quantite'] . ')<br>';
+                        }
+
+                        if (empty($chantiersHtml)) {
+                            $chantiersHtml = '<span class="text-muted">Aucun</span>';
+                        }
+
+
+                        if (empty($chantiersHtml)) {
+                            $chantiersHtml = '<span class="text-muted">Aucun</span>';
+                        }
+
+
                         if ($chantiersHtml === '') $chantiersHtml = '<span class="text-muted">Aucun</span>';
                     }
                     $badge = $quantiteMonChantier > 0 ? '<span class="badge bg-success">' . $quantiteMonChantier . '</span>' : '<span class="badge bg-danger">0</span>';
@@ -199,6 +276,7 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
             <div class="modal-body">
                 <form id="transferForm">
                     <input type="hidden" id="articleId" name="article_id">
+
                     <div class="mb-3">
                         <label>Destination</label>
                         <select class="form-select" id="destinationChantier">
@@ -242,8 +320,9 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 <script>
     window.isChef = true;
-    window.chefChantierId = <?= $utilisateurChantierId ?>;
+    window.chefChantierActuel = <?= (int) $_GET['chantier_id'] ?>;
 </script>
+
 
 
 

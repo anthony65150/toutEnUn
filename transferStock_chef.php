@@ -33,7 +33,7 @@ if ($sourceType === $destinationType && $sourceId === $destinationId) {
 
 // 🔒 Vérification spéciale pour les chefs de chantier
 if ($sourceType === 'chantier') {
-    $stmtChef = $pdo->prepare("SELECT id FROM chantiers WHERE responsable_id = ?");
+    $stmtChef = $pdo->prepare("SELECT chantier_id FROM utilisateur_chantiers WHERE utilisateur_id = ?");
     $stmtChef->execute([$userId]);
     $chantierIdsChef = $stmtChef->fetchAll(PDO::FETCH_COLUMN);
 
@@ -80,7 +80,6 @@ try {
 
     $pdo->commit();
     echo json_encode(["success" => true, "message" => "Transfert enregistré et en attente de validation."]);
-
 } catch (Exception $e) {
     $pdo->rollBack();
     echo json_encode(["success" => false, "message" => $e->getMessage()]);
