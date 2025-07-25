@@ -1,3 +1,4 @@
+<?php
 require_once "./config/init.php";
 
 if (!isset($_SESSION['utilisateurs']) || $_SESSION['utilisateurs']['fonction'] !== 'administrateur') {
@@ -25,7 +26,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // 🆕 Réinsérer le lien
             $pdo->prepare("INSERT INTO utilisateur_chantiers (utilisateur_id, chantier_id) VALUES (?, ?)")->execute([$responsableId, $chantierId]);
 
-            $_SESSION['flash'] = "Chantier modifié avec succès.";
+            $_SESSION['flash'] = "Chantier ajouté avec succès.";
+$redirectId = $newChantierId;
+$successType = "create";
+
         } else {
             // Ajouter un nouveau chantier
             $stmt = $pdo->prepare("INSERT INTO chantiers (nom, description, date_debut, date_fin, responsable_id) VALUES (?, ?, ?, ?, ?)");
@@ -42,6 +46,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $_SESSION['flash'] = "Erreur : nom et chef requis.";
     }
 
-    header('Location: chantiers_admin.php');
-    exit;
+$redirectId = $chantierId ?: $newChantierId ?? null;
+$successType = $chantierId ? "update" : "create";
+
+header("Location: chantiers_admin.php?success={$successType}&highlight={$redirectId}");
+exit;
 }
