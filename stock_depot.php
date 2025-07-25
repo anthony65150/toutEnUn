@@ -172,7 +172,8 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
           $subcat = strtolower(trim($stock['sous_categorie']));
           $chantierList = $chantierAssoc[$stockId] ?? [];
         ?>
-          <tr data-cat="<?= $cat ?>" data-subcat="<?= $subcat ?>">
+          <tr data-cat="<?= $cat ?>" data-subcat="<?= $subcat ?>"
+          class="<?= (isset($_SESSION['highlight_stock_id']) && $_SESSION['highlight_stock_id'] == $stock['id']) ? 'table-success highlight-row' : '' ?>">
             <td>
               <span class="nom-article"><?= $nom ?></span>
               <span class="article-total"> (<?= $total ?>)</span>
@@ -208,6 +209,19 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
         <?php endforeach; ?>
       </tbody>
     </table>
+            <?php if (isset($_SESSION['highlight_stock_id'])): ?>
+            <script>
+                document.addEventListener("DOMContentLoaded", () => {
+                    const highlighted = document.querySelector("tr.highlight-row");
+                    if (highlighted) {
+                        setTimeout(() => {
+                            highlighted.classList.remove("table-success", "highlight-row");
+                        }, 3000);
+                    }
+                });
+            </script>
+            <?php unset($_SESSION['highlight_stock_id']); ?>
+        <?php endif; ?>
   </div>
 </div>
 

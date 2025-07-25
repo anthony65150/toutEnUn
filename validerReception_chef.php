@@ -8,7 +8,6 @@ if (!isset($_SESSION['utilisateurs'])) {
 
 $chefId = $_SESSION['utilisateurs']['id'];
 
-// ✅ Récupérer tous les chantiers associés au chef via utilisateur_chantiers
 $stmtChefChantiers = $pdo->prepare("
     SELECT chantier_id 
     FROM utilisateur_chantiers 
@@ -49,7 +48,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['transfert_id'])) {
         try {
             $pdo->beginTransaction();
 
-            // ➖ Décrémenter la source (si c'est un chantier)
             if ($transfert['source_type'] === 'chantier') {
                 $stmt = $pdo->prepare("
                     UPDATE stock_chantiers
@@ -63,7 +61,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['transfert_id'])) {
                 ]);
             }
 
-            // ➕ Ajouter au chantier destination
             $stmtCheck = $pdo->prepare("SELECT COUNT(*) FROM stock_chantiers WHERE chantier_id = ? AND stock_id = ?");
             $stmtCheck->execute([$chantierId, $articleId]);
             $exists = $stmtCheck->fetchColumn();
@@ -91,17 +88,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['transfert_id'])) {
                 ]);
             }
 
-            // ✅ Supprimer le transfert
             $stmtDelete = $pdo->prepare("DELETE FROM transferts_en_attente WHERE id = ?");
             $stmtDelete->execute([$transfertId]);
 
-            // 🔔 Notifier
             $message = "✅ Le transfert de {$quantite} x {$articleNom} a été validé par le chantier.";
             $stmtNotif = $pdo->prepare("INSERT INTO notifications (utilisateur_id, message) VALUES (?, ?)");
             $stmtNotif->execute([$demandeurId, $message]);
 
             $pdo->commit();
             $_SESSION['success_message'] = "Transfert validé avec succès.";
+
+            // ✅ Le surlignage avec $_SESSION
+            $_SESSION['highlight_stock_id'] = $articleId;
+
         } catch (Exception $e) {
             $pdo->rollBack();
             $_SESSION['error_message'] = "Erreur lors de la validation : " . $e->getMessage();
@@ -111,5 +110,5 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['transfert_id'])) {
     }
 }
 
-header("Location: stock_chef.php");
+header("Location: stock_chef.php?chantier_id=" . ($chantierId ?? ''));
 exit;

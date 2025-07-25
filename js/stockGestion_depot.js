@@ -133,6 +133,13 @@ document.getElementById('transferForm').addEventListener('submit', (e) => {
         console.error(err);
         showToast('❌ Erreur lors de la requête', false);
     });
+            const highlighted = document.querySelector("tr.highlight-row");
+if (highlighted) {
+    setTimeout(() => {
+        highlighted.classList.remove("highlight-row", "table-success");
+    }, 3000);
+}
+
 });
 
 });

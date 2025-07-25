@@ -79,6 +79,13 @@ document.addEventListener("DOMContentLoaded", () => {
             console.error(err);
             showToast('❌ Erreur lors de la requête', false);
         });
+        const highlighted = document.querySelector("tr.highlight-row");
+if (highlighted) {
+    setTimeout(() => {
+        highlighted.classList.remove("highlight-row", "table-success");
+    }, 3000);
+}
+
     });
 
     // ----- Filtres catégories / sous-catégories -----

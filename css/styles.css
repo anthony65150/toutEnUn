@@ -238,3 +238,9 @@ body.dark-mode .navbar-toggler-icon {
     filter: invert(1);
 }
 
+
+.highlight-success {
+    background-color: #d4edda !important;
+    transition: background-color 0.5s ease;
+}
+

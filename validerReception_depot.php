@@ -70,6 +70,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['transfert_id'])) {
 
             $pdo->commit();
             $_SESSION['success_message'] = "Transfert validé avec succès.";
+            
+            // ✅ Le surlignage avec $_SESSION
+            $_SESSION['highlight_stock_id'] = $articleId;
         } catch (Exception $e) {
             $pdo->rollBack();
             $_SESSION['error_message'] = "Erreur lors de la validation : " . $e->getMessage();
@@ -81,5 +84,5 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['transfert_id'])) {
     $_SESSION['error_message'] = "Requête invalide.";
 }
 
-header("Location: stock_depot.php");
+header("Location: stock_depot.php?chantier_id=" . ($chantierId ?? ''));
 exit;

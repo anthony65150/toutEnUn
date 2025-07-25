@@ -79,14 +79,34 @@ if ($sourceType === 'chantier') {
 
         $pdo->commit();
 
-        $_SESSION['success_message'] = "Transfert validé avec succès.";
+        if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') {
+            echo json_encode(['success' => true, 'transfert_id' => $transfertId]);
+            exit;
+        } else {
+            $_SESSION['success_message'] = "Transfert validé avec succès.";
+            $_SESSION['highlight_stock_id'] = $articleId;
+
+            header("Location: stock_admin.php");
+            exit;
+        }
     } catch (Exception $e) {
         $pdo->rollBack();
-        $_SESSION['error_message'] = "Erreur lors de la validation : " . $e->getMessage();
+        if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') {
+            echo json_encode(['success' => false, 'message' => "Erreur : " . $e->getMessage()]);
+            exit;
+        } else {
+            $_SESSION['error_message'] = "Erreur lors de la validation : " . $e->getMessage();
+            header("Location: stock_admin.php");
+            exit;
+        }
     }
 } else {
-    $_SESSION['error_message'] = "Requête invalide.";
+    if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') {
+        echo json_encode(['success' => false, 'message' => "Requête invalide."]);
+        exit;
+    } else {
+        $_SESSION['error_message'] = "Requête invalide.";
+            header("Location: stock_admin.php");
+        exit;
+    }
 }
-
-header("Location: stock_admin.php");
-exit;

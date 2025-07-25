@@ -172,7 +172,11 @@ foreach ($subCatRaw as $row) {
                     $depotsList = $depotAssoc[$stockId] ?? [];
                     $chantiersList = $chantierAssoc[$stockId] ?? [];
                     ?>
-                    <tr data-cat="<?= htmlspecialchars($stock['categorie']) ?>" data-subcat="<?= htmlspecialchars($stock['sous_categorie']) ?>">
+                    <tr data-row-id="<?= $stockId ?>"
+                        data-cat="<?= htmlspecialchars($stock['categorie']) ?>"
+                        data-subcat="<?= htmlspecialchars($stock['sous_categorie']) ?>"
+                        class="<?= (isset($_SESSION['highlight_stock_id']) && $_SESSION['highlight_stock_id'] == $stockId) ? 'table-success highlight-row' : '' ?>">
+
                         <td><?= htmlspecialchars($stock['nom']) ?> (<?= $quantiteTotale ?>)</td>
                         <td class="col-photo"><img src="uploads/photos/<?= $stockId ?>.jpg" alt="photo" style="height: 40px;"></td>
                         <td>
@@ -228,6 +232,20 @@ foreach ($subCatRaw as $row) {
                 <?php endforeach; ?>
             </tbody>
         </table>
+        <?php if (isset($_SESSION['highlight_stock_id'])): ?>
+            <script>
+                document.addEventListener("DOMContentLoaded", () => {
+                    const highlighted = document.querySelector("tr.highlight-row");
+                    if (highlighted) {
+                        setTimeout(() => {
+                            highlighted.classList.remove("table-success", "highlight-row");
+                        }, 3000);
+                    }
+                });
+            </script>
+            <?php unset($_SESSION['highlight_stock_id']); ?>
+        <?php endif; ?>
+
     </div>
 </div>
 

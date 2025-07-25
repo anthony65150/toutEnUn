@@ -247,7 +247,8 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
                     $badge = $quantiteMonChantier > 0 ? '<span class="badge bg-success">' . $quantiteMonChantier . '</span>' : '<span class="badge bg-danger">0</span>';
                     ?>
                     <tr data-cat="<?= strtolower(trim(htmlspecialchars($stock['categorie']))) ?>"
-                        data-subcat="<?= strtolower(trim(htmlspecialchars($stock['sous_categorie']))) ?>">
+                        data-subcat="<?= strtolower(trim(htmlspecialchars($stock['sous_categorie']))) ?>"
+                        class="<?= (isset($_SESSION['highlight_stock_id']) && $_SESSION['highlight_stock_id'] == $stock['id']) ? 'table-success highlight-row' : '' ?>">
                         <td><?= htmlspecialchars($stock['nom']) ?> (<?= $quantiteTotale ?>)</td>
                         <td class="col-photo"><img src="uploads/photos/<?= $stockId ?>.jpg" alt="photo" style="height: 40px;"></td>
                         <td><?= $depotsHtml ?></td>
@@ -262,6 +263,20 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 <?php endforeach; ?>
             </tbody>
         </table>
+        <?php if (isset($_SESSION['highlight_stock_id'])): ?>
+            <script>
+                document.addEventListener("DOMContentLoaded", () => {
+                    const highlighted = document.querySelector("tr.highlight-row");
+                    if (highlighted) {
+                        setTimeout(() => {
+                            highlighted.classList.remove("table-success", "highlight-row");
+                        }, 3000);
+                    }
+                });
+            </script>
+            <?php unset($_SESSION['highlight_stock_id']); ?>
+        <?php endif; ?>
+
     </div>
 </div>
 

@@ -118,7 +118,13 @@ document.addEventListener('DOMContentLoaded', () => {
           }
         }
         modifyModal.hide();
-        showToast('modifyToast');
+        if (currentRow) {
+          currentRow.classList.add("table-success");
+          showToast('modifyToast');
+          setTimeout(() => currentRow.classList.remove("table-success"), 3000);
+        }
+
+
       } else {
         showErrorToast(data.message);
       }
@@ -220,10 +226,17 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!res.ok) throw new Error("Erreur serveur");
         return res.text(); // car tu rediriges avec header() dans PHP
       })
-      .then(() => {
-        showToast('modifyToast'); // tu peux ajouter un toast "validation réussie"
-        setTimeout(() => location.reload(), 1000); // recharger pour mettre à jour la liste
-      })
+         .then(() => {
+      const row = document.querySelector(`tr[data-row-id="${transfertId}"]`);
+      if (row) {
+        row.classList.add("table-success");
+        showToast('modifyToast');
+        setTimeout(() => location.reload(), 1000);
+      } else {
+        location.reload();
+      }
+    })
+
       .catch(err => {
         console.error(err);
         showErrorToast('Erreur lors de la validation du transfert.');

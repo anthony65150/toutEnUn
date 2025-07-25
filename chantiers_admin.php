@@ -57,23 +57,26 @@ if (!isset($_SESSION['utilisateurs']) || $_SESSION['utilisateurs']['fonction'] !
               <button class="btn btn-sm btn-warning edit-btn"
     data-bs-toggle="modal"
     data-bs-target="#chantierEditModal"
+    data-id="' . $chantier['id'] . '"
+    data-nom="' . htmlspecialchars($chantier['nom']) . '"
+    data-description="' . htmlspecialchars($chantier['description']) . '"
+    data-debut="' . $chantier['date_debut'] . '"
+    data-fin="' . $chantier['date_fin'] . '"
+    data-chef="' . ($chefs[0]['id'] ?? '') . '"
+    title="Modifier"
+>
+    <i class="bi bi-pencil-fill"></i>
+</button>
 
-                    data-id="' . $chantier['id'] . '"
-                    data-nom="' . htmlspecialchars($chantier['nom']) . '"
-                    data-description="' . htmlspecialchars($chantier['description']) . '"
-                    data-debut="' . $chantier['date_debut'] . '"
-                    data-fin="' . $chantier['date_fin'] . '"
-                    data-chef="' . ($chefs[0]['id'] ?? '') . '"
-                >
-                    Modifier
-                </button>
-                <button class="btn btn-sm btn-danger delete-btn"
-                    data-bs-toggle="modal"
-                    data-bs-target="#deleteModal"
-                    data-id="' . $chantier['id'] . '"
-                >
-                    Supprimer
-                </button>
+<button class="btn btn-sm btn-danger delete-btn"
+    data-bs-toggle="modal"
+    data-bs-target="#deleteModal"
+    data-id="' . $chantier['id'] . '"
+    title="Supprimer"
+>
+    <i class="bi bi-trash-fill"></i>
+</button>
+
             </td>';
             }
             ?>
