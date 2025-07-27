@@ -38,7 +38,8 @@ foreach ($stmt as $row) {
 
 $stmt = $pdo->prepare("
     SELECT 
-        s.id, s.nom, 
+        s.id, s.nom,
+        s.quantite_totale, 
         COALESCE(sd.quantite,0)+COALESCE(sc.total_chantier,0) AS total_recalculé,
         COALESCE(sd.quantite,0) AS quantite_stock_depot,
         COALESCE(sd.quantite,0) AS disponible_depot,
@@ -165,7 +166,7 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
       <tbody>
         <?php foreach ($stocks as $stock):
           $stockId = $stock['id'];
-          $total = (int)$stock['total_recalculé'];
+          $quantiteTotale = (int)$stock['quantite_totale'];
           $dispoDepot = (int)$stock['disponible_depot'];
           $nom = htmlspecialchars($stock['nom']);
           $cat = strtolower(trim($stock['categorie']));
@@ -173,11 +174,11 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
           $chantierList = $chantierAssoc[$stockId] ?? [];
         ?>
           <tr data-cat="<?= $cat ?>" data-subcat="<?= $subcat ?>"
-          class="<?= (isset($_SESSION['highlight_stock_id']) && $_SESSION['highlight_stock_id'] == $stock['id']) ? 'table-success highlight-row' : '' ?>">
-            <td>
-              <span class="nom-article"><?= $nom ?></span>
-              <span class="article-total"> (<?= $total ?>)</span>
-            </td>
+            class="<?= (isset($_SESSION['highlight_stock_id']) && $_SESSION['highlight_stock_id'] == $stock['id']) ? 'table-success highlight-row' : '' ?>">
+            <td><a href="article.php?id=<?= urlencode($stock['nom']) ?>" class="nom-article text-decoration-underline fw-bold text-primary">
+                <?= htmlspecialchars(ucfirst(strtolower($stock['nom']))) ?>
+              </a>
+              (<?= $quantiteTotale ?>)</td>
             <td class="col-photo"><img src="uploads/photos/<?= $stockId ?>.jpg" alt="<?= $nom ?>" style="height:40px;"></td>
             <td><span class="badge quantite-disponible <?= $dispoDepot < 10 ? 'bg-danger' : 'bg-success' ?>"><?= $dispoDepot ?></span></td>
             <td>
@@ -209,19 +210,19 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
         <?php endforeach; ?>
       </tbody>
     </table>
-            <?php if (isset($_SESSION['highlight_stock_id'])): ?>
-            <script>
-                document.addEventListener("DOMContentLoaded", () => {
-                    const highlighted = document.querySelector("tr.highlight-row");
-                    if (highlighted) {
-                        setTimeout(() => {
-                            highlighted.classList.remove("table-success", "highlight-row");
-                        }, 3000);
-                    }
-                });
-            </script>
-            <?php unset($_SESSION['highlight_stock_id']); ?>
-        <?php endif; ?>
+    <?php if (isset($_SESSION['highlight_stock_id'])): ?>
+      <script>
+        document.addEventListener("DOMContentLoaded", () => {
+          const highlighted = document.querySelector("tr.highlight-row");
+          if (highlighted) {
+            setTimeout(() => {
+              highlighted.classList.remove("table-success", "highlight-row");
+            }, 3000);
+          }
+        });
+      </script>
+      <?php unset($_SESSION['highlight_stock_id']); ?>
+    <?php endif; ?>
   </div>
 </div>
 

@@ -177,7 +177,10 @@ foreach ($subCatRaw as $row) {
                         data-subcat="<?= htmlspecialchars($stock['sous_categorie']) ?>"
                         class="<?= (isset($_SESSION['highlight_stock_id']) && $_SESSION['highlight_stock_id'] == $stockId) ? 'table-success highlight-row' : '' ?>">
 
-                        <td><?= htmlspecialchars($stock['nom']) ?> (<?= $quantiteTotale ?>)</td>
+                        <td><a href="article.php?id=<?= urlencode($stock['nom']) ?>" class="nom-article text-decoration-underline fw-bold text-primary">
+                                <?= htmlspecialchars(ucfirst(strtolower($stock['nom']))) ?>
+                            </a>
+                            (<?= $quantiteTotale ?>)</td>
                         <td class="col-photo"><img src="uploads/photos/<?= $stockId ?>.jpg" alt="photo" style="height: 40px;"></td>
                         <td>
                             <?php if ($depotsList): foreach ($depotsList as $d): ?>

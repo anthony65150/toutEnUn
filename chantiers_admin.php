@@ -15,7 +15,7 @@ if (!isset($_SESSION['utilisateurs']) || $_SESSION['utilisateurs']['fonction'] !
 
     <!-- Bouton création -->
     <div class="d-flex justify-content-center mb-3">
-        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#chantierModal">
+        <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#chantierModal">
             + Créer un chantier
         </button>
     </div>

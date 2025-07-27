@@ -249,7 +249,10 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
                     <tr data-cat="<?= strtolower(trim(htmlspecialchars($stock['categorie']))) ?>"
                         data-subcat="<?= strtolower(trim(htmlspecialchars($stock['sous_categorie']))) ?>"
                         class="<?= (isset($_SESSION['highlight_stock_id']) && $_SESSION['highlight_stock_id'] == $stock['id']) ? 'table-success highlight-row' : '' ?>">
-                        <td><?= htmlspecialchars($stock['nom']) ?> (<?= $quantiteTotale ?>)</td>
+                        <td><a href="article.php?id=<?= urlencode($stock['nom']) ?>" class="nom-article text-decoration-underline fw-bold text-primary">
+                                <?= htmlspecialchars(ucfirst(strtolower($stock['nom']))) ?>
+                            </a>
+                            (<?= $quantiteTotale ?>)</td>
                         <td class="col-photo"><img src="uploads/photos/<?= $stockId ?>.jpg" alt="photo" style="height: 40px;"></td>
                         <td><?= $depotsHtml ?></td>
                         <td><?= $chantiersHtml ?></td>

@@ -27,21 +27,26 @@ $success = false;
 
 // === Traitement du formulaire POST ===
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $nom = trim($_POST['nom'] ?? '');
+    $nom = ucfirst(strtolower(trim($_POST['nom'] ?? '')));
+
     $quantite = (int)($_POST['quantite'] ?? 0);
 
     // Gestion catégorie
     $categorie = '';
     if (!empty($_POST['nouvelleCategorie'])) {
-        $categorie = trim($_POST['nouvelleCategorie']);
+    $categorie = ucfirst(strtolower(trim($_POST['nouvelleCategorie'])));
+
+
     } elseif (!empty($_POST['categorieSelect'])) {
         $categorie = trim($_POST['categorieSelect']);
     }
 
     // Gestion sous-catégorie
     $sous_categorie = '';
-    if (!empty($_POST['nouvelleSousCategorie'])) {
-        $sous_categorie = trim($_POST['nouvelleSousCategorie']);
+   if (!empty($_POST['nouvelleSousCategorie'])) {
+    $sous_categorie = ucfirst(strtolower(trim($_POST['nouvelleSousCategorie'])));
+
+
     } elseif (!empty($_POST['sous_categorieSelect'])) {
         $sous_categorie = trim($_POST['sous_categorieSelect']);
     }
