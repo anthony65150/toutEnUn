@@ -1,0 +1,6 @@
+array (
+  'stockId' => '10',
+  'nom' => 'Piqueur',
+  'quantite' => '23',
+  'deleteDocument' => '1',
+)

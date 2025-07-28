@@ -34,24 +34,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Gestion catégorie
     $categorie = '';
     if (!empty($_POST['nouvelleCategorie'])) {
-    $categorie = ucfirst(strtolower(trim($_POST['nouvelleCategorie'])));
-
-
+        $categorie = ucfirst(strtolower(trim($_POST['nouvelleCategorie'])));
     } elseif (!empty($_POST['categorieSelect'])) {
         $categorie = trim($_POST['categorieSelect']);
     }
 
     // Gestion sous-catégorie
     $sous_categorie = '';
-   if (!empty($_POST['nouvelleSousCategorie'])) {
-    $sous_categorie = ucfirst(strtolower(trim($_POST['nouvelleSousCategorie'])));
-
-
+    if (!empty($_POST['nouvelleSousCategorie'])) {
+        $sous_categorie = ucfirst(strtolower(trim($_POST['nouvelleSousCategorie'])));
     } elseif (!empty($_POST['sous_categorieSelect'])) {
         $sous_categorie = trim($_POST['sous_categorieSelect']);
     }
 
     $photo = $_FILES['photo'] ?? null;
+    $document = $_FILES['document'] ?? null;
+    $nom_document = null;
+
+    if ($document && $document['error'] === UPLOAD_ERR_OK) {
+        $extensionDoc = strtolower(pathinfo($document['name'], PATHINFO_EXTENSION));
+        $extensionsAutorisees = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'png', 'jpg', 'jpeg'];
+
+        if (in_array($extensionDoc, $extensionsAutorisees)) {
+            $nom_document = uniqid() . '.' . $extensionDoc;
+            move_uploaded_file($document['tmp_name'], __DIR__ . '/uploads/documents/' . $nom_document);
+        } else {
+            $errors['document'] = "Type de fichier non autorisé.";
+        }
+    }
+
 
     if ($nom === '') {
         $errors['nom'] = "Le nom est obligatoire.";
@@ -75,8 +86,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo->beginTransaction();
 
             // Insertion dans la table 'stock'
-            $stmt = $pdo->prepare("INSERT INTO stock (nom, quantite_totale, categorie, sous_categorie, photo) VALUES (?, ?, ?, ?, ?)");
-            $stmt->execute([$nom, $quantite, $categorie, $sous_categorie ?: null, $nom_fichier]);
+            $stmt = $pdo->prepare("INSERT INTO stock (nom, quantite_totale, categorie, sous_categorie, photo, document) VALUES (?, ?, ?, ?, ?, ?)");
+            $stmt->execute([$nom, $quantite, $categorie, $sous_categorie ?: null, $nom_fichier, $nom_document]);
+
 
             $stockId = $pdo->lastInsertId();
 
@@ -188,6 +200,13 @@ if ($categorieSelectionnee !== '') {
                         <input type="file" name="photo" id="photo" class="form-control">
                     </div>
 
+                    <div class="mb-3">
+                        <label for="modifierDocument" class="form-label">Document technique (PDF, notice, etc.)</label>
+                        <input type="file" name="document" id="modifierDocument" class="form-control">
+                    </div>
+
+
+
                     <div class="text-center mt-5">
                         <button type="submit" class="btn btn-primary w-50">Ajouter au dépôt</button>
                     </div>
@@ -196,9 +215,9 @@ if ($categorieSelectionnee !== '') {
         </div>
     </div>
 
-<script src="/js/ajoutStock.js"></script>
+    <script src="/js/ajoutStock.js"></script>
 
-<?php
-require_once __DIR__ . '/templates/footer.php';
-ob_end_flush();
-?>
+    <?php
+    require_once __DIR__ . '/templates/footer.php';
+    ob_end_flush();
+    ?>

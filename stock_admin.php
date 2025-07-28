@@ -51,7 +51,7 @@ foreach ($stmt as $row) {
 
 
 // Articles + catégories/sous-catégories
-$stocks = $pdo->query("SELECT id, nom, quantite_totale, categorie, sous_categorie FROM stock ORDER BY nom")->fetchAll(PDO::FETCH_ASSOC);
+$stocks = $pdo->query("SELECT id, nom, quantite_totale, categorie, sous_categorie, document FROM stock ORDER BY nom")->fetchAll(PDO::FETCH_ASSOC);
 $categories = $pdo->query("SELECT DISTINCT categorie FROM stock WHERE categorie IS NOT NULL ORDER BY categorie")->fetchAll(PDO::FETCH_COLUMN);
 $subCatRaw = $pdo->query("SELECT categorie, sous_categorie FROM stock WHERE sous_categorie IS NOT NULL")->fetchAll(PDO::FETCH_ASSOC);
 $subCategoriesGrouped = [];
@@ -224,9 +224,18 @@ foreach ($subCatRaw as $row) {
                             <button class="btn btn-sm btn-primary transfer-btn" data-stock-id="<?= $stockId ?>">
                                 <i class="bi bi-arrow-left-right"></i>
                             </button>
-                            <button class="btn btn-sm btn-warning edit-btn" data-stock-id="<?= $stockId ?>" data-stock-nom="<?= htmlspecialchars($stock['nom']) ?>">
-                                <i class="bi bi-pencil"></i>
-                            </button>
+                    <button 
+        class="btn btn-sm btn-warning edit-btn"
+        data-stock-id="<?= $stockId ?>"
+        data-stock-nom="<?= htmlspecialchars($stock['nom']) ?>"
+        data-stock-quantite="<?= $stock['quantite_totale'] ?>"
+        data-stock-photo="<?= $stock['photo'] ?? '' ?>"
+        data-stock-document="<?= $stock['document'] ?? '' ?>"
+    >
+        <i class="bi bi-pencil"></i>
+    </button>
+
+
                             <button class="btn btn-sm btn-danger delete-btn" data-stock-id="<?= $stockId ?>" data-stock-nom="<?= htmlspecialchars($stock['nom']) ?>">
                                 <i class="bi bi-trash"></i>
                             </button>
@@ -308,18 +317,39 @@ foreach ($subCatRaw as $row) {
 </div>
 
 <!-- MODALE MODIFIER -->
-<div class="modal fade" id="modifyModal" tabindex="-1">
-    <div class="modal-dialog">
+<div class="modal fade" id="modifyModal" tabindex="-1" aria-labelledby="modifyModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">Modifier l'article</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <h5 class="modal-title" id="modifyModalLabel">Modifier l'article</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
             </div>
             <div class="modal-body">
                 <input type="hidden" id="modifyStockId">
-                <div class="mb-3"><label>Nom</label><input type="text" class="form-control" id="modifyNom"></div>
-                <div class="mb-3"><label>Quantité totale</label><input type="number" class="form-control" id="modifyQty" min="0"></div>
-                <div class="mb-3"><label>Photo (optionnel)</label><input type="file" class="form-control" id="modifyPhoto"></div>
+
+                <div class="mb-3">
+                    <label for="modifyNom" class="form-label">Nom de l'article</label>
+                    <input type="text" class="form-control" id="modifyNom">
+                </div>
+
+                <div class="mb-3">
+                    <label for="modifyQty" class="form-label">Quantité totale</label>
+                    <input type="number" class="form-control" id="modifyQty" min="0">
+                </div>
+
+                <div class="mb-3">
+                    <label for="modifyPhoto" class="form-label">Nouvelle photo (optionnel)</label>
+                    <input type="file" class="form-control" id="modifyPhoto" accept="image/*">
+                    <div id="existingPhoto" class="mt-2"></div>
+                </div>
+
+                <div class="mb-3">
+                    <label for="modifierDocument" class="form-label">Nouveau document (PDF, etc. - optionnel)</label>
+                    <input type="file" class="form-control" id="modifierDocument" accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg">
+                    <div id="existingDocument" class="mt-2"></div>
+                   
+                </div>
+
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
@@ -328,6 +358,7 @@ foreach ($subCatRaw as $row) {
         </div>
     </div>
 </div>
+
 
 <!-- MODALE SUPPRIMER -->
 <div class="modal fade" id="confirmDeleteModal" tabindex="-1">

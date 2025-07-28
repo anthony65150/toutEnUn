@@ -71,66 +71,134 @@ document.addEventListener('DOMContentLoaded', () => {
     .catch(() => showErrorToast('Erreur réseau ou serveur.'));
   });
 
-  // ----- MODIFIER -----
-  document.querySelectorAll('.edit-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      currentRow = btn.closest('tr');
-      document.getElementById('modifyStockId').value = btn.dataset.stockId;
-      document.getElementById('modifyNom').value = btn.dataset.stockNom;
-      document.getElementById('modifyQty').value = '';
-      document.getElementById('modifyPhoto').value = '';
-      modifyModal.show();
+// ----- MODIFIER -----
+document.getElementById('stockTableBody').addEventListener('click', (e) => {
+  const btn = e.target.closest('.edit-btn');
+  if (!btn) return;
+
+  currentRow = btn.closest('tr');
+
+  document.getElementById('modifyStockId').value = btn.dataset.stockId;
+  document.getElementById('modifyNom').value = btn.dataset.stockNom;
+  document.getElementById('modifyQty').value = btn.dataset.stockQuantite;
+
+  document.getElementById('modifyPhoto').value = '';
+  document.getElementById('modifierDocument').value = '';
+
+  const photoDiv = document.getElementById('existingPhoto');
+  if (btn.dataset.stockPhoto) {
+    photoDiv.innerHTML = `<img src="uploads/${btn.dataset.stockPhoto}" alt="Photo actuelle" class="img-thumbnail" style="max-height: 100px;">`;
+  } else {
+    photoDiv.innerHTML = '<em class="text-muted">Aucune photo</em>';
+  }
+
+const docDiv = document.getElementById('existingDocument');
+if (btn.dataset.stockDocument) {
+  docDiv.innerHTML = `
+    <div class="d-flex align-items-center gap-2">
+      <a href="uploads/documents/${btn.dataset.stockDocument}" target="_blank" class="text-info">📄 Voir le document</a>
+      <button type="button" class="btn btn-sm btn-outline-danger p-1" id="btnRemoveDocument" title="Supprimer le document">
+        <i class="bi bi-trash3"></i>
+      </button>
+      <input type="hidden" name="deleteDocument" id="deleteDocumentHidden" value="0">
+    </div>
+  `;
+
+  // 🔁 Bien récupérer les éléments APRES avoir injecté le HTML
+  const deleteBtn = document.getElementById('btnRemoveDocument');
+  const deleteHidden = document.getElementById('deleteDocumentHidden');
+
+  if (deleteBtn && deleteHidden) {
+    deleteBtn.addEventListener('click', () => {
+      deleteHidden.value = '1';
+
+      // Supprimer uniquement le lien et le bouton
+      const link = docDiv.querySelector('a');
+      if (link) link.remove();
+      deleteBtn.remove();
+
+      // Conserver le champ hidden et ajouter le texte
+      docDiv.insertAdjacentHTML('beforeend', '<em class="text-muted">Document marqué pour suppression</em>');
     });
-  });
+  }
+} else {
+  docDiv.innerHTML = '<em class="text-muted">Aucun document</em>';
+}
+
+
+  modifyModal.show();
+});
+
+
 
   document.getElementById('confirmModify').addEventListener('click', () => {
-    const formData = new FormData();
-    formData.append('stockId', document.getElementById('modifyStockId').value);
-    formData.append('nom', document.getElementById('modifyNom').value);
-    formData.append('quantite', document.getElementById('modifyQty').value);
-    const photoFile = document.getElementById('modifyPhoto').files[0];
-    if (photoFile) formData.append('photo', photoFile);
+  const formData = new FormData();
+  formData.append('stockId', document.getElementById('modifyStockId').value);
+  formData.append('nom', document.getElementById('modifyNom').value);
+  formData.append('quantite', document.getElementById('modifyQty').value);
 
-    fetch('modifierStock.php', { method: 'POST', body: formData })
+  const photoFile = document.getElementById('modifyPhoto').files[0];
+  if (photoFile) formData.append('photo', photoFile);
+
+  const documentFile = document.getElementById('modifierDocument')?.files[0];
+  if (documentFile) formData.append('document', documentFile);
+
+const hiddenDeleteInput = document.getElementById('deleteDocumentHidden');
+const deleteDoc = hiddenDeleteInput?.value === '1';
+formData.append('deleteDocument', deleteDoc ? '1' : '0');
+
+
+
+  fetch('modifierStock.php', { method: 'POST', body: formData })
     .then(res => res.json())
     .then(data => {
       if (data.success) {
-        if (currentRow) {
-          // Mettre à jour le nom (quantité totale NE CHANGE PAS sauf si admin le modifie)
-          currentRow.querySelector('td:first-child').textContent = `${data.newNom} (${data.newQuantiteTotale})`;
-
-          // Mettre à jour badge dépôt 1
-          const depotDivs = currentRow.querySelectorAll('td:nth-child(3) div');
-          depotDivs.forEach(div => {
-            if (div.textContent.includes('1')) {
-              const badge = div.querySelector('span');
-              if (badge) {
-                badge.textContent = `(${data.quantiteDispo})`;
-                badge.className = `badge ${data.quantiteDispo < 10 ? 'bg-danger' : 'bg-success'}`;
-              }
-            }
-          });
-
-          // Mettre à jour photo si changée
-          const img = currentRow.querySelector('td:nth-child(2) img');
-          if (img && data.newPhotoUrl) {
-            img.src = data.newPhotoUrl + '?t=' + Date.now();
+        const editBtn = currentRow.querySelector('.edit-btn');
+        if (editBtn) {
+          editBtn.dataset.stockNom = data.newNom;
+          editBtn.dataset.stockQuantite = data.newQuantiteTotale;
+          if (documentFile || deleteDoc) {
+            editBtn.dataset.stockDocument = data.newDocument || '';
           }
         }
-        modifyModal.hide();
-        if (currentRow) {
-          currentRow.classList.add("table-success");
-          showToast('modifyToast');
-          setTimeout(() => currentRow.classList.remove("table-success"), 3000);
+
+        // Mise à jour nom
+        currentRow.querySelector('td:first-child').innerHTML = `
+          <a href="article.php?id=${encodeURIComponent(data.newNom)}" class="nom-article text-decoration-underline fw-bold text-primary">
+            ${data.newNom.charAt(0).toUpperCase() + data.newNom.slice(1).toLowerCase()}
+          </a> (${data.newQuantiteTotale})
+        `;
+
+        // Mise à jour badge dépôt 1
+        const depotDivs = currentRow.querySelectorAll('td:nth-child(3) div');
+        depotDivs.forEach(div => {
+          if (div.textContent.includes('1')) {
+            const badge = div.querySelector('span');
+            if (badge) {
+              badge.textContent = `(${data.quantiteDispo})`;
+              badge.className = `badge ${data.quantiteDispo < 10 ? 'bg-danger' : 'bg-success'}`;
+            }
+          }
+        });
+
+        // Mise à jour image si changée
+        const img = currentRow.querySelector('td:nth-child(2) img');
+        if (img && data.newPhotoUrl) {
+          img.src = data.newPhotoUrl + '?t=' + Date.now();
         }
 
-
+        modifyModal.hide();
+        currentRow.classList.add("table-success");
+        showToast('modifyToast');
+        setTimeout(() => currentRow.classList.remove("table-success"), 3000);
       } else {
         showErrorToast(data.message);
       }
     })
     .catch(() => showErrorToast('Erreur réseau.'));
-  });
+});
+
+
 
   // ----- SUPPRIMER -----
   document.querySelectorAll('.delete-btn').forEach(btn => {
