@@ -118,7 +118,7 @@ if (btn.dataset.stockDocument) {
       deleteBtn.remove();
 
       // Conserver le champ hidden et ajouter le texte
-      docDiv.insertAdjacentHTML('beforeend', '<em class="text-muted">Document marqué pour suppression</em>');
+      docDiv.insertAdjacentHTML('beforeend', '<em class="text-muted">Document prét à être supprimé</em>');
     });
   }
 } else {
