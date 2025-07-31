@@ -70,7 +70,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     .catch(() => showErrorToast('Erreur réseau ou serveur.'));
   });
-
 // ----- MODIFIER -----
 document.getElementById('stockTableBody').addEventListener('click', (e) => {
   const btn = e.target.closest('.edit-btn');
@@ -85,53 +84,86 @@ document.getElementById('stockTableBody').addEventListener('click', (e) => {
   document.getElementById('modifyPhoto').value = '';
   document.getElementById('modifierDocument').value = '';
 
+  // ----- PHOTO EXISTANTE -----
   const photoDiv = document.getElementById('existingPhoto');
+  photoDiv.innerHTML = '';
+
   if (btn.dataset.stockPhoto) {
-    photoDiv.innerHTML = `<img src="uploads/${btn.dataset.stockPhoto}" alt="Photo actuelle" class="img-thumbnail" style="max-height: 100px;">`;
+    const photoHTML = `
+      <div class="d-flex align-items-center gap-2">
+        <img src="uploads/photos/${btn.dataset.stockPhoto}" alt="Photo actuelle" class="img-thumbnail" style="max-height: 100px;">
+        <button type="button" class="btn btn-sm btn-outline-danger p-1" id="btnRemovePhoto" title="Supprimer la photo">
+          <i class="bi bi-trash3"></i>
+        </button>
+        <input type="hidden" name="deletePhoto" id="deletePhotoHidden" value="0">
+      </div>
+    `;
+    photoDiv.innerHTML = photoHTML;
+
+    const deleteBtn = document.getElementById('btnRemovePhoto');
+    const deleteHidden = document.getElementById('deletePhotoHidden');
+
+    if (deleteBtn && deleteHidden) {
+      deleteBtn.addEventListener('click', () => {
+        deleteHidden.value = '1';
+
+        // Supprimer l’image et le bouton
+        const img = photoDiv.querySelector('img');
+        if (img) img.remove();
+        deleteBtn.remove();
+
+        // Afficher message de suppression
+        photoDiv.insertAdjacentHTML('beforeend', '<em class="text-muted">Photo prête à être supprimée</em>');
+      });
+    }
   } else {
     photoDiv.innerHTML = '<em class="text-muted">Aucune photo</em>';
   }
 
-const docDiv = document.getElementById('existingDocument');
-if (btn.dataset.stockDocument) {
-  docDiv.innerHTML = `
-    <div class="d-flex align-items-center gap-2">
-      <a href="uploads/documents/${btn.dataset.stockDocument}" target="_blank" class="text-info">📄 Voir le document</a>
-      <button type="button" class="btn btn-sm btn-outline-danger p-1" id="btnRemoveDocument" title="Supprimer le document">
-        <i class="bi bi-trash3"></i>
-      </button>
-      <input type="hidden" name="deleteDocument" id="deleteDocumentHidden" value="0">
-    </div>
-  `;
+  // ----- DOCUMENT EXISTANT -----
+  const docDiv = document.getElementById('existingDocument');
+  docDiv.innerHTML = '';
 
-  // 🔁 Bien récupérer les éléments APRES avoir injecté le HTML
-  const deleteBtn = document.getElementById('btnRemoveDocument');
-  const deleteHidden = document.getElementById('deleteDocumentHidden');
+  if (btn.dataset.stockDocument) {
+    docDiv.innerHTML = `
+      <div class="d-flex align-items-center gap-2">
+        <a href="uploads/documents/${btn.dataset.stockDocument}" target="_blank" class="text-info">📄 Voir le document</a>
+        <button type="button" class="btn btn-sm btn-outline-danger p-1" id="btnRemoveDocument" title="Supprimer le document">
+          <i class="bi bi-trash3"></i>
+        </button>
+        <input type="hidden" name="deleteDocument" id="deleteDocumentHidden" value="0">
+      </div>
+    `;
 
-  if (deleteBtn && deleteHidden) {
-    deleteBtn.addEventListener('click', () => {
-      deleteHidden.value = '1';
+    const deleteBtn = document.getElementById('btnRemoveDocument');
+    const deleteHidden = document.getElementById('deleteDocumentHidden');
 
-      // Supprimer uniquement le lien et le bouton
-      const link = docDiv.querySelector('a');
-      if (link) link.remove();
-      deleteBtn.remove();
+    if (deleteBtn && deleteHidden) {
+      deleteBtn.addEventListener('click', () => {
+        deleteHidden.value = '1';
 
-      // Conserver le champ hidden et ajouter le texte
-      docDiv.insertAdjacentHTML('beforeend', '<em class="text-muted">Document prét à être supprimé</em>');
-    });
+        const link = docDiv.querySelector('a');
+        if (link) link.remove();
+        deleteBtn.remove();
+        docDiv.insertAdjacentHTML('beforeend', '<em class="text-muted">Document prêt à être supprimé</em>');
+      });
+    }
+  } else {
+    docDiv.innerHTML = '<em class="text-muted">Aucun document</em>';
   }
-} else {
-  docDiv.innerHTML = '<em class="text-muted">Aucun document</em>';
-}
 
-
+  // Ouvrir la modale
+  const modifyModal = new bootstrap.Modal(document.getElementById('modifyModal'));
   modifyModal.show();
 });
 
 
 
-  document.getElementById('confirmModify').addEventListener('click', () => {
+});
+
+
+
+document.getElementById('confirmModify').addEventListener('click', () => {
   const formData = new FormData();
   formData.append('stockId', document.getElementById('modifyStockId').value);
   formData.append('nom', document.getElementById('modifyNom').value);
@@ -143,11 +175,13 @@ if (btn.dataset.stockDocument) {
   const documentFile = document.getElementById('modifierDocument')?.files[0];
   if (documentFile) formData.append('document', documentFile);
 
-const hiddenDeleteInput = document.getElementById('deleteDocumentHidden');
-const deleteDoc = hiddenDeleteInput?.value === '1';
-formData.append('deleteDocument', deleteDoc ? '1' : '0');
+  const deleteDocInput = document.getElementById('deleteDocumentHidden');
+  const deleteDoc = deleteDocInput?.value === '1';
+  formData.append('deleteDocument', deleteDoc ? '1' : '0');
 
-
+  const deletePhotoInput = document.getElementById('deletePhotoHidden');
+  const deletePhoto = deletePhotoInput?.value === '1';
+  formData.append('deletePhoto', deletePhoto ? '1' : '0');
 
   fetch('modifierStock.php', { method: 'POST', body: formData })
     .then(res => res.json())
@@ -157,46 +191,47 @@ formData.append('deleteDocument', deleteDoc ? '1' : '0');
         if (editBtn) {
           editBtn.dataset.stockNom = data.newNom;
           editBtn.dataset.stockQuantite = data.newQuantiteTotale;
-          if (documentFile || deleteDoc) {
-            editBtn.dataset.stockDocument = data.newDocument || '';
+          editBtn.dataset.stockDocument = data.newDocument || '';
+
+          // ✅ Met à jour le dataset de la photo
+          if (data.newPhotoUrl) {
+            editBtn.dataset.stockPhoto = data.newPhotoUrl.split('/').pop();
+          } else {
+            editBtn.dataset.stockPhoto = '';
           }
         }
 
-        // Mise à jour nom
+        // ✅ Met à jour le nom dans le tableau
         currentRow.querySelector('td:first-child').innerHTML = `
           <a href="article.php?id=${encodeURIComponent(data.newNom)}" class="nom-article text-decoration-underline fw-bold text-primary">
             ${data.newNom.charAt(0).toUpperCase() + data.newNom.slice(1).toLowerCase()}
           </a> (${data.newQuantiteTotale})
         `;
 
-        // Mise à jour badge dépôt 1
-        const depotDivs = currentRow.querySelectorAll('td:nth-child(3) div');
-        depotDivs.forEach(div => {
-          if (div.textContent.includes('1')) {
-            const badge = div.querySelector('span');
-            if (badge) {
-              badge.textContent = `(${data.quantiteDispo})`;
-              badge.className = `badge ${data.quantiteDispo < 10 ? 'bg-danger' : 'bg-success'}`;
-            }
-          }
-        });
-
-        // Mise à jour image si changée
-        const img = currentRow.querySelector('td:nth-child(2) img');
-        if (img && data.newPhotoUrl) {
-          img.src = data.newPhotoUrl + '?t=' + Date.now();
+        // ✅ Met à jour la photo
+        const photoCell = currentRow.querySelector('.col-photo');
+        if (data.newPhotoUrl) {
+          photoCell.innerHTML = `<img src="${data.newPhotoUrl}?t=${Date.now()}" alt="photo" style="height: 40px;">`;
+        } else {
+          photoCell.innerHTML = `<img src="images/photo-par-defaut.jpg" alt="Aucune photo" style="height: 40px;">`;
         }
+
+        // ✅ Réinitialisation de la modal
+        document.getElementById('modifyForm').reset();
+        document.getElementById('existingPhoto').innerHTML = '';
+        document.getElementById('existingDocument').innerHTML = '';
 
         modifyModal.hide();
         currentRow.classList.add("table-success");
         showToast('modifyToast');
         setTimeout(() => currentRow.classList.remove("table-success"), 3000);
       } else {
-        showErrorToast(data.message);
+        showErrorToast(data.message || "Erreur lors de la modification.");
       }
     })
     .catch(() => showErrorToast('Erreur réseau.'));
 });
+
 
 
 
@@ -213,17 +248,10 @@ formData.append('deleteDocument', deleteDoc ? '1' : '0');
   document.getElementById('confirmDeleteButton').addEventListener('click', () => {
     fetch(`supprimerStock.php?id=${currentDeleteId}`)
     .then(res => res.json())
-    .then(data => {
-      if (data.success) {
-        if (currentRow) currentRow.remove();
-        deleteModal.hide();
-        showToast('modifyToast');
-      } else {
-        showErrorToast(data.message);
-      }
-    })
-    .catch(() => showErrorToast('Erreur réseau.'));
+    // Juste après le fetch vers updateArticle_admin.php :
+
   });
+  
 
   // ----- FILTRAGE -----
   const searchInput = document.getElementById("searchInput");
@@ -277,7 +305,7 @@ formData.append('deleteDocument', deleteDoc ? '1' : '0');
   });
 
   filterByCategory('');
-});
+
 
 
   // ----- VALIDATION DES TRANSFERTS -----
@@ -310,5 +338,6 @@ formData.append('deleteDocument', deleteDoc ? '1' : '0');
         showErrorToast('Erreur lors de la validation du transfert.');
       });
     });
-  });
+  
 
+});

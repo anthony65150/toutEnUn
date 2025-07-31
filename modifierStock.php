@@ -44,11 +44,48 @@ if ($document && $document['error'] === UPLOAD_ERR_OK) {
     if (in_array($extensionDoc, $extensionsAutorisees)) {
         $nom_document = uniqid() . '.' . $extensionDoc;
         move_uploaded_file($document['tmp_name'], __DIR__ . '/uploads/documents/' . $nom_document);
+
     } else {
         echo json_encode(['success' => false, 'message' => 'Type de fichier non autorisé.']);
         exit;
     }
 }
+
+$photo = $_FILES['photo'] ?? null;
+$deletePhoto = ($_POST['deletePhoto'] ?? '0') === '1';
+
+$nom_photo = null;
+
+if ($photo && $photo['error'] === UPLOAD_ERR_OK) {
+    $extensionPhoto = strtolower(pathinfo($photo['name'], PATHINFO_EXTENSION));
+    $extensionsAutorisees = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
+
+    if (in_array($extensionPhoto, $extensionsAutorisees)) {
+        $nom_photo = uniqid() . '.' . $extensionPhoto;
+        move_uploaded_file($photo['tmp_name'], __DIR__ . '/uploads/photos/' . $nom_photo);
+    } else {
+        echo json_encode(['success' => false, 'message' => 'Format d’image non autorisé.']);
+        exit;
+    }
+}
+
+
+if ($deletePhoto) {
+    $stmt = $pdo->prepare("SELECT photo FROM stock WHERE id = ?");
+    $stmt->execute([$stockId]);
+    $anciennePhoto = $stmt->fetchColumn();
+
+    if ($anciennePhoto && file_exists(__DIR__ . "/uploads/photos/" . $anciennePhoto)) {
+        unlink(__DIR__ . "/uploads/photos/" . $anciennePhoto);
+    }
+
+    if (!$nom_photo) {
+        $stmt = $pdo->prepare("UPDATE stock SET photo = NULL WHERE id = ?");
+        $stmt->execute([$stockId]);
+    }
+}
+
+
 
 try {
     $pdo->beginTransaction();
@@ -59,13 +96,24 @@ try {
 
     $diff = $quantite - $ancienneQuantite;
 
+    $updateSql = "UPDATE stock SET nom = ?, quantite_totale = ?, quantite_disponible = quantite_disponible + ?";
+    $params = [$nom, $quantite, $diff];
+
     if ($nom_document) {
-        $stmt = $pdo->prepare("UPDATE stock SET nom = ?, quantite_totale = ?, quantite_disponible = quantite_disponible + ?, document = ? WHERE id = ?");
-        $stmt->execute([$nom, $quantite, $diff, $nom_document, $stockId]);
-    } else {
-        $stmt = $pdo->prepare("UPDATE stock SET nom = ?, quantite_totale = ?, quantite_disponible = quantite_disponible + ? WHERE id = ?");
-        $stmt->execute([$nom, $quantite, $diff, $stockId]);
+        $updateSql .= ", document = ?";
+        $params[] = $nom_document;
     }
+
+    if ($nom_photo) {
+        $updateSql .= ", photo = ?";
+        $params[] = $nom_photo;
+    }
+
+    $updateSql .= " WHERE id = ?";
+    $params[] = $stockId;
+
+    $stmt = $pdo->prepare($updateSql);
+    $stmt->execute($params);
 
     $stmtDepotCheck = $pdo->prepare("SELECT quantite FROM stock_depots WHERE stock_id = ? AND depot_id = 1");
     $stmtDepotCheck->execute([$stockId]);
@@ -98,10 +146,9 @@ try {
         'newNom' => $nom,
         'newQuantiteTotale' => $quantite,
         'quantiteDispo' => $quantiteDispo,
-        'newPhotoUrl' => isset($newPhotoUrl) ? $newPhotoUrl : null,
+        'newPhotoUrl' => $nom_photo ? "uploads/photos/$nom_photo" : null,
         'newDocument' => $nom_document
     ]);
-
 } catch (Exception $e) {
     $pdo->rollBack();
     echo json_encode(['success' => false, 'message' => $e->getMessage()]);

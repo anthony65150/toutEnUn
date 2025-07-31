@@ -51,7 +51,7 @@ foreach ($stmt as $row) {
 
 
 // Articles + catégories/sous-catégories
-$stocks = $pdo->query("SELECT id, nom, quantite_totale, categorie, sous_categorie, document FROM stock ORDER BY nom")->fetchAll(PDO::FETCH_ASSOC);
+$stocks = $pdo->query("SELECT id, nom, quantite_totale, categorie, sous_categorie, document, photo FROM stock ORDER BY nom")->fetchAll(PDO::FETCH_ASSOC);
 $categories = $pdo->query("SELECT DISTINCT categorie FROM stock WHERE categorie IS NOT NULL ORDER BY categorie")->fetchAll(PDO::FETCH_COLUMN);
 $subCatRaw = $pdo->query("SELECT categorie, sous_categorie FROM stock WHERE sous_categorie IS NOT NULL")->fetchAll(PDO::FETCH_ASSOC);
 $subCategoriesGrouped = [];
@@ -177,11 +177,18 @@ foreach ($subCatRaw as $row) {
                         data-subcat="<?= htmlspecialchars($stock['sous_categorie']) ?>"
                         class="<?= (isset($_SESSION['highlight_stock_id']) && $_SESSION['highlight_stock_id'] == $stockId) ? 'table-success highlight-row' : '' ?>">
 
-                        <td><a href="article.php?id=<?= urlencode($stock['nom']) ?>" class="nom-article text-decoration-underline fw-bold text-primary">
+                        <td><a href="article.php?id=<?= $stock['id'] ?>" class="nom-article text-decoration-underline fw-bold text-primary">
                                 <?= htmlspecialchars(ucfirst(strtolower($stock['nom']))) ?>
                             </a>
                             (<?= $quantiteTotale ?>)</td>
-                        <td class="col-photo"><img src="uploads/photos/<?= $stockId ?>.jpg" alt="photo" style="height: 40px;"></td>
+
+                        <td class="col-photo"><?php if (!empty($stock['photo'])): ?>
+                                <img src="uploads/photos/<?= htmlspecialchars($stock['photo']) ?>" alt="photo" style="height: 40px;">
+                            <?php else: ?>
+                                <img src="images/photo-par-defaut.jpg" alt="Aucune photo" style="height: 40px;">
+                            <?php endif; ?>
+
+                        </td>
                         <td>
                             <?php if ($depotsList): foreach ($depotsList as $d): ?>
                                     <div>
@@ -224,16 +231,15 @@ foreach ($subCatRaw as $row) {
                             <button class="btn btn-sm btn-primary transfer-btn" data-stock-id="<?= $stockId ?>">
                                 <i class="bi bi-arrow-left-right"></i>
                             </button>
-                    <button 
-        class="btn btn-sm btn-warning edit-btn"
-        data-stock-id="<?= $stockId ?>"
-        data-stock-nom="<?= htmlspecialchars($stock['nom']) ?>"
-        data-stock-quantite="<?= $stock['quantite_totale'] ?>"
-        data-stock-photo="<?= $stock['photo'] ?? '' ?>"
-        data-stock-document="<?= $stock['document'] ?? '' ?>"
-    >
-        <i class="bi bi-pencil"></i>
-    </button>
+                            <button
+                                class="btn btn-sm btn-warning edit-btn"
+                                data-stock-id="<?= $stockId ?>"
+                                data-stock-nom="<?= htmlspecialchars($stock['nom']) ?>"
+                                data-stock-quantite="<?= $stock['quantite_totale'] ?>"
+                                data-stock-photo="<?= $stock['photo'] ?? '' ?>"
+                                data-stock-document="<?= $stock['document'] ?? '' ?>">
+                                <i class="bi bi-pencil"></i>
+                            </button>
 
 
                             <button class="btn btn-sm btn-danger delete-btn" data-stock-id="<?= $stockId ?>" data-stock-nom="<?= htmlspecialchars($stock['nom']) ?>">
@@ -319,45 +325,44 @@ foreach ($subCatRaw as $row) {
 <!-- MODALE MODIFIER -->
 <div class="modal fade" id="modifyModal" tabindex="-1" aria-labelledby="modifyModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg">
-        <div class="modal-content">
+        <form class="modal-content" id="modifyForm" enctype="multipart/form-data" method="post">
             <div class="modal-header">
                 <h5 class="modal-title" id="modifyModalLabel">Modifier l'article</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
             </div>
             <div class="modal-body">
-                <input type="hidden" id="modifyStockId">
+                <input type="hidden" id="modifyStockId" name="stock_id">
 
                 <div class="mb-3">
                     <label for="modifyNom" class="form-label">Nom de l'article</label>
-                    <input type="text" class="form-control" id="modifyNom">
+                    <input type="text" class="form-control" id="modifyNom" name="nom">
                 </div>
 
                 <div class="mb-3">
                     <label for="modifyQty" class="form-label">Quantité totale</label>
-                    <input type="number" class="form-control" id="modifyQty" min="0">
+                    <input type="number" class="form-control" id="modifyQty" name="quantite" min="0">
                 </div>
 
                 <div class="mb-3">
                     <label for="modifyPhoto" class="form-label">Nouvelle photo (optionnel)</label>
-                    <input type="file" class="form-control" id="modifyPhoto" accept="image/*">
+                    <input type="file" class="form-control" id="modifyPhoto" name="photo" accept="image/*">
                     <div id="existingPhoto" class="mt-2"></div>
                 </div>
 
                 <div class="mb-3">
                     <label for="modifierDocument" class="form-label">Nouveau document (PDF, etc. - optionnel)</label>
-                    <input type="file" class="form-control" id="modifierDocument" accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg">
+                    <input type="file" class="form-control" id="modifierDocument" name="document" accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg">
                     <div id="existingDocument" class="mt-2"></div>
-                   
                 </div>
-
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
-                <button type="button" class="btn btn-primary" id="confirmModify">Enregistrer</button>
+                <button type="submit" class="btn btn-primary" id="confirmModify">Enregistrer</button>
             </div>
-        </div>
+        </form>
     </div>
 </div>
+
 
 
 <!-- MODALE SUPPRIMER -->

@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Hôte : 127.0.0.1
--- Généré le : dim. 27 juil. 2025 à 17:06
+-- Généré le : jeu. 31 juil. 2025 à 21:22
 -- Version du serveur : 10.4.32-MariaDB
 -- Version de PHP : 8.0.30
 
@@ -120,7 +120,13 @@ INSERT INTO `notifications` (`id`, `utilisateur_id`, `message`, `lu`, `created-a
 (131, 6, '✅ Le transfert de 10 x plateau 3m a été validé par l\'administrateur.', 0, '2025-07-27 14:53:24'),
 (132, 3, '✅ Le transfert de 1 x Piqueur a été validé par l\'administrateur.', 0, '2025-07-27 14:59:21'),
 (133, 3, '✅ Le transfert de 30 x plateau 3m a été validé par l\'administrateur.', 0, '2025-07-27 14:59:22'),
-(134, 3, '✅ Le transfert de 1 x Piqueur a été validé par l\'administrateur.', 0, '2025-07-27 14:59:35');
+(134, 3, '✅ Le transfert de 1 x Piqueur a été validé par l\'administrateur.', 0, '2025-07-27 14:59:35'),
+(135, 3, '✅ Le transfert de 10 x plateau 3m a été validé par l\'administrateur.', 0, '2025-07-28 20:51:04'),
+(136, 4, '✅ Le transfert de 10 x plateau 3m a été validé par l\'administrateur.', 0, '2025-07-28 20:51:37'),
+(137, 3, '✅ Le transfert de 2 x banche 2m75 a été validé par l\'administrateur.', 0, '2025-07-29 19:36:57'),
+(138, 3, '✅ Le transfert de 2 x banche 2m75 a été validé par l\'administrateur.', 0, '2025-07-31 19:13:59'),
+(139, 3, '✅ Le transfert de 13 x banche 2m75 a été validé par l\'administrateur.', 0, '2025-07-31 19:15:52'),
+(140, 3, '✅ Le transfert de 13 x banche 2m75 a été validé par l\'administrateur.', 0, '2025-07-31 19:16:24');
 
 -- --------------------------------------------------------
 
@@ -135,6 +141,8 @@ CREATE TABLE `stock` (
   `quantite_disponible` int(11) DEFAULT 0,
   `categorie` varchar(255) DEFAULT NULL,
   `sous_categorie` varchar(255) DEFAULT NULL,
+  `dimensions` varchar(100) DEFAULT NULL,
+  `poids` varchar(50) DEFAULT NULL,
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
   `depot_id` int(11) DEFAULT NULL,
   `photo` varchar(255) DEFAULT NULL,
@@ -145,10 +153,10 @@ CREATE TABLE `stock` (
 -- Déchargement des données de la table `stock`
 --
 
-INSERT INTO `stock` (`id`, `nom`, `quantite_totale`, `quantite_disponible`, `categorie`, `sous_categorie`, `created_at`, `depot_id`, `photo`, `document`) VALUES
-(2, 'banche 2m75', 12, 12, 'Banches', 'Manuportables', '2025-07-17 20:31:41', NULL, NULL, NULL),
-(3, 'plateau 3m', 100, 100, 'echafaudage', '3m', '2025-07-20 19:30:14', NULL, NULL, NULL),
-(4, 'Piqueur', 23, 23, 'Electroportatif', 'Piquage', '2025-07-27 14:58:37', NULL, NULL, NULL);
+INSERT INTO `stock` (`id`, `nom`, `quantite_totale`, `quantite_disponible`, `categorie`, `sous_categorie`, `dimensions`, `poids`, `created_at`, `depot_id`, `photo`, `document`) VALUES
+(2, 'banche 2m75', 24, 24, 'Banches', 'Manuportables', NULL, NULL, '2025-07-17 20:31:41', NULL, NULL, NULL),
+(3, 'plateau 3m', 100, 100, 'echafaudage', '3m', NULL, NULL, '2025-07-20 19:30:14', NULL, NULL, NULL),
+(10, 'Piqueur', 23, 23, 'Electroportatif', 'Piquage', NULL, NULL, '2025-07-27 21:08:02', NULL, NULL, NULL);
 
 -- --------------------------------------------------------
 
@@ -173,8 +181,7 @@ INSERT INTO `stock_chantiers` (`id`, `chantier_id`, `stock_id`, `quantite`, `cre
 (30, 1, 2, 0, '2025-07-25 20:33:23'),
 (31, 6, 2, 0, '2025-07-25 21:03:25'),
 (32, 2, 3, 0, '2025-07-27 14:19:49'),
-(33, 14, 3, 0, '2025-07-27 14:19:55'),
-(34, 1, 4, 0, '2025-07-27 14:59:21');
+(33, 14, 3, 0, '2025-07-27 14:19:55');
 
 -- --------------------------------------------------------
 
@@ -194,9 +201,9 @@ CREATE TABLE `stock_depots` (
 --
 
 INSERT INTO `stock_depots` (`id`, `depot_id`, `stock_id`, `quantite`) VALUES
-(2, 1, 2, 12),
+(2, 1, 2, 24),
 (3, 1, 3, 100),
-(4, 1, 4, 23);
+(10, 1, 10, 23);
 
 -- --------------------------------------------------------
 
@@ -355,13 +362,13 @@ ALTER TABLE `depots`
 -- AUTO_INCREMENT pour la table `notifications`
 --
 ALTER TABLE `notifications`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=135;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=141;
 
 --
 -- AUTO_INCREMENT pour la table `stock`
 --
 ALTER TABLE `stock`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=5;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=11;
 
 --
 -- AUTO_INCREMENT pour la table `stock_chantiers`
@@ -373,13 +380,13 @@ ALTER TABLE `stock_chantiers`
 -- AUTO_INCREMENT pour la table `stock_depots`
 --
 ALTER TABLE `stock_depots`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=5;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=11;
 
 --
 -- AUTO_INCREMENT pour la table `transferts_en_attente`
 --
 ALTER TABLE `transferts_en_attente`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=145;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=151;
 
 --
 -- AUTO_INCREMENT pour la table `utilisateurs`
