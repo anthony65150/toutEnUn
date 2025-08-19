@@ -53,12 +53,15 @@ $drapeau = $drapeaux[$langue] ?? $drapeaux['Français'];
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title><?= isset($pageTitle) ? htmlspecialchars($pageTitle) : "Simpliz" ?></title>
 
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" href="/images/Main.png" />
 
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" crossorigin="anonymous" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
     <link rel="stylesheet" href="/assets/css/override-bootstrap.css" />
     <link rel="stylesheet" href="../css/styles.css" />
 </head>
+
 
 <body <?= isset($_POST['sous_categorie']) ? 'data-sous-categorie="' . htmlspecialchars($_POST['sous_categorie']) . '"' : '' ?> class="d-flex flex-column min-vh-100 fond-gris">
 
@@ -93,8 +96,8 @@ $drapeau = $drapeaux[$langue] ?? $drapeaux['Français'];
                     </div>
                 <?php } ?>
                 <button id="toggleDarkMode" style="font-size: 1.5rem; border: none; background: none; cursor: pointer;">
-    🌙
-</button>
+                    🌙
+                </button>
 
 
             </form>
