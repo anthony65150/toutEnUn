@@ -72,9 +72,20 @@ $totalQuantite = $quantiteDepot + $quantiteChantier;
         <!-- Image -->
         <div class="col-md-4">
             <div class="card shadow-sm">
-                <img src="uploads/etai.jpg" class="card-img-top" alt="Photo de l'article">
+                <?php if (!empty($article['photo'])): ?>
+                    <?php $photoUrl = '/' . ltrim($article['photo'], '/'); ?>
+                    <img src="<?= htmlspecialchars($photoUrl) ?>"
+                        class="card-img-top img-fluid"
+                        alt="Photo de l'article"
+                        style="max-height: 320px; object-fit: contain;">
+                <?php else: ?>
+                    <div class="text-muted text-center p-4">
+                        Aucune photo disponible
+                    </div>
+                <?php endif; ?>
             </div>
         </div>
+
 
         <!-- Quantités -->
         <div class="col-md-8">

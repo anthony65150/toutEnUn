@@ -1,7 +1,7 @@
 array (
-  'stockId' => '2',
-  'nom' => 'banche 2m75',
-  'quantite' => '24',
-  'deleteDocument' => '0',
+  'stockId' => '11',
   'deletePhoto' => '0',
+  'nom' => 'Banche 2m40',
+  'quantite' => '12',
+  'deleteDocIds' => '[4]',
 )

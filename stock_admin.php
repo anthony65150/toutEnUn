@@ -182,13 +182,18 @@ foreach ($subCatRaw as $row) {
                             </a>
                             (<?= $quantiteTotale ?>)</td>
 
-                        <td class="col-photo"><?php if (!empty($stock['photo'])): ?>
-                                <img src="uploads/photos/<?= htmlspecialchars($stock['photo']) ?>" alt="photo" style="height: 40px;">
+                        <td class="col-photo">
+                            <?php
+                            // Normalise en chemin web absolu (avec slash initial)
+                            $photoWeb = !empty($stock['photo']) ? '/' . ltrim($stock['photo'], '/') : '';
+                            ?>
+                            <?php if ($photoWeb): ?>
+                                <img class="article-photo img-thumbnail" src="<?= htmlspecialchars($photoWeb) ?>" alt="photo" style="height: 40px;">
                             <?php else: ?>
-                                <img src="images/photo-par-defaut.jpg" alt="Aucune photo" style="height: 40px;">
+                                <img class="article-photo img-thumbnail d-none" src="" alt="Aucune photo" style="height: 40px; display:none">
                             <?php endif; ?>
-
                         </td>
+
                         <td>
                             <?php if ($depotsList): foreach ($depotsList as $d): ?>
                                     <div>
@@ -231,15 +236,17 @@ foreach ($subCatRaw as $row) {
                             <button class="btn btn-sm btn-primary transfer-btn" data-stock-id="<?= $stockId ?>">
                                 <i class="bi bi-arrow-left-right"></i>
                             </button>
+                            <?php $photoWeb = !empty($stock['photo']) ? '/' . ltrim($stock['photo'], '/') : ''; ?>
                             <button
                                 class="btn btn-sm btn-warning edit-btn"
                                 data-stock-id="<?= $stockId ?>"
                                 data-stock-nom="<?= htmlspecialchars($stock['nom']) ?>"
                                 data-stock-quantite="<?= $stock['quantite_totale'] ?>"
-                                data-stock-photo="<?= $stock['photo'] ?? '' ?>"
-                                data-stock-document="<?= $stock['document'] ?? '' ?>">
+                                data-stock-photo="<?= htmlspecialchars($photoWeb) ?>">
                                 <i class="bi bi-pencil"></i>
                             </button>
+
+
 
 
                             <button class="btn btn-sm btn-danger delete-btn" data-stock-id="<?= $stockId ?>" data-stock-nom="<?= htmlspecialchars($stock['nom']) ?>">
@@ -330,8 +337,16 @@ foreach ($subCatRaw as $row) {
                 <h5 class="modal-title" id="modifyModalLabel">Modifier l'article</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
             </div>
+
             <div class="modal-body">
-                <input type="hidden" id="modifyStockId" name="stock_id">
+                <!-- ⚠️ name changé: stockId (et pas stock_id) -->
+                <input type="hidden" id="modifyStockId" name="stockId">
+
+                <!-- flags globaux -->
+                <input type="hidden" id="deletePhoto" name="deletePhoto" value="0">
+                <!-- plus de deleteDocument côté legacy -->
+                <!-- On garde deletePhoto uniquement -->
+                <input type="hidden" id="deletePhoto" name="deletePhoto" value="0">
 
                 <div class="mb-3">
                     <label for="modifyNom" class="form-label">Nom de l'article</label>
@@ -349,12 +364,29 @@ foreach ($subCatRaw as $row) {
                     <div id="existingPhoto" class="mt-2"></div>
                 </div>
 
+                <!-- ===== Documents (multi) ===== -->
                 <div class="mb-3">
-                    <label for="modifierDocument" class="form-label">Nouveau document (PDF, etc. - optionnel)</label>
-                    <input type="file" class="form-control" id="modifierDocument" name="document" accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg">
-                    <div id="existingDocument" class="mt-2"></div>
+                    <label class="form-label">Documents existants</label>
+                    <div id="existingDocs" class="d-flex flex-column gap-2"></div>
+                    <div class="form-text">Clique sur la corbeille pour supprimer un document.</div>
                 </div>
+
+                <div class="mb-3">
+                    <label for="modifierDocument" class="form-label">Ajouter des documents</label>
+                    <input
+                        type="file"
+                        class="form-control"
+                        id="modifierDocument"
+                        name="documents[]"
+                        multiple
+                        accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.webp">
+                    <div id="newDocsPreview" class="mt-2 d-flex flex-column gap-1"></div>
+                </div>
+
+                <!-- Suppressions en lot (rempli par le JS au submit) -->
+                <input type="hidden" id="deleteDocIds" name="deleteDocIds" value="[]">
             </div>
+
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
                 <button type="submit" class="btn btn-primary" id="confirmModify">Enregistrer</button>
