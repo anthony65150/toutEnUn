@@ -25,13 +25,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['transfert_id'])) {
         exit;
     }
 
-    $articleId = $transfert['article_id'];
-    $quantite = (int)$transfert['quantite'];
-    $sourceType = $transfert['source_type'];
-    $sourceId = (int)$transfert['source_id'];
-    $destinationType = $transfert['destination_type'];
-    $destinationId = (int)$transfert['destination_id'];
-    $demandeurId = $transfert['demandeur_id'];
+    $articleId        = (int)$transfert['article_id'];
+    $quantite         = (int)$transfert['quantite'];
+    $sourceType       = $transfert['source_type'];        // 'depot' | 'chantier'
+    $sourceId         = isset($transfert['source_id']) ? (int)$transfert['source_id'] : null;
+    $destinationType  = $transfert['destination_type'];   // 'depot' | 'chantier'
+    $destinationId    = isset($transfert['destination_id']) ? (int)$transfert['destination_id'] : null;
+    $demandeurId      = (int)$transfert['demandeur_id'];
+    $validatorUserId  = $_SESSION['utilisateurs']['id'] ?? null;
 
     try {
         $pdo->beginTransaction();
@@ -59,14 +60,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['transfert_id'])) {
             }
         }
 
-      // 🔻 Retirer de la source
-if ($sourceType === 'chantier') {
-    $stmtUpdate = $pdo->prepare("UPDATE stock_chantiers SET quantite = GREATEST(quantite - :qte, 0) WHERE chantier_id = :src AND stock_id = :article");
-    $stmtUpdate->execute(['qte' => $quantite, 'src' => $sourceId, 'article' => $articleId]);
-}
-// Si source = dépôt, ne rien faire ici (déjà décrémenté à l’envoi)
+        // 🔻 Retirer de la source
+        if ($sourceType === 'chantier') {
+            $stmtUpdate = $pdo->prepare("UPDATE stock_chantiers SET quantite = GREATEST(quantite - :qte, 0) WHERE chantier_id = :src AND stock_id = :article");
+            $stmtUpdate->execute(['qte' => $quantite, 'src' => $sourceId, 'article' => $articleId]);
+        }
+        // Si source = dépôt, ne rien faire ici (déjà décrémenté à l’envoi)
 
-
+        // 🧾 Enregistrer l'historique du mouvement
+        $stmtMv = $pdo->prepare("
+            INSERT INTO stock_mouvements
+                (stock_id, type, source_type, source_id, dest_type, dest_id, quantite, statut, utilisateur_id, created_at)
+            VALUES
+                (:stock_id, 'transfert', :src_type, :src_id, :dest_type, :dest_id, :qte, 'valide', :user_id, NOW())
+        ");
+        $stmtMv->execute([
+            ':stock_id' => $articleId,
+            ':src_type' => $sourceType,
+            ':src_id'   => ($sourceType === 'chantier') ? $sourceId : null,   // null si dépôt
+            ':dest_type'=> $destinationType,
+            ':dest_id'  => ($destinationType === 'chantier') ? $destinationId : null, // null si dépôt
+            ':qte'      => $quantite,
+            ':user_id'  => $validatorUserId,
+        ]);
 
         // ✅ Supprimer le transfert en attente
         $stmtDelete = $pdo->prepare("DELETE FROM transferts_en_attente WHERE id = ?");
@@ -85,7 +101,6 @@ if ($sourceType === 'chantier') {
         } else {
             $_SESSION['success_message'] = "Transfert validé avec succès.";
             $_SESSION['highlight_stock_id'] = $articleId;
-
             header("Location: stock_admin.php");
             exit;
         }
@@ -106,7 +121,7 @@ if ($sourceType === 'chantier') {
         exit;
     } else {
         $_SESSION['error_message'] = "Requête invalide.";
-            header("Location: stock_admin.php");
+        header("Location: stock_admin.php");
         exit;
     }
 }

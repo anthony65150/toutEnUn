@@ -6,7 +6,9 @@ if (!isset($_SESSION['utilisateurs'])) {
     exit;
 }
 
-$userId = $_SESSION['utilisateurs']['id'];
+$userId = (int)($_SESSION['utilisateurs']['id'] ?? 0);
+
+// Récupérer le dépôt du responsable connecté
 $stmtDepot = $pdo->prepare("SELECT id FROM depots WHERE responsable_id = ?");
 $stmtDepot->execute([$userId]);
 $depot = $stmtDepot->fetch(PDO::FETCH_ASSOC);
@@ -21,68 +23,121 @@ if (!$depotId) {
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['transfert_id'])) {
     $transfertId = (int)$_POST['transfert_id'];
 
-    $stmt = $pdo->prepare("
-        SELECT t.*, s.nom AS article_nom
-        FROM transferts_en_attente t
-        JOIN stock s ON t.article_id = s.id
-        WHERE t.id = ? AND t.destination_type = 'depot' AND t.destination_id = ?
-    ");
-    $stmt->execute([$transfertId, $depotId]);
-    $transfert = $stmt->fetch(PDO::FETCH_ASSOC);
+    try {
+        // Démarrer la transaction AVANT le SELECT ... FOR UPDATE
+        $pdo->beginTransaction();
 
-    if ($transfert) {
-        $articleId = $transfert['article_id'];
-        $quantite = (int)$transfert['quantite'];
-        $demandeurId = $transfert['demandeur_id'];
-        $sourceType = $transfert['source_type'];
-        $sourceId = $transfert['source_id'];
+        // Sélectionner et verrouiller le transfert (destination = ce dépôt, encore en attente)
+        $stmt = $pdo->prepare("
+            SELECT t.*, s.nom AS article_nom
+            FROM transferts_en_attente t
+            JOIN stock s ON t.article_id = s.id
+            WHERE t.id = ?
+              AND t.destination_type = 'depot'
+              AND t.destination_id = ?
+              AND t.statut = 'en_attente'
+            FOR UPDATE
+        ");
+        $stmt->execute([$transfertId, $depotId]);
+        $transfert = $stmt->fetch(PDO::FETCH_ASSOC);
 
-        try {
-            $pdo->beginTransaction();
-
-            if ($sourceType === 'chantier') {
-                // Ajouter au dépôt (uniquement si source = chantier)
-                $stmtCheck = $pdo->prepare("SELECT COUNT(*) FROM stock_depots WHERE depot_id = ? AND stock_id = ?");
-                $stmtCheck->execute([$depotId, $articleId]);
-                $exists = $stmtCheck->fetchColumn();
-
-                if ($exists) {
-                    $stmtUpdate = $pdo->prepare("UPDATE stock_depots SET quantite = quantite + :qte WHERE depot_id = :depot AND stock_id = :article");
-                    $stmtUpdate->execute(['qte' => $quantite, 'depot' => $depotId, 'article' => $articleId]);
-                } else {
-                    $stmtInsert = $pdo->prepare("INSERT INTO stock_depots (depot_id, stock_id, quantite) VALUES (:depot, :article, :qte)");
-                    $stmtInsert->execute(['depot' => $depotId, 'article' => $articleId, 'qte' => $quantite]);
-                }
-
-                // Retirer du chantier source
-                $stmtUpdateChantier = $pdo->prepare("UPDATE stock_chantiers SET quantite = GREATEST(quantite - :qte, 0) WHERE chantier_id = :chantier AND stock_id = :article");
-                $stmtUpdateChantier->execute(['qte' => $quantite, 'chantier' => $sourceId, 'article' => $articleId]);
-            }
-
-            // Supprimer le transfert en attente
-            $stmtDelete = $pdo->prepare("DELETE FROM transferts_en_attente WHERE id = ?");
-            $stmtDelete->execute([$transfertId]);
-
-            // Notifier
-            $message = "✅ Le transfert de {$quantite} x {$transfert['article_nom']} a été validé par le dépôt.";
-            $stmtNotif = $pdo->prepare("INSERT INTO notifications (utilisateur_id, message) VALUES (?, ?)");
-            $stmtNotif->execute([$demandeurId, $message]);
-
-            $pdo->commit();
-            $_SESSION['success_message'] = "Transfert validé avec succès.";
-            
-            // ✅ Le surlignage avec $_SESSION
-            $_SESSION['highlight_stock_id'] = $articleId;
-        } catch (Exception $e) {
+        if (!$transfert) {
             $pdo->rollBack();
-            $_SESSION['error_message'] = "Erreur lors de la validation : " . $e->getMessage();
+            $_SESSION['error_message'] = "Transfert introuvable ou déjà traité.";
+            header("Location: stock_depot.php");
+            exit;
         }
-    } else {
-        $_SESSION['error_message'] = "Transfert introuvable.";
+
+        $articleId   = (int)$transfert['article_id'];
+        $quantite    = (int)$transfert['quantite'];
+        $demandeurId = (int)$transfert['demandeur_id'];
+        $sourceType  = $transfert['source_type'];                 // 'depot' | 'chantier'
+        $sourceId    = isset($transfert['source_id']) ? (int)$transfert['source_id'] : null;
+        $articleNom  = htmlspecialchars($transfert['article_nom']);
+
+        // ➕ Ajouter au dépôt
+        $stmtCheck = $pdo->prepare("SELECT COUNT(*) FROM stock_depots WHERE depot_id = ? AND stock_id = ?");
+        $stmtCheck->execute([$depotId, $articleId]);
+        $exists = (bool)$stmtCheck->fetchColumn();
+
+        if ($exists) {
+            $stmtUpdate = $pdo->prepare("
+                UPDATE stock_depots
+                SET quantite = quantite + :qte
+                WHERE depot_id = :depot AND stock_id = :article
+            ");
+            $stmtUpdate->execute([
+                'qte'     => $quantite,
+                'depot'   => $depotId,
+                'article' => $articleId
+            ]);
+        } else {
+            $stmtInsert = $pdo->prepare("
+                INSERT INTO stock_depots (depot_id, stock_id, quantite)
+                VALUES (:depot, :article, :qte)
+            ");
+            $stmtInsert->execute([
+                'depot'   => $depotId,
+                'article' => $articleId,
+                'qte'     => $quantite
+            ]);
+        }
+
+        // 🔻 Retirer de la source si la source est un chantier
+        if ($sourceType === 'chantier' && $sourceId) {
+            $stmtUpdateChantier = $pdo->prepare("
+                UPDATE stock_chantiers
+                SET quantite = GREATEST(quantite - :qte, 0)
+                WHERE chantier_id = :chantier AND stock_id = :article
+            ");
+            $stmtUpdateChantier->execute([
+                'qte'      => $quantite,
+                'chantier' => $sourceId,
+                'article'  => $articleId
+            ]);
+        }
+        // Si source = dépôt, la décrémentation a normalement été faite à l’envoi
+
+        // 🧾 Historique du mouvement (validation par le dépôt)
+        // Table attendue: stock_mouvements(stock_id, type, source_type, source_id, dest_type, dest_id, quantite, statut, utilisateur_id, created_at)
+        $stmtMv = $pdo->prepare("
+            INSERT INTO stock_mouvements
+                (stock_id, type, source_type, source_id, dest_type, dest_id, quantite, statut, utilisateur_id, created_at)
+            VALUES
+                (:stock_id, 'transfert', :src_type, :src_id, 'depot', :dest_id, :qte, 'valide', :user_id, NOW())
+        ");
+        $stmtMv->execute([
+            ':stock_id' => $articleId,
+            ':src_type' => $sourceType,
+            ':src_id'   => ($sourceType === 'chantier') ? $sourceId : null, // null si dépôt
+            ':dest_id'  => $depotId,
+            ':qte'      => $quantite,
+            ':user_id'  => $userId,
+        ]);
+
+        // ✅ Terminer : supprimer le transfert en attente
+        $stmtDelete = $pdo->prepare("DELETE FROM transferts_en_attente WHERE id = ?");
+        $stmtDelete->execute([$transfertId]);
+
+        // 🔔 Notifier le demandeur
+        $message = "✅ Le transfert de {$quantite} x {$articleNom} a été validé par le dépôt.";
+        $stmtNotif = $pdo->prepare("INSERT INTO notifications (utilisateur_id, message) VALUES (?, ?)");
+        $stmtNotif->execute([$demandeurId, $message]);
+
+        $pdo->commit();
+
+        $_SESSION['success_message']     = "Transfert validé avec succès.";
+        $_SESSION['highlight_stock_id']  = $articleId;
+
+    } catch (Exception $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        $_SESSION['error_message'] = "Erreur lors de la validation : " . $e->getMessage();
     }
+
 } else {
     $_SESSION['error_message'] = "Requête invalide.";
 }
 
-header("Location: stock_depot.php?chantier_id=" . ($chantierId ?? ''));
+// Redirection (pas de chantier_id ici)
+header("Location: stock_depot.php");
 exit;
