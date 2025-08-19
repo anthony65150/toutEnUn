@@ -197,7 +197,7 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
                     <th>Dépôts</th>
                     <th>Chantiers</th>
                     <th>Mon chantier</th>
-                    <th>Actions</th>
+                    <th>Action</th>
                 </tr>
             </thead>
             <tbody class="stockTableBody">
@@ -249,10 +249,15 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
                     <tr data-cat="<?= strtolower(trim(htmlspecialchars($stock['categorie']))) ?>"
                         data-subcat="<?= strtolower(trim(htmlspecialchars($stock['sous_categorie']))) ?>"
                         class="<?= (isset($_SESSION['highlight_stock_id']) && $_SESSION['highlight_stock_id'] == $stock['id']) ? 'table-success highlight-row' : '' ?>">
-                        <td><a href="article.php?id=<?= urlencode($stock['nom']) ?>" class="nom-article text-decoration-underline fw-bold text-primary">
+                        <td>
+                            <a
+                                href="article.php?id=<?= (int)$stockId ?>&chantier_id=<?= (int)$utilisateurChantierId ?>"
+                                class="nom-article text-decoration-underline fw-bold text-primary">
                                 <?= htmlspecialchars(ucfirst(strtolower($stock['nom']))) ?>
                             </a>
-                            (<?= $quantiteTotale ?>)</td>
+                            (<?= $quantiteTotale ?>)
+                        </td>
+
                         <td class="col-photo"><img src="uploads/photos/<?= $stockId ?>.jpg" alt="photo" style="height: 40px;"></td>
                         <td><?= $depotsHtml ?></td>
                         <td><?= $chantiersHtml ?></td>
@@ -338,7 +343,7 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 <script>
     window.isChef = true;
-    window.chefChantierActuel = <?= (int) $_GET['chantier_id'] ?>;
+    window.chefChantierActuel = <?= (int)($_GET['chantier_id'] ?? 0) ?>;
 </script>
 
 

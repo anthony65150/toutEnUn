@@ -175,10 +175,15 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
         ?>
           <tr data-cat="<?= $cat ?>" data-subcat="<?= $subcat ?>"
             class="<?= (isset($_SESSION['highlight_stock_id']) && $_SESSION['highlight_stock_id'] == $stock['id']) ? 'table-success highlight-row' : '' ?>">
-            <td><a href="article.php?id=<?= urlencode($stock['nom']) ?>" class="nom-article text-decoration-underline fw-bold text-primary">
+            <td>
+              <a
+                href="article.php?id=<?= (int)$stockId ?>&depot_id=<?= (int)$depotId ?>"
+                class="nom-article text-decoration-underline fw-bold text-primary">
                 <?= htmlspecialchars(ucfirst(strtolower($stock['nom']))) ?>
               </a>
-              (<?= $quantiteTotale ?>)</td>
+              (<?= $quantiteTotale ?>)
+            </td>
+
             <td class="col-photo"><img src="uploads/photos/<?= $stockId ?>.jpg" alt="<?= $nom ?>" style="height:40px;"></td>
             <td><span class="badge quantite-disponible <?= $dispoDepot < 10 ? 'bg-danger' : 'bg-success' ?>"><?= $dispoDepot ?></span></td>
             <td>
@@ -202,10 +207,16 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 
             <td>
-              <button class="btn btn-sm btn-primary btn-transfer transfer-btn" data-stock-id="<?= $stockId ?>" data-stock-nom="<?= $nom ?>">
-                <i class="bi bi-arrow-left-right"></i> Transférer
+              <button
+                class="btn btn-sm btn-primary transfer-btn"
+                data-stock-id="<?= (int)$stockId ?>"
+                data-stock-nom="<?= $nom ?>"
+                title="Transférer"
+                aria-label="Transférer">
+                <i class="bi bi-arrow-left-right"></i>
               </button>
             </td>
+
           </tr>
         <?php endforeach; ?>
       </tbody>
