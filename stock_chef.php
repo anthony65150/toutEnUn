@@ -90,7 +90,12 @@ foreach ($stmt as $row) {
     $depotAssoc[$row['stock_id']][] = ['id' => $row['depot_id'], 'nom' => $row['depot_nom'], 'quantite' => (int)$row['quantite']];
 }
 
-$stocks = $pdo->query("SELECT id, nom, quantite_totale, categorie, sous_categorie FROM stock ORDER BY nom")->fetchAll(PDO::FETCH_ASSOC);
+$stocks = $pdo->query("
+  SELECT id, nom, photo, quantite_totale, categorie, sous_categorie
+  FROM stock
+  ORDER BY nom
+")->fetchAll(PDO::FETCH_ASSOC);
+
 $categories = $pdo->query("SELECT DISTINCT categorie FROM stock WHERE categorie IS NOT NULL ORDER BY categorie")->fetchAll(PDO::FETCH_COLUMN);
 $subCatRaw = $pdo->query("SELECT categorie, sous_categorie FROM stock WHERE sous_categorie IS NOT NULL")->fetchAll(PDO::FETCH_ASSOC);
 $subCategoriesGrouped = [];
@@ -258,7 +263,27 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
                             (<?= $quantiteTotale ?>)
                         </td>
 
-                        <td class="col-photo"><img src="uploads/photos/<?= $stockId ?>.jpg" alt="photo" style="height: 40px;"></td>
+                        <td class="col-photo">
+                            <?php
+                            $photoPath = null;
+                            if (!empty($stock['photo'])) {
+                                // chemin stocké en BDD (ex: uploads/photos/123.jpg)
+                                $photoPath = '/' . ltrim($stock['photo'], '/');
+                            } else {
+                                // fallback si fichier uploads/photos/{id}.jpg existe
+                                $localFile = __DIR__ . "/uploads/photos/{$stockId}.jpg";
+                                if (is_file($localFile)) {
+                                    $photoPath = "/uploads/photos/{$stockId}.jpg";
+                                }
+                            }
+                            ?>
+                            <?php if ($photoPath): ?>
+                                <img src="<?= htmlspecialchars($photoPath) ?>" alt="photo" style="height:40px;">
+                            <?php else: ?>
+                                <span class="text-muted">—</span>
+                            <?php endif; ?>
+                        </td>
+
                         <td><?= $depotsHtml ?></td>
                         <td><?= $chantiersHtml ?></td>
                         <td><?= $badge ?></td>

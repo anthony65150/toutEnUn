@@ -38,7 +38,7 @@ foreach ($stmt as $row) {
 
 $stmt = $pdo->prepare("
     SELECT 
-        s.id, s.nom,
+        s.id, s.nom, s.photo,
         s.quantite_totale, 
         COALESCE(sd.quantite,0)+COALESCE(sc.total_chantier,0) AS total_recalculé,
         COALESCE(sd.quantite,0) AS quantite_stock_depot,
@@ -53,6 +53,7 @@ $stmt = $pdo->prepare("
     ) sc ON s.id = sc.stock_id
     ORDER BY s.nom
 ");
+
 $stmt->execute([$depotId]);
 
 $stocks = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -184,7 +185,25 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
               (<?= $quantiteTotale ?>)
             </td>
 
-            <td class="col-photo"><img src="uploads/photos/<?= $stockId ?>.jpg" alt="<?= $nom ?>" style="height:40px;"></td>
+            <td class="col-photo">
+              <?php
+              $photoPath = null;
+              if (!empty($stock['photo'])) {
+                $photoPath = '/' . ltrim($stock['photo'], '/');
+              } else {
+                $localFile = __DIR__ . "/uploads/photos/{$stockId}.jpg";
+                if (is_file($localFile)) {
+                  $photoPath = "/uploads/photos/{$stockId}.jpg";
+                }
+              }
+              ?>
+              <?php if ($photoPath): ?>
+                <img src="<?= htmlspecialchars($photoPath) ?>" alt="<?= $nom ?>" style="height:40px;">
+              <?php else: ?>
+                <span class="text-muted">—</span>
+              <?php endif; ?>
+            </td>
+
             <td><span class="badge quantite-disponible <?= $dispoDepot < 10 ? 'bg-danger' : 'bg-success' ?>"><?= $dispoDepot ?></span></td>
             <td>
               <?php
