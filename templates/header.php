@@ -104,20 +104,19 @@ $drapeau = $drapeaux[$langue] ?? $drapeaux['Français'];
 
             <!-- Bonjour + prénom centré -->
             <?php if (isset($_SESSION['utilisateurs'])) : ?>
+                <!-- Bloc Bonjour (reste centré) -->
                 <div class="flex-grow-1 d-flex justify-content-center px-2">
                     <div class="d-flex align-items-center flex-nowrap overflow-auto py-2 px-2 rounded" style="max-width: 100%;">
+
+
                         <a href="/mon-profil.php" class="me-2 flex-shrink-0">
                             <?php
-                            $photo = '/images/image-default.png'; // Image par défaut
-
-                            if (isset($_SESSION['utilisateurs']['photo']) && !empty($_SESSION['utilisateurs']['photo'])) {
-                                $cheminRelatif = ltrim($_SESSION['utilisateurs']['photo'], '/'); // ex: uploads/photo1.jpg
-                                $cheminAbsolu = $_SERVER['DOCUMENT_ROOT'] . '/' . $cheminRelatif;
-
-                                $extension = strtolower(pathinfo($cheminAbsolu, PATHINFO_EXTENSION));
-                                $formatsAutorises = ['jpg', 'jpeg', 'png', 'webp'];
-
-                                if (file_exists($cheminAbsolu) && in_array($extension, $formatsAutorises)) {
+                            $photo = '/images/image-default.png';
+                            if (!empty($_SESSION['utilisateurs']['photo'])) {
+                                $cheminRelatif = ltrim($_SESSION['utilisateurs']['photo'], '/');
+                                $cheminAbsolu  = $_SERVER['DOCUMENT_ROOT'] . '/' . $cheminRelatif;
+                                $ext = strtolower(pathinfo($cheminAbsolu, PATHINFO_EXTENSION));
+                                if (file_exists($cheminAbsolu) && in_array($ext, ['jpg', 'jpeg', 'png', 'webp'])) {
                                     $photo = '/' . $cheminRelatif;
                                 }
                             }
@@ -132,7 +131,14 @@ $drapeau = $drapeaux[$langue] ?? $drapeaux['Français'];
                         </span>
                     </div>
                 </div>
+
+                <!-- Bouton Déconnexion tout à droite -->
+                <div class="d-none d-md-block ms-auto pe-3">
+                    <a href="/deconnexion.php" class="nav-link text-danger">Déconnexion</a>
+                </div>
             <?php endif; ?>
+
+
 
             <!-- Bouton burger (mobile) -->
             <?php $currentPage = basename($_SERVER['PHP_SELF']); ?>

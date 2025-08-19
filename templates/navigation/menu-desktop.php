@@ -37,6 +37,17 @@ $current_page = basename($_SERVER['PHP_SELF']);
                 </li>
             <?php endif; ?>
 
+            <?php if ($_SESSION['utilisateurs']['fonction'] === 'administrateur'): ?>
+                <li class="nav-item p-2">
+                    <a href="/depots_admin.php"
+                        class="nav-link <?php echo ($current_page == 'depots_admin.php') ? 'active' : ''; ?>">
+                        Dépôts
+                    </a>
+                </li>
+            <?php endif; ?>
+
+
+
             <?php
             $fonction = $_SESSION['utilisateurs']['fonction'] ?? '';
             $stockPage = match ($fonction) {
@@ -53,10 +64,6 @@ $current_page = basename($_SERVER['PHP_SELF']);
             <?php endif; ?>
         </ul>
 
-        <?php if (isset($_SESSION["utilisateurs"])) : ?>
-            <div class="p-2">
-                <a class="nav-link text-danger" href="/deconnexion.php">Déconnexion</a>
-            </div>
-        <?php endif; ?>
+
     </div>
 </nav>
