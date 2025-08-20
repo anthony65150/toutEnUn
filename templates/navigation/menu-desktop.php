@@ -29,10 +29,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
             <?php endif; ?>
 
             <?php if (isset($_SESSION['utilisateurs']['fonction']) && $_SESSION['utilisateurs']['fonction'] === 'administrateur') : ?>
-                <li class="nav-item p-2">
-                    <a href="/ajoutEmploye.php" class="nav-link <?php echo ($current_page == 'ajoutEmploye.php') ? 'active' : ''; ?>">Ajout employés</a>
-                </li>
-                <li class="nav-item p-2">
+                               <li class="nav-item p-2">
                     <a href="/chantiers_admin.php" class="nav-link <?php echo ($current_page == 'chantiers_admin.php') ? 'active' : ''; ?>">Chantiers</a>
                 </li>
             <?php endif; ?>
@@ -45,6 +42,15 @@ $current_page = basename($_SERVER['PHP_SELF']);
                     </a>
                 </li>
             <?php endif; ?>
+
+            <?php if ($_SESSION['utilisateurs']['fonction'] === 'administrateur'): ?>
+                <li class="nav-item p-2">
+                    <a class="nav-link" href="employes.php">
+                        Employés
+                    </a>
+                </li>
+            <?php endif; ?>
+
 
 
 

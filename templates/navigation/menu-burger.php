@@ -47,14 +47,6 @@ $current_page = basename($_SERVER['PHP_SELF']);
 
             <?php if ($_SESSION['utilisateurs']['fonction'] ?? '' === 'administrateur') : ?>
                 <li class="p-2">
-                    <a href="/ajoutEmploye.php" class="nav-link <?= ($current_page == 'ajoutEmploye.php') ? 'active' : '' ?> text-center">
-                        Ajout employés
-                    </a>
-                </li>
-            <?php endif; ?>
-
-            <?php if ($_SESSION['utilisateurs']['fonction'] ?? '' === 'administrateur') : ?>
-                <li class="p-2">
                     <a href="/chantiers_admin.php" class="nav-link <?= ($current_page == 'chantiers_admin.php') ? 'active' : '' ?> text-center">
                         Chantiers
                     </a>
@@ -81,13 +73,22 @@ $current_page = basename($_SERVER['PHP_SELF']);
                 default => null
             };
             ?>
+            <?php if ($_SESSION['utilisateurs']['fonction'] === 'administrateur'): ?>
+                <li class="nav-item p-2">
+                    <a class="nav-link" href="employes.php">
+                        Employés
+                    </a>
+                </li>
+            <?php endif; ?>
+            
             <?php if ($stockPage): ?>
-                <li class="p-2">
+                <li class="nav-item p-2">
                     <a href="/<?= $stockPage ?>" class="nav-link <?= ($current_page == $stockPage) ? 'active' : '' ?> text-center">
                         Stock
                     </a>
                 </li>
             <?php endif; ?>
+
 
             <?php if (isset($_SESSION["utilisateurs"])): ?>
                 <li class="p-2">

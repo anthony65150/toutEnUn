@@ -1,41 +1,4 @@
 <?php
-function ajouUtilisateur(PDO $pdo, string $nom, string $prenom, string $email, string $motDePasse, string $fonction, ?array $chantiers = []): bool
-{
-    $query = $pdo->prepare("INSERT INTO utilisateurs (nom, prenom, email, motDePasse, fonction) 
-                            VALUES (:nom, :prenom, :email, :motDePasse, :fonction)");
-
-    $motDePasse = password_hash($motDePasse, PASSWORD_DEFAULT);
-
-    $query->bindValue(':nom', $nom);
-    $query->bindValue(':prenom', $prenom);
-    $query->bindValue(':email', $email);
-    $query->bindValue(':motDePasse', $motDePasse);
-    $query->bindValue(':fonction', $fonction);
-
-    $success = $query->execute();
-
-    if ($success) {
-        $newUserId = $pdo->lastInsertId();
-
-        if ($fonction === 'chef' && !empty($chantiers)) {
-            $stmt = $pdo->prepare("INSERT INTO utilisateur_chantiers (utilisateur_id, chantier_id) VALUES (?, ?)");
-            foreach ($chantiers as $chantier_id) {
-                $stmt->execute([$newUserId, $chantier_id]);
-
-                // Optionnel : tu peux aussi mettre à jour le responsable_id dans chantiers
-                $pdo->prepare("UPDATE chantiers SET responsable_id = :user_id WHERE id = :chantier_id")
-                    ->execute([':user_id' => $newUserId, ':chantier_id' => $chantier_id]);
-            }
-        }
-
-        if ($fonction === 'depot') {
-            $stmt = $pdo->prepare("UPDATE depots SET responsable_id = ? WHERE responsable_id IS NULL LIMIT 1");
-            $stmt->execute([$newUserId]);
-        }
-    }
-
-    return $success;
-}
 
 
 function verifieUtilisateur(array $utilisateurs): array|bool
