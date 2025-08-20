@@ -36,6 +36,8 @@ foreach ($stmt as $row) {
 }
 
 
+$pdo->query("SET SESSION group_concat_max_len = 8192");
+
 $stmt = $pdo->prepare("
     SELECT 
         s.id, s.nom, s.photo,
@@ -43,19 +45,29 @@ $stmt = $pdo->prepare("
         COALESCE(sd.quantite,0)+COALESCE(sc.total_chantier,0) AS total_recalculé,
         COALESCE(sd.quantite,0) AS quantite_stock_depot,
         COALESCE(sd.quantite,0) AS disponible_depot,
-        s.categorie, s.sous_categorie
+        s.categorie, s.sous_categorie,
+        odo.autres_depots
     FROM stock s
-    LEFT JOIN stock_depots sd ON s.id = sd.stock_id AND sd.depot_id = ?
+    LEFT JOIN stock_depots sd 
+        ON s.id = sd.stock_id AND sd.depot_id = ?
     LEFT JOIN (
         SELECT stock_id, SUM(quantite) AS total_chantier 
         FROM stock_chantiers 
         GROUP BY stock_id
     ) sc ON s.id = sc.stock_id
+    /* --- autres dépôts (hors dépôt courant) --- */
+    LEFT JOIN (
+        SELECT sd2.stock_id,
+               GROUP_CONCAT(CONCAT(d2.nom, ' (', sd2.quantite, ')') 
+                            ORDER BY d2.nom SEPARATOR ', ') AS autres_depots
+        FROM stock_depots sd2
+        INNER JOIN depots d2 ON d2.id = sd2.depot_id
+        WHERE sd2.depot_id <> ? AND sd2.quantite > 0
+        GROUP BY sd2.stock_id
+    ) odo ON odo.stock_id = s.id
     ORDER BY s.nom
 ");
-
-$stmt->execute([$depotId]);
-
+$stmt->execute([$depotId, $depotId]);
 $stocks = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 $categories = $pdo->query("SELECT DISTINCT categorie FROM stock WHERE categorie IS NOT NULL ORDER BY categorie")->fetchAll(PDO::FETCH_COLUMN);
@@ -82,6 +94,15 @@ $stmt = $pdo->prepare("
 ");
 $stmt->execute([$depotId]);
 $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+
+$depotNom = '';
+if ($depotId) {
+  $stmt = $pdo->prepare("SELECT nom FROM depots WHERE id = ?");
+  $stmt->execute([$depotId]);
+  $depotNom = (string) $stmt->fetchColumn();
+}
+
 ?>
 
 <div class="container py-5">
@@ -101,7 +122,7 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
     <?php unset($_SESSION['error_message']); ?>
   <?php endif; ?>
 
-  <h2 class="text-center mb-4">Stock dépôt</h2>
+  <h2 class="text-center mb-4">Stock dépôt<?= $depotNom ? ' – ' . htmlspecialchars($depotNom) : '' ?></h2>
 
   <div class="d-flex justify-content-center mb-3 flex-wrap gap-2" id="categoriesSlide">
     <button class="btn btn-outline-primary" onclick="filterByCategory('')">Tous</button>
@@ -160,6 +181,7 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
           <th>Nom</th>
           <th class="col-photo">Photo</th>
           <th>Disponible au dépôt</th>
+          <th>Autres dépôts</th>
           <th>Chantiers</th>
           <th>Action</th>
         </tr>
@@ -205,6 +227,26 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
             </td>
 
             <td><span class="badge quantite-disponible <?= $dispoDepot < 10 ? 'bg-danger' : 'bg-success' ?>"><?= $dispoDepot ?></span></td>
+            <td>
+              <?php
+              $autres = $stock['autres_depots'] ?? '';
+              if ($autres) {
+                foreach (explode(', ', $autres) as $item) {
+
+                  if (preg_match('/^(.*)\s\((\d+)\)$/', $item, $m)) {
+                    $nomDepot = trim($m[1]);
+                    $qte = (int)$m[2];
+                    $color = $qte > 10 ? 'bg-success' : 'bg-danger';
+                    echo '<div><span class="badge ' . $color . '">' . $nomDepot . ' (' . $qte . ')</span></div>';
+                  } else {
+                    echo '<div>' . htmlspecialchars($item) . '</div>';
+                  }
+                }
+              } else {
+                echo '<span class="text-muted">Aucun</span>';
+              }
+              ?>
+            </td>
             <td>
               <?php
               // 🔽 Filtrer les chantiers avec quantité > 0

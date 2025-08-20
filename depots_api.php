@@ -1,67 +1,71 @@
 <?php
-require_once "./config/init.php";
-header('Content-Type: application/json');
+require_once './config/init.php';
+header('Content-Type: application/json; charset=utf-8');
 
 if (!isset($_SESSION['utilisateurs']) || $_SESSION['utilisateurs']['fonction'] !== 'administrateur') {
-  http_response_code(403);
-  echo json_encode(['ok' => false, 'error' => 'forbidden']);
-  exit;
+  echo json_encode(['ok' => false, 'error' => 'Non autorisé']); exit;
 }
 
-$action = $_POST['action'] ?? $_GET['action'] ?? null;
-if (!$action) { echo json_encode(['ok'=>false,'error'=>'no action']); exit; }
+$action = $_POST['action'] ?? '';
 
 try {
-  if ($action === 'create') {
-    $nom = trim($_POST['nom'] ?? '');
-    if ($nom === '') throw new Exception('Nom obligatoire');
-    $responsable_id = !empty($_POST['responsable_id']) ? (int)$_POST['responsable_id'] : null;
+  switch ($action) {
+    case 'create': {
+      $nom  = trim($_POST['nom'] ?? '');
+      $resp = $_POST['responsable_id'] ?? '';
+      $resp = ($resp === '' ? null : (int)$resp);
 
-    // unicité optionnelle
-    $stmt = $pdo->prepare("SELECT COUNT(*) FROM depots WHERE nom = ?");
-    $stmt->execute([$nom]);
-    if ($stmt->fetchColumn() > 0) throw new Exception("Un dépôt '$nom' existe déjà");
+      if ($nom === '') throw new Exception('Nom obligatoire');
 
-    $stmt = $pdo->prepare("INSERT INTO depots (nom, responsable_id) VALUES (?, ?)");
-    $stmt->execute([$nom, $responsable_id]);
+      $stmt = $pdo->prepare(
+        "INSERT INTO depots (nom, responsable_id, created_at)
+         VALUES (:nom, :resp, NOW())"
+      );
+      $stmt->bindValue(':nom', $nom, PDO::PARAM_STR);
+      if ($resp === null) $stmt->bindValue(':resp', null, PDO::PARAM_NULL);
+      else                $stmt->bindValue(':resp', $resp, PDO::PARAM_INT);
+      $stmt->execute();
 
-    echo json_encode(['ok'=>true,'id'=>$pdo->lastInsertId()]);
-    exit;
-  }
-
-  if ($action === 'update') {
-    $id  = (int)($_POST['id'] ?? 0);
-    $nom = trim($_POST['nom'] ?? '');
-    if (!$id) throw new Exception('ID manquant');
-    if ($nom === '') throw new Exception('Nom obligatoire');
-    $responsable_id = !empty($_POST['responsable_id']) ? (int)$_POST['responsable_id'] : null;
-
-    $stmt = $pdo->prepare("UPDATE depots SET nom=?, responsable_id=? WHERE id=?");
-    $stmt->execute([$nom, $responsable_id, $id]);
-
-    echo json_encode(['ok'=>true]);
-    exit;
-  }
-
-  if ($action === 'delete') {
-    $id = (int)($_POST['id'] ?? 0);
-    if (!$id) throw new Exception('ID manquant');
-
-    // Si tu as une table stock_depots, on empêche la suppression s'il reste du stock
-    $hasStock = $pdo->prepare("SELECT COUNT(*) FROM stock_depots WHERE depot_id = ?");
-    if ($hasStock->execute([$id]) && $hasStock->fetchColumn() > 0) {
-      throw new Exception("Impossible: des articles sont encore rattachés à ce dépôt.");
+      echo json_encode(['ok' => true, 'id' => (int)$pdo->lastInsertId()]);
+      break;
     }
 
-    $stmt = $pdo->prepare("DELETE FROM depots WHERE id=?");
-    $stmt->execute([$id]);
+    case 'update': {
+      $id   = (int)($_POST['id'] ?? 0);
+      $nom  = trim($_POST['nom'] ?? '');
+      $resp = $_POST['responsable_id'] ?? '';
+      $resp = ($resp === '' ? null : (int)$resp);
 
-    echo json_encode(['ok'=>true]);
-    exit;
+      if ($id <= 0)       throw new Exception('ID manquant');
+      if ($nom === '')    throw new Exception('Nom obligatoire');
+
+      $stmt = $pdo->prepare(
+        "UPDATE depots SET nom = :nom, responsable_id = :resp WHERE id = :id"
+      );
+      $stmt->bindValue(':nom', $nom, PDO::PARAM_STR);
+      if ($resp === null) $stmt->bindValue(':resp', null, PDO::PARAM_NULL);
+      else                $stmt->bindValue(':resp', $resp, PDO::PARAM_INT);
+      $stmt->bindValue(':id', $id, PDO::PARAM_INT);
+      $stmt->execute();
+
+      // Vérif: lignes affectées (si 0, c’est possiblement un no-op — mêmes valeurs)
+      echo json_encode(['ok' => true, 'id' => $id, 'rows' => $stmt->rowCount()]);
+      break;
+    }
+
+    case 'delete': {
+      $id = (int)($_POST['id'] ?? 0);
+      if ($id <= 0) throw new Exception('ID manquant');
+
+      // Option: vérifier contraintes FK ici si besoin
+      $pdo->prepare("DELETE FROM depots WHERE id = ?")->execute([$id]);
+      echo json_encode(['ok' => true]);
+      break;
+    }
+
+    default:
+      echo json_encode(['ok' => false, 'error' => 'Action inconnue']);
   }
-
-  echo json_encode(['ok'=>false,'error'=>'unknown action']);
-} catch (Exception $e) {
-  http_response_code(400);
-  echo json_encode(['ok'=>false,'error'=>$e->getMessage()]);
+} catch (Throwable $e) {
+  echo json_encode(['ok' => false, 'error' => $e->getMessage()]);
 }
