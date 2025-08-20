@@ -3,5 +3,5 @@ array (
   'deletePhoto' => '0',
   'nom' => 'Banche 2m40',
   'quantite' => '12',
-  'deleteDocIds' => '[6]',
+  'deleteDocIds' => '[]',
 )

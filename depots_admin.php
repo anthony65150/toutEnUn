@@ -59,7 +59,13 @@ $utilisateurs = $pdo->query("
                 $highlight = (isset($_GET['highlight']) && $_GET['highlight'] == $depot['id']) ? 'table-success' : '';
                 echo "<tr class='align-middle $highlight'>";
 
-                echo '<td><a class="text-decoration-none" href="stock_depot.php?depot_id=' . (int)$depot['id'] . '">' . htmlspecialchars($depot['nom']) . '</a></td>';
+                echo '<td>
+  <a class="text-decoration-none" href="depot_contenu.php?depot_id=' . (int)$depot['id'] . '">
+    ' . htmlspecialchars($depot['nom']) . '
+  </a>
+</td>';
+
+
                 echo '<td>' . $respText . '</td>';
                 echo '<td>' . htmlspecialchars(date('d/m/Y', strtotime($depot['created_at']))) . '</td>';
                 echo '<td>
