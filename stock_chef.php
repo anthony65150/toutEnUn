@@ -215,7 +215,23 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
                     $depotsList = $depotAssoc[$stockId] ?? [];
                     $chantiersList = $chantierAssoc[$stockId] ?? [];
                     $quantiteMonChantier = 0;
-                    $depotsHtml = $depotsList ? implode('<br>', array_map(fn($d) => htmlspecialchars($d['nom']) . ' (' . $d['quantite'] . ')', $depotsList)) : '<span class="text-muted">Aucun</span>';
+                    $depotsHtml = $depotsList
+                        ? implode('<br>', array_map(function ($d) {
+                            $full  = trim((string)$d['nom']);
+                            // garde les accents correctement
+                            $short = function_exists('mb_substr') ? mb_substr($full, 0, 4, 'UTF-8') : substr($full, 0, 4);
+                            $q     = (int)$d['quantite'];
+
+                            return '<span class="depot-nom">'
+                                .   '<span class="name-full">'  . htmlspecialchars($full)  . '</span>'
+                                .   '<span class="name-short">' . htmlspecialchars($short) . '</span> '
+                                .   '<span class="qty">(' . $q . ')</span>'
+                                . '</span>';
+                        }, $depotsList))
+                        : '<span class="text-muted">Aucun</span>';
+
+
+
                     $chantiersHtml = '<span class="text-muted">Aucun</span>';
                     if ($chantiersList) {
                         $quantiteMonChantier = 0;
@@ -264,7 +280,7 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 
                         <!-- PHOTO -->
-                        <td class="text-center" style="width:64px">
+                        <td class="text-center col-photo" style="width:64px">
                             <?php
                             $photoWeb = '';
                             if (!empty($stock['photo'])) {

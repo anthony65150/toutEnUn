@@ -244,3 +244,13 @@ body.dark-mode .navbar-toggler-icon {
     transition: background-color 0.5s ease;
 }
 
+/* Desktop : nom complet */
+.depot-nom .name-short { display: none; }
+.depot-nom .name-full  { display: inline; }
+.depot-nom .qty        { display: inline; }
+
+/* Mobile <= 425px : 4 lettres */
+@media (max-width: 425px) {
+  .depot-nom .name-full  { display: none; }
+  .depot-nom .name-short { display: inline; }
+}

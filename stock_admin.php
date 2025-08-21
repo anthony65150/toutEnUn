@@ -156,7 +156,7 @@ foreach ($subCatRaw as $row) {
     <div class="table-responsive">
         <table id="stockTable" class="table table-bordered table-hover text-center align-middle">
             <thead class="table-dark">
-                
+
                 <tr>
                     <th style="width:82px">Photo</th>
                     <th>Article</th>
@@ -172,14 +172,30 @@ foreach ($subCatRaw as $row) {
                     $quantiteTotale = (int)$stock['quantite_totale'];
                     $depotsList = $depotAssoc[$stockId] ?? [];
                     $chantiersList = $chantierAssoc[$stockId] ?? [];
+
+                    $depotsHtml = $depotsList
+                        ? implode('<br>', array_map(function ($d) {
+                            $full  = trim((string)$d['nom']);
+                            $short = function_exists('mb_substr') ? mb_substr($full, 0, 4, 'UTF-8') : substr($full, 0, 4);
+                            $q     = (int)$d['quantite'];
+
+                            return '<span class="depot-nom">'
+                                .   '<span class="name-full">'  . htmlspecialchars($full)  . '</span>'
+                                .   '<span class="name-short">' . htmlspecialchars($short) . '</span> '
+                                .   '<span class="qty">(' . $q . ')</span>'
+                                . '</span>';
+                        }, $depotsList))
+                        : '<span class="text-muted">Aucun</span>';
                     ?>
+
+
                     <tr data-row-id="<?= $stockId ?>"
                         data-cat="<?= htmlspecialchars($stock['categorie']) ?>"
                         data-subcat="<?= htmlspecialchars($stock['sous_categorie']) ?>"
                         class="<?= (isset($_SESSION['highlight_stock_id']) && $_SESSION['highlight_stock_id'] == $stockId) ? 'table-success highlight-row' : '' ?>">
 
                         <!-- PHOTO -->
-                        <td class="text-center" style="width:64px">
+                        <td class="text-center col-photo" style="width:64px">
                             <?php
                             $photoWeb = !empty($stock['photo']) ? '/' . ltrim($stock['photo'], '/') : '';
                             ?>
@@ -212,17 +228,8 @@ foreach ($subCatRaw as $row) {
                         </td>
 
                         <td class="text-center">
-                            <?php if ($depotsList): foreach ($depotsList as $d): ?>
-                                    <div>
-                                        <?= htmlspecialchars($d['nom']) ?>
-                                        <span id="qty-source-depot-<?= $d['id'] ?>-<?= $stockId ?>" class="badge <?= $d['quantite'] < 10 ? 'bg-danger' : 'bg-success' ?>">
-                                            <?= $d['quantite'] ?>
-                                        </span>
-                                    </div>
-                                <?php endforeach;
-                            else: ?>
-                                <span class="text-muted">Aucun</span>
-                            <?php endif; ?>
+                            <?= $depotsHtml ?>
+
                         </td>
                         <td class="text-center">
                             <?php

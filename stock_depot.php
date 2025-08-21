@@ -200,7 +200,7 @@ if ($depotId) {
           <tr data-cat="<?= $cat ?>" data-subcat="<?= $subcat ?>"
             class="<?= (isset($_SESSION['highlight_stock_id']) && $_SESSION['highlight_stock_id'] == $stock['id']) ? 'table-success highlight-row' : '' ?>">
             <!-- PHOTO -->
-            <td class="text-center" style="width:64px">
+            <td class="text-center col-photo" style="width:64px">
               <?php
               // Même logique qu’admin : on privilégie le chemin en base, sinon fallback local
               $photoWeb = '';
@@ -250,12 +250,16 @@ if ($depotId) {
               $autres = $stock['autres_depots'] ?? '';
               if ($autres) {
                 foreach (explode(', ', $autres) as $item) {
-
-                  if (preg_match('/^(.*)\s\((\d+)\)$/', $item, $m)) {
+                  if (preg_match('/^(.*)\s\((\d+)\)$/u', $item, $m)) {
                     $nomDepot = trim($m[1]);
                     $qte = (int)$m[2];
-                    $color = $qte > 10 ? 'bg-success' : 'bg-danger';
-                    echo '<div><span class="badge ' . $color . '">' . $nomDepot . ' (' . $qte . ')</span></div>';
+                    $short = function_exists('mb_substr') ? mb_substr($nomDepot, 0, 4, 'UTF-8') : substr($nomDepot, 0, 4);
+
+                    echo '<div class="depot-nom">'
+                      .   '<span class="name-full">'  . htmlspecialchars($nomDepot)  . '</span>'
+                      .   '<span class="name-short">' . htmlspecialchars($short)     . '</span> '
+                      .   '<span class="qty">(' . $qte . ')</span>'
+                      . '</div>';
                   } else {
                     echo '<div>' . htmlspecialchars($item) . '</div>';
                   }
@@ -265,6 +269,7 @@ if ($depotId) {
               }
               ?>
             </td>
+
             <td>
               <?php
               // 🔽 Filtrer les chantiers avec quantité > 0
