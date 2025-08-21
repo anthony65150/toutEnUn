@@ -4,7 +4,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
 
 <!-- Menu complet affiché uniquement au-dessus de md -->
 <nav class="d-none d-md-block fond-gris border-bottom">
-    <div class="container d-flex justify-content-between align-items-center">
+    <div class="container d-flex justify-content-center">
         <ul class="nav nav-pills">
             <li class="nav-item p-2">
                 <a href="/accueil.php" class="nav-link <?php echo ($current_page == 'accueil.php') ? 'active' : ''; ?>">Accueil</a>
@@ -29,7 +29,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
             <?php endif; ?>
 
             <?php if (isset($_SESSION['utilisateurs']['fonction']) && $_SESSION['utilisateurs']['fonction'] === 'administrateur') : ?>
-                               <li class="nav-item p-2">
+                <li class="nav-item p-2">
                     <a href="/chantiers_admin.php" class="nav-link <?php echo ($current_page == 'chantiers_admin.php') ? 'active' : ''; ?>">Chantiers</a>
                 </li>
             <?php endif; ?>

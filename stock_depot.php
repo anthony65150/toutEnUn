@@ -175,7 +175,7 @@ if ($depotId) {
 
 
   <div class="table-responsive">
-    <table class="table table-bordered table-hover align-middle text-center" id="stockTableBody">
+    <table class="table table-striped table-bordered table-hover align-middle text-center" id="stockTableBody">
       <thead class="table-dark">
         <tr>
           <th class="col-photo">Photo</th>

@@ -20,7 +20,7 @@ if (!isset($_SESSION['utilisateurs']) || $_SESSION['utilisateurs']['fonction'] !
         </button>
     </div>
     <!-- Tableau des chantiers -->
-    <table class="table table-bordered text-center">
+    <table class="table table-striped table-bordered text-center">
         <thead class="table-dark">
             <tr>
                 <th>Nom</th>

@@ -154,7 +154,7 @@ foreach ($subCatRaw as $row) {
     <input type="text" id="searchInput" class="form-control mb-4" placeholder="Rechercher un article...">
 
     <div class="table-responsive">
-        <table id="stockTable" class="table table-bordered table-hover text-center align-middle">
+        <table id="stockTable" class="table table-striped table-bordered table-hover text-center align-middle">
             <thead class="table-dark">
 
                 <tr>

@@ -10,6 +10,8 @@ html, body {
   color: white; /* Changer la couleur du texte */
 }
 
+
+
 .gradient-custom-2 {
     
   
@@ -134,6 +136,13 @@ html, body {
     display: none;
   }
 }
+/* Cacher les catégories/sous-catégories en dessous de 500px */
+@media (max-width: 500px) {
+  .td-article .small.text-muted {
+    display: none;
+  }
+}
+
 
 
 .table td, .table th {

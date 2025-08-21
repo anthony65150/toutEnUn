@@ -194,7 +194,7 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 
     <div class="table-responsive mb-4">
-        <table class="table table-bordered table-hover text-center align-middle">
+        <table class="table table-striped table-bordered table-hover text-center align-middle">
             <thead class="table-dark">
                 <tr>
                     <th class="col-photo">Photo</th>
