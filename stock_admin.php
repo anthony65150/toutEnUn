@@ -158,8 +158,8 @@ foreach ($subCatRaw as $row) {
             <thead class="table-dark">
 
                 <tr>
-                    <th style="width:82px">Photo</th>
-                    <th>Article</th>
+                    <th style="width:82px" class="col-photo">Photo</th>
+                    <th>Articles</th>
                     <th>Dépôts</th>
                     <th>Chantiers</th>
                     <th>Actions</th>

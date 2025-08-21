@@ -179,7 +179,7 @@ if ($depotId) {
       <thead class="table-dark">
         <tr>
           <th class="col-photo">Photo</th>
-          <th>Nom</th>
+          <th>Articles</th>
           <th>Disponible au dépôt</th>
           <th>Autres dépôts</th>
           <th>Chantiers</th>

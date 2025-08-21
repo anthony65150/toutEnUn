@@ -198,7 +198,7 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
             <thead class="table-dark">
                 <tr>
                     <th class="col-photo">Photo</th>
-                    <th>Nom</th>
+                    <th>Articles</th>
                     <th>Dépôts</th>
                     <th>Chantiers</th>
                     <th>Mon chantier</th>
