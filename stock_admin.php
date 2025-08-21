@@ -154,11 +154,12 @@ foreach ($subCatRaw as $row) {
     <input type="text" id="searchInput" class="form-control mb-4" placeholder="Rechercher un article...">
 
     <div class="table-responsive">
-        <table class="table table-bordered table-hover text-center align-middle">
+        <table id="stockTable" class="table table-bordered table-hover text-center align-middle">
             <thead class="table-dark">
+                
                 <tr>
-                    <th>Nom (Total)</th>
-                    <th class="col-photo">Photo</th>
+                    <th style="width:82px">Photo</th>
+                    <th>Article</th>
                     <th>Dépôts</th>
                     <th>Chantiers</th>
                     <th>Actions</th>
@@ -177,24 +178,40 @@ foreach ($subCatRaw as $row) {
                         data-subcat="<?= htmlspecialchars($stock['sous_categorie']) ?>"
                         class="<?= (isset($_SESSION['highlight_stock_id']) && $_SESSION['highlight_stock_id'] == $stockId) ? 'table-success highlight-row' : '' ?>">
 
-                        <td><a href="article.php?id=<?= $stock['id'] ?>" class="nom-article text-decoration-underline fw-bold text-primary">
-                                <?= htmlspecialchars(ucfirst(strtolower($stock['nom']))) ?>
-                            </a>
-                            (<?= $quantiteTotale ?>)</td>
-
-                        <td class="col-photo">
+                        <!-- PHOTO -->
+                        <td class="text-center" style="width:64px">
                             <?php
-                            // Normalise en chemin web absolu (avec slash initial)
                             $photoWeb = !empty($stock['photo']) ? '/' . ltrim($stock['photo'], '/') : '';
                             ?>
                             <?php if ($photoWeb): ?>
-                                <img class="article-photo img-thumbnail" src="<?= htmlspecialchars($photoWeb) ?>" alt="photo" style="height: 40px;">
+                                <img src="<?= htmlspecialchars($photoWeb) ?>"
+                                    alt=""
+                                    class="img-thumbnail"
+                                    style="width:56px;height:56px;object-fit:cover;">
                             <?php else: ?>
-                                <img class="article-photo img-thumbnail d-none" src="" alt="Aucune photo" style="height: 40px; display:none">
+                                <div class="border rounded d-inline-flex align-items-center justify-content-center"
+                                    style="width:56px;height:56px;">—</div>
                             <?php endif; ?>
                         </td>
 
-                        <td>
+                        <!-- ARTICLE (nom cliquable + sous-texte catégorie/sous-catégorie) -->
+                        <td class="text-center td-article">
+                            <a href="article.php?id=<?= (int)$stock['id'] ?>"
+                                class="fw-semibold text-decoration-none">
+                                <?= htmlspecialchars($stock['nom']) ?>
+                            </a>
+                            <span class="ms-1 text-muted">(<?= (int)$quantiteTotale ?>)</span>
+                            <div class="small text-muted">
+                                <?php
+                                $chips = [];
+                                if (!empty($stock['categorie']))      $chips[] = $stock['categorie'];
+                                if (!empty($stock['sous_categorie'])) $chips[] = $stock['sous_categorie'];
+                                echo $chips ? htmlspecialchars(implode(' • ', $chips)) : '—';
+                                ?>
+                            </div>
+                        </td>
+
+                        <td class="text-center">
                             <?php if ($depotsList): foreach ($depotsList as $d): ?>
                                     <div>
                                         <?= htmlspecialchars($d['nom']) ?>
@@ -207,7 +224,7 @@ foreach ($subCatRaw as $row) {
                                 <span class="text-muted">Aucun</span>
                             <?php endif; ?>
                         </td>
-                        <td>
+                        <td class="text-center">
                             <?php
                             // 🔽 Filtrer les chantiers avec quantité > 0
                             $chantiersAvecStock = array_filter($chantiersList, fn($c) => $c['quantite'] > 0);
@@ -232,7 +249,7 @@ foreach ($subCatRaw as $row) {
 
 
 
-                        <td>
+                        <td class="text-center">
                             <button class="btn btn-sm btn-primary transfer-btn" data-stock-id="<?= $stockId ?>">
                                 <i class="bi bi-arrow-left-right"></i>
                             </button>

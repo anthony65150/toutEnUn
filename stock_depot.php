@@ -178,14 +178,15 @@ if ($depotId) {
     <table class="table table-bordered table-hover align-middle text-center" id="stockTableBody">
       <thead class="table-dark">
         <tr>
-          <th>Nom</th>
           <th class="col-photo">Photo</th>
+          <th>Nom</th>
           <th>Disponible au dépôt</th>
           <th>Autres dépôts</th>
           <th>Chantiers</th>
           <th>Action</th>
         </tr>
       </thead>
+
       <tbody>
         <?php foreach ($stocks as $stock):
           $stockId = $stock['id'];
@@ -198,33 +199,50 @@ if ($depotId) {
         ?>
           <tr data-cat="<?= $cat ?>" data-subcat="<?= $subcat ?>"
             class="<?= (isset($_SESSION['highlight_stock_id']) && $_SESSION['highlight_stock_id'] == $stock['id']) ? 'table-success highlight-row' : '' ?>">
-            <td>
-              <a
-                href="article.php?id=<?= (int)$stockId ?>&depot_id=<?= (int)$depotId ?>"
-                class="nom-article text-decoration-underline fw-bold text-primary">
-                <?= htmlspecialchars(ucfirst(strtolower($stock['nom']))) ?>
-              </a>
-              (<?= $quantiteTotale ?>)
-            </td>
-
-            <td class="col-photo">
+            <!-- PHOTO -->
+            <td class="text-center" style="width:64px">
               <?php
-              $photoPath = null;
+              // Même logique qu’admin : on privilégie le chemin en base, sinon fallback local
+              $photoWeb = '';
               if (!empty($stock['photo'])) {
-                $photoPath = '/' . ltrim($stock['photo'], '/');
+                $photoWeb = '/' . ltrim($stock['photo'], '/');
               } else {
-                $localFile = __DIR__ . "/uploads/photos/{$stockId}.jpg";
-                if (is_file($localFile)) {
-                  $photoPath = "/uploads/photos/{$stockId}.jpg";
+                $fallbackLocal = __DIR__ . "/uploads/photos/{$stockId}.jpg";
+                if (is_file($fallbackLocal)) {
+                  $photoWeb = "/uploads/photos/{$stockId}.jpg";
                 }
               }
               ?>
-              <?php if ($photoPath): ?>
-                <img src="<?= htmlspecialchars($photoPath) ?>" alt="<?= $nom ?>" style="height:40px;">
+              <?php if ($photoWeb): ?>
+                <img src="<?= htmlspecialchars($photoWeb) ?>"
+                  alt=""
+                  class="img-thumbnail"
+                  style="width:56px;height:56px;object-fit:cover;">
               <?php else: ?>
-                <span class="text-muted">—</span>
+                <div class="border rounded d-inline-flex align-items-center justify-content-center"
+                  style="width:56px;height:56px;">—</div>
               <?php endif; ?>
             </td>
+
+
+            <!-- ARTICLE (nom cliquable + sous-texte catégorie/sous-catégorie) -->
+            <td class="text-center td-article">
+              <a href="article.php?id=<?= (int)$stockId ?>&depot_id=<?= (int)$depotId ?>"
+                class="fw-semibold text-decoration-none">
+                <?= htmlspecialchars($stock['nom']) ?>
+              </a>
+              <span class="ms-1 text-muted">(<?= (int)$quantiteTotale ?>)</span>
+              <div class="small text-muted">
+                <?php
+                $chips = [];
+                if (!empty($stock['categorie']))      $chips[] = $stock['categorie'];
+                if (!empty($stock['sous_categorie'])) $chips[] = $stock['sous_categorie'];
+                echo $chips ? htmlspecialchars(implode(' • ', $chips)) : '—';
+                ?>
+              </div>
+            </td>
+
+
 
             <td><span class="badge quantite-disponible <?= $dispoDepot < 10 ? 'bg-danger' : 'bg-success' ?>"><?= $dispoDepot ?></span></td>
             <td>

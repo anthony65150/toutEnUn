@@ -7,6 +7,54 @@ document.addEventListener('DOMContentLoaded', () => {
   const modifyModal   = new bootstrap.Modal(document.getElementById('modifyModal'));
   const deleteModal   = new bootstrap.Modal(document.getElementById('confirmDeleteModal'));
 
+
+  function attachRowHandlers(row) {
+  // Transfer
+  const tBtn = row.querySelector('.transfer-btn');
+  if (tBtn) {
+    tBtn.addEventListener('click', () => {
+      document.getElementById('modalStockId').value = tBtn.dataset.stockId;
+      document.getElementById('sourceChantier').value = '';
+      document.getElementById('destinationChantier').value = '';
+      document.getElementById('transferQty').value = '';
+      transferModal.show();
+    });
+  }
+
+  // Delete
+  const dBtn = row.querySelector('.delete-btn');
+  if (dBtn) {
+    dBtn.addEventListener('click', () => {
+      currentDeleteId = dBtn.dataset.stockId;
+      document.getElementById('deleteItemName').textContent = dBtn.dataset.stockNom;
+      currentRow = row;
+      deleteModal.show();
+    });
+  }
+}
+
+// Force l'alignement attendu sur une ligne (Photo & Actions centrés, le reste à gauche)
+function normalizeRowAlignment(row) {
+  if (!row) return;
+  const tds = row.querySelectorAll('td');
+  if (!tds.length) return;
+
+  tds.forEach((td, i) => {
+    td.classList.remove('text-center', 'text-start');
+    // 1ère cellule = Photo, dernière = Actions
+    if (i === 0 || i === tds.length - 1) {
+      td.classList.add('text-center');
+    } else {
+      td.classList.add('text-start');
+    }
+  });
+}
+
+// Optionnel : normalise toute la table si besoin
+function normalizeTable() {
+  document.querySelectorAll('#stockTableBody > tr').forEach(normalizeRowAlignment);
+}
+
   let currentRow = null;
   let currentDeleteId = null;
 
@@ -264,9 +312,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // =========================================================
-  // ENREGISTRER MODIFS (submit)
-  // =========================================================
+// =========================================================
+// ENREGISTRER MODIFS (submit)
+// =========================================================
 document.getElementById('modifyForm').addEventListener('submit', (e) => {
   e.preventDefault();
 
@@ -282,9 +330,8 @@ document.getElementById('modifyForm').addEventListener('submit', (e) => {
   // 👉 FORCER deletePhoto à la valeur actuelle du hidden (au cas où)
   const delPhotoInput = document.getElementById('deletePhoto');
   fd.set('deletePhoto', delPhotoInput ? delPhotoInput.value : '0');
-  console.log('deletePhoto envoyé =', fd.get('deletePhoto'));
 
-  // Vérifs rapides...
+  // Vérifs rapides…
   const nom = (fd.get('nom') || '').toString().trim();
   const qte = Number(fd.get('quantite'));
   if (!nom || Number.isNaN(qte) || qte < 0) {
@@ -294,82 +341,110 @@ document.getElementById('modifyForm').addEventListener('submit', (e) => {
 
   submitBtn.disabled = true;
 
-    fetch('modifierStock.php', { method: 'POST', body: fd })
-      .then(res => res.json())
-      .then(data => {
-        if (!data.success) throw new Error(data.message || 'Erreur inconnue');
+  fetch('modifierStock.php', { method: 'POST', body: fd })
+    .then(res => res.json())
+    .then(data => {
+      if (!data.success) throw new Error(data.message || 'Erreur inconnue');
 
-        // --- MAJ UI de la ligne courante ---
-        if (currentRow) {
-          const stockId = currentRow.dataset.rowId;
+      // 1) Si le serveur renvoie la ligne complète => on remplace le <tr>
+      if (currentRow && data.rowHtml) {
+        const tmp = document.createElement('tbody');
+        tmp.innerHTML = data.rowHtml.trim();
+        const newRow = tmp.querySelector('tr');
 
-          // Nom + (Total)
-          const firstCell = currentRow.querySelector('td:first-child');
-          if (firstCell) {
-            const newName = (data.newNom || '').toString();
-            const capName = newName.charAt(0).toUpperCase() + newName.slice(1).toLowerCase();
-            firstCell.innerHTML = `
-              <a href="article.php?id=${encodeURIComponent(stockId)}" class="nom-article text-decoration-underline fw-bold text-primary">
-                ${capName}
-              </a> (${data.newQuantiteTotale})
-            `;
-          }
+        currentRow.replaceWith(newRow);
+        currentRow = newRow;
 
-          // Dataset du bouton edit (photo uniquement)
-          const editBtn = currentRow.querySelector('.edit-btn');
-          if (editBtn) {
-            editBtn.dataset.stockNom = data.newNom || editBtn.dataset.stockNom;
-            editBtn.dataset.stockQuantite = data.newQuantiteTotale ?? editBtn.dataset.stockQuantite;
-            editBtn.dataset.stockPhoto = data.newPhotoUrl ? asWebPath(data.newPhotoUrl) : '';
-          }
+        // Ré-attacher les handlers spécifiques (si tu n'as pas mis de délégation)
+        attachRowHandlers(currentRow);
 
-          // Vignette photo
-          const imgEl = currentRow.querySelector('td.col-photo img.article-photo, td.col-photo img');
-          if (imgEl) {
-            if (data.newPhotoUrl) {
-              const url = asWebPath(data.newPhotoUrl);
-              const bust = (url.includes('?') ? '&' : '?') + 't=' + Date.now();
-              imgEl.src = url + bust;
-              imgEl.classList.remove('d-none');
-              imgEl.style.display = '';
-            } else {
-              imgEl.src = '';
-              imgEl.classList.add('d-none');
-              imgEl.style.display = 'none';
-            }
-          }
-
-          // Surlignage 3s
-          currentRow.classList.add('table-success');
-          setTimeout(() => currentRow.classList.remove('table-success'), 3000);
-        }
-
-        // Rafraîchir la liste des documents dans la modale
-        const stockIdForDocs = document.getElementById('modifyStockId').value;
-        if (Array.isArray(data.docsAll)) {
-          renderExistingDocs(data.docsAll);
-        } else {
-          // fallback si l'endpoint ne renvoie pas docsAll
-          loadExistingDocs(stockIdForDocs);
-        }
-
-        // Reset des nouveaux fichiers + set de suppression
-        document.getElementById('modifierDocument').value = '';
-        document.getElementById('newDocsPreview').innerHTML = '';
-        docsToDelete.clear();
-        document.getElementById('deleteDocIds').value = '[]';
-
-        // Fermer la modale
+        // Surlignage + fermeture
+        currentRow.classList.add('table-success');
+        setTimeout(() => currentRow.classList.remove('table-success'), 3000);
         modifyModal.hide();
         showToast('modifyToast');
-      })
-      .catch(err => {
-        showErrorToast(err.message || 'Erreur lors de la modification.');
-      })
-      .finally(() => {
-        submitBtn.disabled = false;
-      });
-  });
+
+        // MAJ docs dans la modale si dispo (optionnel)
+        if (Array.isArray(data.docsAll)) {
+          renderExistingDocs(data.docsAll);
+        }
+        return; // on a fini
+      }
+
+      // 2) Fallback : MAJ manuelle si pas de rowHtml
+      if (currentRow) {
+        const stockId = currentRow.dataset.rowId;
+
+        // ARTICLE (nom + total)
+        const articleCell = currentRow.querySelector('td.td-article');
+        if (articleCell) {
+          const newName = (data.newNom || '').toString();
+          const capName = newName.charAt(0).toUpperCase() + newName.slice(1).toLowerCase();
+          articleCell.innerHTML = `
+            <a href="article.php?id=${encodeURIComponent(stockId)}"
+               class="fw-semibold text-decoration-none">${capName}</a>
+            <span class="ms-1 text-muted">(${data.newQuantiteTotale})</span>
+            <div class="small text-muted">${
+              [currentRow.dataset.cat, currentRow.dataset.subcat].filter(Boolean).join(' • ') || '—'
+            }</div>
+          `;
+        }
+
+        // PHOTO (force anti-cache)
+        const imgEl = currentRow.querySelector('td.col-photo img.article-photo, td.col-photo img');
+        if (imgEl) {
+          if (data.newPhotoUrl) {
+            const url = asWebPath(data.newPhotoUrl);
+            imgEl.src = url + (url.includes('?') ? '&' : '?') + 't=' + Date.now();
+            imgEl.classList.remove('d-none');
+            imgEl.style.display = '';
+          } else {
+            imgEl.src = '';
+            imgEl.classList.add('d-none');
+            imgEl.style.display = 'none';
+          }
+        }
+
+        // Dataset du bouton éditer (pour prochaine ouverture)
+        const editBtn = currentRow.querySelector('.edit-btn');
+        if (editBtn) {
+          editBtn.dataset.stockNom = data.newNom ?? editBtn.dataset.stockNom;
+          editBtn.dataset.stockQuantite = data.newQuantiteTotale ?? editBtn.dataset.stockQuantite;
+          editBtn.dataset.stockPhoto = data.newPhotoUrl ? asWebPath(data.newPhotoUrl) : '';
+        }
+
+        // Surlignage
+        currentRow.classList.add('table-success');
+        setTimeout(() => currentRow.classList.remove('table-success'), 3000);
+      }
+
+      // MAJ docs dans la modale si dispo
+      if (Array.isArray(data.docsAll)) {
+        renderExistingDocs(data.docsAll);
+      }
+
+      // Ferme + toast
+      modifyModal.hide();
+      showToast('modifyToast');
+    })
+    .catch(err => {
+      console.error(err);
+      showErrorToast(err.message || 'Erreur lors de la modification.');
+    })
+    .finally(() => {
+      submitBtn.disabled = false;
+      // Reset des nouveaux fichiers + set de suppression (modale)
+      const inputDocs = document.getElementById('modifierDocument');
+      const newDocsPreview = document.getElementById('newDocsPreview');
+      if (inputDocs) inputDocs.value = '';
+      if (newDocsPreview) newDocsPreview.innerHTML = '';
+      docsToDelete.clear();
+      const deleteDocIdsInput = document.getElementById('deleteDocIds');
+      if (deleteDocIdsInput) deleteDocIdsInput.value = '[]';
+    });
+});
+
+
 
   // =========================================================
   // SUPPRIMER (article)
@@ -438,7 +513,9 @@ document.getElementById('modifyForm').addEventListener('submit', (e) => {
   searchInput.addEventListener("input", () => {
     const search = searchInput.value.toLowerCase();
     tableRows.forEach(row => {
-      const name = row.querySelector("td:first-child").textContent.toLowerCase();
+      const nameCell = row.querySelector("td.td-article");
+const name = (nameCell ? nameCell.textContent : "").toLowerCase();
+
       row.style.display = name.includes(search) ? "" : "none";
     });
   });

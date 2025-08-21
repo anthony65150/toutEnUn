@@ -197,14 +197,16 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
         <table class="table table-bordered table-hover text-center align-middle">
             <thead class="table-dark">
                 <tr>
-                    <th>Nom (Total)</th>
                     <th class="col-photo">Photo</th>
+                    <th>Nom</th>
                     <th>Dépôts</th>
                     <th>Chantiers</th>
                     <th>Mon chantier</th>
                     <th>Action</th>
                 </tr>
             </thead>
+
+
             <tbody class="stockTableBody">
                 <?php foreach ($stocks as $stock): ?>
                     <?php
@@ -251,38 +253,56 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
                     }
                     $badge = $quantiteMonChantier > 0 ? '<span class="badge bg-success">' . $quantiteMonChantier . '</span>' : '<span class="badge bg-danger">0</span>';
                     ?>
-                    <tr data-cat="<?= strtolower(trim(htmlspecialchars($stock['categorie']))) ?>"
-                        data-subcat="<?= strtolower(trim(htmlspecialchars($stock['sous_categorie']))) ?>"
+                    <?php
+                    $catSafe    = strtolower(trim((string)($stock['categorie'] ?? '')));
+                    $subcatSafe = strtolower(trim((string)($stock['sous_categorie'] ?? '')));
+                    ?>
+                    <tr data-cat="<?= htmlspecialchars($catSafe) ?>"
+                        data-subcat="<?= htmlspecialchars($subcatSafe) ?>"
                         class="<?= (isset($_SESSION['highlight_stock_id']) && $_SESSION['highlight_stock_id'] == $stock['id']) ? 'table-success highlight-row' : '' ?>">
-                        <td>
-                            <a
-                                href="article.php?id=<?= (int)$stockId ?>&chantier_id=<?= (int)$utilisateurChantierId ?>"
-                                class="nom-article text-decoration-underline fw-bold text-primary">
-                                <?= htmlspecialchars(ucfirst(strtolower($stock['nom']))) ?>
-                            </a>
-                            (<?= $quantiteTotale ?>)
-                        </td>
 
-                        <td class="col-photo">
+
+
+                        <!-- PHOTO -->
+                        <td class="text-center" style="width:64px">
                             <?php
-                            $photoPath = null;
+                            $photoWeb = '';
                             if (!empty($stock['photo'])) {
-                                // chemin stocké en BDD (ex: uploads/photos/123.jpg)
-                                $photoPath = '/' . ltrim($stock['photo'], '/');
+                                $photoWeb = '/' . ltrim($stock['photo'], '/');
                             } else {
-                                // fallback si fichier uploads/photos/{id}.jpg existe
-                                $localFile = __DIR__ . "/uploads/photos/{$stockId}.jpg";
-                                if (is_file($localFile)) {
-                                    $photoPath = "/uploads/photos/{$stockId}.jpg";
+                                $fallbackLocal = __DIR__ . "/uploads/photos/{$stockId}.jpg";
+                                if (is_file($fallbackLocal)) {
+                                    $photoWeb = "/uploads/photos/{$stockId}.jpg";
                                 }
                             }
                             ?>
-                            <?php if ($photoPath): ?>
-                                <img src="<?= htmlspecialchars($photoPath) ?>" alt="photo" style="height:40px;">
+                            <?php if ($photoWeb): ?>
+                                <img src="<?= htmlspecialchars($photoWeb) ?>"
+                                    alt=""
+                                    class="img-thumbnail"
+                                    style="width:56px;height:56px;object-fit:cover;">
                             <?php else: ?>
-                                <span class="text-muted">—</span>
+                                <div class="border rounded d-inline-flex align-items-center justify-content-center"
+                                    style="width:56px;height:56px;">—</div>
                             <?php endif; ?>
                         </td>
+                        <!-- ARTICLE (nom cliquable + sous-texte catégorie/sous-catégorie) -->
+                        <td class="text-center td-article">
+                            <a href="article.php?id=<?= (int)$stockId ?>&chantier_id=<?= (int)$utilisateurChantierId ?>"
+                                class="fw-semibold text-decoration-none">
+                                <?= htmlspecialchars($stock['nom']) ?>
+                            </a>
+                            <span class="ms-1 text-muted">(<?= (int)$quantiteTotale ?>)</span>
+                            <div class="small text-muted">
+                                <?php
+                                $chips = [];
+                                if (!empty($stock['categorie']))      $chips[] = $stock['categorie'];
+                                if (!empty($stock['sous_categorie'])) $chips[] = $stock['sous_categorie'];
+                                echo $chips ? htmlspecialchars(implode(' • ', $chips)) : '—';
+                                ?>
+                            </div>
+                        </td>
+
 
                         <td><?= $depotsHtml ?></td>
                         <td><?= $chantiersHtml ?></td>
