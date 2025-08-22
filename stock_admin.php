@@ -23,6 +23,38 @@ foreach ($stmt as $row) {
     ];
 }
 
+// --- Responsable de chaque dépôt (prenom/nom) ---
+$depotResponsables = [];
+$stmt = $pdo->query("
+  SELECT d.id AS depot_id, u.prenom, u.nom
+  FROM depots d
+  LEFT JOIN utilisateurs u ON u.id = d.responsable_id
+");
+foreach ($stmt as $r) {
+    $depotResponsables[(int)$r['depot_id']] = [
+        'prenom' => $r['prenom'] ?? '',
+        'nom'    => $r['nom'] ?? '',
+    ];
+}
+
+// --- Chef (au moins un) pour chaque chantier (on prend le premier trouvé) ---
+$chantierChefs = [];
+$stmt = $pdo->query("
+  SELECT uc.chantier_id, u.prenom, u.nom
+  FROM utilisateur_chantiers uc
+  JOIN utilisateurs u ON u.id = uc.utilisateur_id
+  ORDER BY u.nom, u.prenom
+");
+foreach ($stmt as $r) {
+    $cid = (int)$r['chantier_id'];
+    if (!isset($chantierChefs[$cid])) {
+        $chantierChefs[$cid] = [
+            'prenom' => $r['prenom'] ?? '',
+            'nom'    => $r['nom'] ?? '',
+        ];
+    }
+}
+
 
 $stmt = $pdo->query("
     SELECT 
@@ -80,14 +112,19 @@ foreach ($subCatRaw as $row) {
     <h2 class="mb-4 text-center">Gestion de stock (Admin)</h2>
     <?php
     $stmt = $pdo->query("
-    SELECT t.id AS transfert_id, s.nom AS article_nom, t.quantite, 
-           u.prenom, u.nom, t.source_type, t.source_id, t.destination_type, t.destination_id
-    FROM transferts_en_attente t
-    JOIN stock s ON t.article_id = s.id
-    JOIN utilisateurs u ON t.demandeur_id = u.id
-    WHERE t.statut = 'en_attente'
+  SELECT
+    t.id AS transfert_id, s.nom AS article_nom, t.quantite,
+    u.prenom, u.nom, u.fonction AS demandeur_role,
+    t.source_type, t.source_id, t.destination_type, t.destination_id
+  FROM transferts_en_attente t
+  JOIN stock s ON t.article_id = s.id
+  JOIN utilisateurs u ON t.demandeur_id = u.id
+  WHERE t.statut = 'en_attente'
 ");
     $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+
+
     ?>
 
     <?php if ($transfertsEnAttente): ?>
@@ -109,9 +146,98 @@ foreach ($subCatRaw as $row) {
                         <tr>
                             <td><?= htmlspecialchars($t['article_nom']) ?></td>
                             <td><?= $t['quantite'] ?></td>
-                            <td><?= htmlspecialchars($t['prenom'] . ' ' . $t['nom']) ?></td>
-                            <td><?= ucfirst($t['source_type']) ?> <?= $t['source_id'] ?></td>
-                            <td><?= ucfirst($t['destination_type']) ?> <?= $t['destination_id'] ?></td>
+                            <td>
+                                <?php
+                                $prenom  = trim($t['prenom'] ?? '');
+                                $role    = strtolower($t['demandeur_role'] ?? '');
+                                $srcType = $t['source_type'] ?? null;
+                                $srcId   = isset($t['source_id']) ? (int)$t['source_id'] : null;
+
+                                // Origine lisible (sans le nom de famille)
+                                $origine = null;
+                                if ($srcType === 'chantier' && $srcId && isset($allChantiers[$srcId])) {
+                                    $origine = 'Chantier ' . $allChantiers[$srcId];
+                                } elseif ($srcType === 'depot' && $srcId && isset($allDepots[$srcId])) {
+                                    $origine = 'Dépôt ' . $allDepots[$srcId];
+                                }
+
+                                echo htmlspecialchars($prenom);
+                                // Si ce n'est pas l'admin, on ajoute seulement l'origine entre parenthèses
+                                if ($role !== 'administrateur' && $origine) {
+                                    echo ' (' . htmlspecialchars($origine) . ')';
+                                    // Si tu veux forcer en minuscules :
+                                    // echo ' (' . htmlspecialchars(mb_strtolower($origine, 'UTF-8')) . ')';
+                                }
+                                ?>
+                            </td>
+
+
+
+
+
+                            <td>
+                                <?php
+                                $srcType = $t['source_type'] ?? null;
+                                $srcId   = isset($t['source_id']) ? (int)$t['source_id'] : null;
+
+                                $label = '';
+                                $respPrenom = '';
+
+                                if ($srcType === 'chantier' && $srcId) {
+                                    $label = isset($allChantiers[$srcId]) ? ('Chantier ' . $allChantiers[$srcId]) : '';
+                                    if (!empty($chantierChefs[$srcId]['prenom'])) {
+                                        $respPrenom = trim($chantierChefs[$srcId]['prenom']);
+                                    }
+                                } elseif ($srcType === 'depot' && $srcId) {
+                                    $label = isset($allDepots[$srcId]) ? ('Dépôt ' . $allDepots[$srcId]) : '';
+                                    if (!empty($depotResponsables[$srcId]['prenom'])) {
+                                        $respPrenom = trim($depotResponsables[$srcId]['prenom']);
+                                    }
+                                }
+
+                                if ($respPrenom !== '' && $label !== '') {
+                                    echo htmlspecialchars($respPrenom) . ' (' . htmlspecialchars($label) . ')';
+                                } else {
+                                    echo htmlspecialchars($label ?: '—');
+                                }
+                                ?>
+                            </td>
+
+
+
+
+                            <td>
+                                <?php
+                                $dstType = $t['destination_type'] ?? null;
+                                $dstId   = isset($t['destination_id']) ? (int)$t['destination_id'] : null;
+
+                                $label = '';
+                                $respPrenom = '';
+
+                                if ($dstType === 'chantier' && $dstId) {
+                                    $label = isset($allChantiers[$dstId]) ? ('Chantier ' . $allChantiers[$dstId]) : '';
+                                    if (!empty($chantierChefs[$dstId]['prenom'])) {
+                                        $respPrenom = trim($chantierChefs[$dstId]['prenom']);
+                                    }
+                                } elseif ($dstType === 'depot' && $dstId) {
+                                    $label = isset($allDepots[$dstId]) ? ('Dépôt ' . $allDepots[$dstId]) : '';
+                                    if (!empty($depotResponsables[$dstId]['prenom'])) {
+                                        $respPrenom = trim($depotResponsables[$dstId]['prenom']);
+                                    }
+                                }
+
+                                if ($respPrenom !== '' && $label !== '') {
+                                    echo htmlspecialchars($respPrenom) . ' (' . htmlspecialchars($label) . ')';
+                                } else {
+                                    echo htmlspecialchars($label ?: '—');
+                                }
+                                ?>
+                            </td>
+
+
+
+
+
                             <td>
                                 <form method="post" action="validerReception_admin.php" style="display:inline;">
                                     <input type="hidden" name="transfert_id" value="<?= $t['transfert_id'] ?>">

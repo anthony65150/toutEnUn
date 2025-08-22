@@ -109,9 +109,26 @@ foreach ($subCategoriesGrouped as &$subs) {
 }
 unset($subs);
 
-$stmt = $pdo->prepare("SELECT t.id AS transfert_id, s.nom AS article_nom, t.quantite, u.nom AS demandeur_nom, u.prenom AS demandeur_prenom FROM transferts_en_attente t JOIN stock s ON t.article_id = s.id JOIN utilisateurs u ON t.demandeur_id = u.id WHERE t.destination_type = 'chantier' AND t.destination_id = ? AND t.statut = 'en_attente'");
+$stmt = $pdo->prepare("
+  SELECT 
+    t.id AS transfert_id,
+    s.nom AS article_nom,
+    t.quantite,
+    u.nom    AS demandeur_nom,
+    u.prenom AS demandeur_prenom,
+    t.source_type,
+    t.source_id
+  FROM transferts_en_attente t
+  JOIN stock s        ON s.id = t.article_id
+  JOIN utilisateurs u ON u.id = t.demandeur_id
+  WHERE t.destination_type = 'chantier'
+    AND t.destination_id   = ?
+    AND t.statut           = 'en_attente'
+  ORDER BY t.id DESC
+");
 $stmt->execute([$utilisateurChantierId]);
 $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
 ?>
 
 <div class="container py-4">
@@ -172,7 +189,26 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
                         <tr>
                             <td><?= htmlspecialchars($t['article_nom']) ?></td>
                             <td><?= $t['quantite'] ?></td>
-                            <td><?= htmlspecialchars($t['demandeur_prenom'] . ' ' . $t['demandeur_nom']) ?></td>
+                            <td>
+                                <?php
+                                $nomComplet = trim(($t['demandeur_prenom'] ?? ''));
+                                $srcType = $t['source_type'] ?? null;
+                                $srcId   = isset($t['source_id']) ? (int)$t['source_id'] : null;
+
+                                $origine = null;
+                                if ($srcType === 'chantier' && $srcId && isset($allChantiers[$srcId])) {
+                                    $origine = 'Chantier ' . $allChantiers[$srcId];
+                                } elseif ($srcType === 'depot' && $srcId && isset($allDepots[$srcId])) {
+                                    $origine = 'Dépôt ' . $allDepots[$srcId];
+                                }
+
+                                echo htmlspecialchars($nomComplet);
+                                if ($origine) {
+                                    echo ' (' . htmlspecialchars($origine) . ')';
+                                }
+                                ?>
+                            </td>
+
                             <td>
                                 <form method="post" action="validerReception_chef.php" style="display:inline;">
                                     <input type="hidden" name="transfert_id" value="<?= $t['transfert_id'] ?>">

@@ -86,14 +86,28 @@ unset($subs);
 $chantiers = $pdo->query("SELECT id, nom FROM chantiers ORDER BY nom")->fetchAll(PDO::FETCH_ASSOC);
 
 $stmt = $pdo->prepare("
-    SELECT t.id AS transfert_id, s.nom AS article_nom, t.quantite, u.nom AS demandeur_nom, u.prenom AS demandeur_prenom
-    FROM transferts_en_attente t
-    JOIN stock s ON t.article_id = s.id
-    JOIN utilisateurs u ON t.demandeur_id = u.id
-    WHERE t.destination_type = 'depot' AND t.destination_id = ? AND t.statut = 'en_attente'
+  SELECT 
+    t.id AS transfert_id,
+    s.nom AS article_nom,
+    t.quantite,
+    u.nom   AS demandeur_nom,
+    u.prenom AS demandeur_prenom,
+    t.source_type,
+    t.source_id,
+    c.nom AS chantier_nom,
+    d.nom AS depot_nom
+  FROM transferts_en_attente t
+  JOIN stock s        ON s.id = t.article_id
+  JOIN utilisateurs u ON u.id = t.demandeur_id
+  LEFT JOIN chantiers c ON (t.source_type = 'chantier' AND c.id = t.source_id)
+  LEFT JOIN depots d    ON (t.source_type = 'depot'    AND d.id = t.source_id)
+  WHERE t.destination_type = 'depot'
+    AND t.destination_id = ?
+    AND t.statut = 'en_attente'
 ");
 $stmt->execute([$depotId]);
 $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
 
 
 $depotNom = '';
@@ -153,7 +167,23 @@ if ($depotId) {
             <tr>
               <td><?= htmlspecialchars($t['article_nom']) ?></td>
               <td><?= $t['quantite'] ?></td>
-              <td><?= htmlspecialchars($t['demandeur_prenom'] . ' ' . $t['demandeur_nom']) ?></td>
+              <td>
+                <?php
+                $nomComplet = trim(($t['demandeur_prenom'] ?? ''));
+                if ($t['source_type'] === 'chantier' && !empty($t['chantier_nom'])) {
+                  $origine = 'Chantier ' . $t['chantier_nom'];
+                } elseif ($t['source_type'] === 'depot' && !empty($t['depot_nom'])) {
+                  $origine = 'Dépôt ' . $t['depot_nom'];
+                } else {
+                  $origine = null;
+                }
+                echo htmlspecialchars($nomComplet);
+                if ($origine) {
+                  echo ' (' . htmlspecialchars($origine) . ')';
+                }
+                ?>
+              </td>
+
               <td>
                 <form method="post" action="validerReception_depot.php" style="display:inline;">
                   <input type="hidden" name="transfert_id" value="<?= $t['transfert_id'] ?>">

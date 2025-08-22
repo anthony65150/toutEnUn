@@ -22,7 +22,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let j;
     try { j = await res.json(); }
     catch (e) {
-      const txt = await res.text().catch(()=>'');
+      const txt = await res.text().catch(()=> '');
       throw new Error(`Réponse non-JSON: ${txt.substring(0, 200)}`);
     }
     if (!j.ok) throw new Error(j.error || 'Erreur inconnue');
@@ -89,4 +89,49 @@ document.addEventListener('DOMContentLoaded', () => {
       alert(err.message || 'Erreur suppression');
     }
   });
+
+  // --- RECHERCHE DÉPÔTS ---
+  const searchInput = document.getElementById('depotSearchInput');
+  const tbody = document.getElementById('depotsTbody');
+
+  if (searchInput && tbody) {
+    // crée la ligne "aucun résultat" si absente
+    let noRow = document.getElementById('noResultsRow');
+    if (!noRow) {
+      noRow = document.createElement('tr');
+      noRow.id = 'noResultsRow';
+      noRow.className = 'd-none';
+      noRow.innerHTML = `<td colspan="4" class="text-muted text-center py-4">Aucun dépôt trouvé</td>`;
+      tbody.appendChild(noRow);
+    }
+
+    const rows = () => Array.from(tbody.querySelectorAll('tr')).filter(tr => tr !== noRow);
+    const normalize = (s) =>
+      (s || '')
+        .toString()
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '') // retire accents
+        .trim();
+
+    const filter = () => {
+      const q = normalize(searchInput.value);
+      let visible = 0;
+      rows().forEach(tr => {
+        const show = !q || normalize(tr.textContent).includes(q);
+        tr.style.display = show ? '' : 'none';
+        if (show) visible++;
+      });
+      noRow.classList.toggle('d-none', visible !== 0);
+    };
+
+    let t;
+    searchInput.addEventListener('input', () => {
+      clearTimeout(t);
+      t = setTimeout(filter, 120); // petit debounce
+    });
+
+    // init
+    filter();
+  }
 });

@@ -16,6 +16,44 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const ACTION_URL = 'employes_actions.php'; // relatif = robuste même en sous-dossier
 
+  // ---------- RECHERCHE EMPLOYÉS ----------
+  const searchInput = document.getElementById('employeSearchInput');
+  // crée/retient la ligne "aucun résultat"
+  let noRow = document.getElementById('noResultsEmploye');
+  if (!noRow && tableBody) {
+    noRow = document.createElement('tr');
+    noRow.id = 'noResultsEmploye';
+    noRow.className = 'd-none';
+    noRow.innerHTML = `<td colspan="5" class="text-muted text-center py-4">Aucun employé trouvé</td>`;
+    tableBody.appendChild(noRow);
+  }
+  const rows = () => Array.from(tableBody.querySelectorAll('tr')).filter(tr => tr !== noRow);
+  const normalize = (s) => (s || '')
+    .toString()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim();
+
+  const applyFilter = () => {
+    if (!searchInput) return;
+    const q = normalize(searchInput.value);
+    let visible = 0;
+    rows().forEach(tr => {
+      const show = !q || normalize(tr.textContent).includes(q);
+      tr.style.display = show ? '' : 'none';
+      if (show) visible++;
+    });
+    if (noRow) noRow.classList.toggle('d-none', visible !== 0);
+  };
+
+  let debounce;
+  searchInput?.addEventListener('input', () => {
+    clearTimeout(debounce);
+    debounce = setTimeout(applyFilter, 120);
+  });
+  // ---------------------------------------
+
   // Ouvrir modale en création
   document.querySelector('[data-bs-target="#employeModal"]').addEventListener('click', () => {
     title.textContent = 'Ajouter un employé';
@@ -84,6 +122,7 @@ document.addEventListener('DOMContentLoaded', () => {
           tableBody.insertAdjacentHTML('afterbegin', data.rowHtml);
         }
         highlightRow(data.id);
+        applyFilter(); // <-- réapplique le filtre courant
       } else {
         location.reload();
       }
@@ -122,6 +161,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const tr = tableBody.querySelector(`tr[data-id="${data.id}"]`);
       if (tr) tr.remove();
       deleteModal.hide();
+      applyFilter(); // <-- réapplique le filtre courant
     } catch (err) {
       console.error('Erreur réseau/fetch:', err);
       alert("Impossible de contacter le serveur (voir console).");
@@ -134,4 +174,7 @@ document.addEventListener('DOMContentLoaded', () => {
     row.classList.add('table-warning');
     setTimeout(() => row.classList.remove('table-warning'), 3000);
   }
+
+  // premier filtrage au chargement (si champ pré-rempli par le navigateur)
+  applyFilter();
 });

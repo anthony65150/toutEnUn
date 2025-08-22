@@ -19,6 +19,13 @@ if (!isset($_SESSION['utilisateurs']) || $_SESSION['utilisateurs']['fonction'] !
             + Créer un chantier
         </button>
     </div>
+    <input
+        type="text"
+        id="chantierSearchInput"
+        class="form-control mb-4"
+        placeholder="Rechercher un chantier..."
+        autocomplete="off" />
+
     <!-- Tableau des chantiers -->
     <table class="table table-striped table-bordered text-center">
         <thead class="table-dark">

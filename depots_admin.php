@@ -21,13 +21,19 @@ $utilisateurs = $pdo->query("
 <div class="container mt-4">
     <h1 class="mb-4 text-center">Gestion des dépôts</h1>
 
-    <!-- Bouton création -->
+    <!-- Bouton création centré -->
     <div class="d-flex justify-content-center mb-3">
         <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#modalDepotCreate">
             + Créer un dépôt
         </button>
-
     </div>
+
+    <!-- Barre de recherche -->
+    <input
+        type="text"
+        id="depotSearchInput"
+        class="form-control mb-4"
+        placeholder="Rechercher un dépôt...">
 
     <!-- Tableau des dépôts -->
     <table class="table table-striped table-bordered text-center">
@@ -41,60 +47,55 @@ $utilisateurs = $pdo->query("
         </thead>
         <tbody id="depotsTbody">
             <?php
-            // liste dépôts
             $depots = $pdo->query("SELECT * FROM depots ORDER BY nom ASC")->fetchAll(PDO::FETCH_ASSOC);
-
             foreach ($depots as $depot) {
-
-                // responsable (utilisateur rôle depot)
                 $resp = null;
                 if (!empty($depot['responsable_id'])) {
                     $st = $pdo->prepare("SELECT prenom, nom FROM utilisateurs WHERE id = ?");
                     $st->execute([$depot['responsable_id']]);
                     $resp = $st->fetch(PDO::FETCH_ASSOC);
                 }
-
                 $respText = $resp ? htmlspecialchars($resp['prenom'] . ' ' . $resp['nom']) : '—';
-
                 $highlight = (isset($_GET['highlight']) && $_GET['highlight'] == $depot['id']) ? 'table-success' : '';
                 echo "<tr class='align-middle $highlight'>";
 
                 echo '<td>
-  <a class="text-decoration-none" href="depot_contenu.php?depot_id=' . (int)$depot['id'] . '">
-    ' . htmlspecialchars($depot['nom']) . '
-  </a>
-</td>';
-
+                <a class="text-decoration-none" href="depot_contenu.php?depot_id=' . (int)$depot['id'] . '">'
+                    . htmlspecialchars($depot['nom']) .
+                    '</a>
+              </td>';
 
                 echo '<td>' . $respText . '</td>';
                 echo '<td>' . htmlspecialchars(date('d/m/Y', strtotime($depot['created_at']))) . '</td>';
                 echo '<td>
-  <button
-    class="btn btn-sm btn-warning edit-depot-btn"
-    data-bs-toggle="modal"
-    data-bs-target="#modalDepotEdit"
-    data-id="' . (int)$depot['id'] . '"
-    data-nom="' . htmlspecialchars($depot['nom'], ENT_QUOTES) . '"
-    data-resp="' . (int)($depot['responsable_id'] ?? 0) . '"
-    title="Modifier">
-    <i class="bi bi-pencil-fill"></i>
-  </button>
-
-  <button
-    class="btn btn-sm btn-danger delete-depot-btn"
-    data-bs-toggle="modal"
-    data-bs-target="#modalDepotDelete"
-    data-id="' . (int)$depot['id'] . '"
-    title="Supprimer">
-    <i class="bi bi-trash-fill"></i>
-  </button>
-</td>';
+                <button class="btn btn-sm btn-warning edit-depot-btn"
+                        data-bs-toggle="modal"
+                        data-bs-target="#modalDepotEdit"
+                        data-id="' . (int)$depot['id'] . '"
+                        data-nom="' . htmlspecialchars($depot['nom'], ENT_QUOTES) . '"
+                        data-resp="' . (int)($depot['responsable_id'] ?? 0) . '"
+                        title="Modifier">
+                  <i class="bi bi-pencil-fill"></i>
+                </button>
+                <button class="btn btn-sm btn-danger delete-depot-btn"
+                        data-bs-toggle="modal"
+                        data-bs-target="#modalDepotDelete"
+                        data-id="' . (int)$depot['id'] . '"
+                        title="Supprimer">
+                  <i class="bi bi-trash-fill"></i>
+                </button>
+              </td>';
 
                 echo '</tr>';
             }
             ?>
+            <!-- ligne "aucun résultat" (affichée par JS si besoin) -->
+            <tr id="noResultsRow" class="d-none">
+                <td colspan="4" class="text-muted text-center py-4">Aucun dépôt trouvé</td>
+            </tr>
         </tbody>
     </table>
+
 </div>
 
 <!-- Modal création -->

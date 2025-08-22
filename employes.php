@@ -56,6 +56,13 @@ function badgeRole($role)
             + Ajouter un employé
         </button>
     </div>
+    <input
+        type="text"
+        id="employeSearchInput"
+        class="form-control mb-4"
+        placeholder="Rechercher un employé (nom, email, rôle)..."
+        autocomplete="off" />
+
 
     <div class="table-responsive">
         <table class="table table-bordered table-striped align-middle">
