@@ -103,20 +103,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['transfert_id'])) {
         }
 
         // 🧾 Historique du mouvement (validation par le chef)
+        // -> on enregistre aussi le DEMANDEUR et on garde le source_id même si la source est un dépôt
+        $commentaire = $transfert['commentaire'] ?? null;
+
         $stmtMv = $pdo->prepare("
-            INSERT INTO stock_mouvements
-                (stock_id, type, source_type, source_id, dest_type, dest_id, quantite, statut, utilisateur_id, created_at)
-            VALUES
-                (:stock_id, 'transfert', :src_type, :src_id, 'chantier', :dest_id, :qte, 'valide', :user_id, NOW())
-        ");
+    INSERT INTO stock_mouvements
+        (stock_id, type, source_type, source_id, dest_type, dest_id, quantite, statut, commentaire, utilisateur_id, demandeur_id, created_at)
+    VALUES
+        (:stock_id, 'transfert', :src_type, :src_id, 'chantier', :dest_id, :qte, 'valide', :commentaire, :validateur_id, :demandeur_id, NOW())
+");
         $stmtMv->execute([
-            ':stock_id' => $articleId,
-            ':src_type' => $sourceType,
-            ':src_id'   => ($sourceType === 'chantier') ? $sourceId : null, // null si dépôt
-            ':dest_id'  => $chantierId,
-            ':qte'      => $quantite,
-            ':user_id'  => $chefId,
+            ':stock_id'      => $articleId,
+            ':src_type'      => $sourceType,     // 'depot' | 'chantier'
+            ':src_id'        => $sourceId,       // ✅ on ENREGISTRE l'ID même si c'est un dépôt
+            ':dest_id'       => $chantierId,     // destination = ce chantier
+            ':qte'           => $quantite,
+            ':commentaire'   => $commentaire,
+            ':validateur_id' => $chefId,         // celui qui VALIDE (colonne "Par")
+            ':demandeur_id'  => $demandeurId,    // ✅ NOUVEAU : qui a DEMANDÉ (sert pour la colonne "De")
         ]);
+
 
         // ✅ Supprimer le transfert en attente
         $stmtDelete = $pdo->prepare("DELETE FROM transferts_en_attente WHERE id = ?");
@@ -131,7 +137,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['transfert_id'])) {
 
         $_SESSION['success_message'] = "Transfert validé avec succès.";
         $_SESSION['highlight_stock_id'] = $articleId;
-
     } catch (Exception $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();
         $_SESSION['error_message'] = "Erreur lors de la validation : " . $e->getMessage();

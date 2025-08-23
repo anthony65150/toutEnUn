@@ -18,6 +18,11 @@ if (isset($_GET['depot_id'])) {
     $depotId = (int)$_GET['id'];
 }
 
+// Listes pour la modale (identique à stock_depot.php)
+$allChantiers = $pdo->query("SELECT id, nom FROM chantiers")->fetchAll(PDO::FETCH_KEY_PAIR);
+$allDepots    = $pdo->query("SELECT id, nom FROM depots")->fetchAll(PDO::FETCH_KEY_PAIR);
+
+
 // Récup infos dépôt
 $stmtDepot = $pdo->prepare("SELECT id, nom, responsable_id FROM depots WHERE id = ?");
 $stmtDepot->execute([$depotId]);
@@ -164,12 +169,16 @@ foreach ($subCategoriesGrouped as $k => $arr) {
                             </td>
 
                             <td class="text-center">
-                                <a href="stock_depot.php"
-                                    class="btn btn-primary btn-icon"
-                                    title="Transférer" aria-label="Transférer">
+                                <button
+                                    class="btn btn-sm btn-primary transfer-btn"
+                                    data-stock-id="<?= (int)$r['article_id'] ?>"
+                                    data-stock-nom="<?= htmlspecialchars($r['article_nom']) ?>"
+                                    title="Transférer"
+                                    aria-label="Transférer">
                                     <i class="bi bi-arrow-left-right"></i>
-                                </a>
+                                </button>
                             </td>
+
 
 
                         </tr>
@@ -180,100 +189,61 @@ foreach ($subCategoriesGrouped as $k => $arr) {
     </div>
 </div>
 
+<!-- Modal Transfert -->
+<div class="modal fade" id="transferModal" tabindex="-1" aria-labelledby="transferModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="transferModalLabel">Transférer du stock</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
+            </div>
+            <div class="modal-body">
+                <form id="transferForm">
+                    <input type="hidden" id="articleId" name="article_id">
+                    <input type="hidden" id="sourceDepotId" name="source_depot_id" value="<?= $depotId ?>">
+                    <div class="mb-3">
+                        <label>Destination</label>
+                        <select class="form-select" id="destinationChantier">
+                            <option value="" disabled selected>Choisir la destination</option>
+                            <optgroup label="Dépôts">
+                                <?php foreach ($allDepots as $id => $nom): ?>
+                                    <?php if ($id != $depotId): ?>
+                                        <option value="depot_<?= $id ?>"><?= htmlspecialchars($nom) ?></option>
+                                    <?php endif; ?>
+                                <?php endforeach; ?>
+                            </optgroup>
+                            <optgroup label="Chantiers">
+                                <?php foreach ($allChantiers as $id => $nom): ?>
+                                    <option value="chantier_<?= $id ?>"><?= htmlspecialchars($nom) ?></option>
+                                <?php endforeach; ?>
+                            </optgroup>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="quantity" class="form-label">Quantité</label>
+                        <input type="number" class="form-control" id="quantity" name="quantity" min="1" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Envoyer</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index: 1100">
+  <div id="toastMessage" class="toast align-items-center text-bg-primary border-0" role="alert" aria-live="assertive" aria-atomic="true">
+    <div class="d-flex">
+      <div class="toast-body"></div>
+      <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Fermer"></button>
+    </div>
+  </div>
+</div>
+
 <script>
-    (function() {
-        // Données sous-catégories (par catégorie)
-        const subCategories = <?= json_encode($subCategoriesGrouped) ?>;
-
-        const $catsWrap = document.getElementById('categoriesSlide');
-        const $subsWrap = document.getElementById('subCategoriesSlide');
-        const $rowsBody = document.getElementById('stockTableBody');
-        const $search = document.getElementById('searchInput');
-
-        let currentCat = '';
-        let currentSub = '';
-        let searchTerm = '';
-
-        function normalize(str) {
-            return (str || '').toString().toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '');
-        }
-
-        function renderSubCats(cat) {
-            $subsWrap.innerHTML = '';
-            if (!cat || !subCategories[cat] || subCategories[cat].length === 0) return;
-
-            subCategories[cat].forEach(sc => {
-                const b = document.createElement('button');
-                b.className = 'btn btn-outline-secondary';
-                b.dataset.subcat = sc;
-                b.textContent = sc;
-                $subsWrap.appendChild(b);
-            });
-        }
-
-
-        function applyFilters() {
-            const rows = $rowsBody.querySelectorAll('tr');
-            const s = normalize(searchTerm);
-
-            rows.forEach(tr => {
-                // Skip placeholder row (no data-cat attribute)
-                if (!tr.hasAttribute('data-cat')) {
-                    tr.style.display = '';
-                    return;
-                }
-
-                const cat = tr.getAttribute('data-cat') || '';
-                const sub = tr.getAttribute('data-subcat') || '';
-                const nameEl = tr.querySelector('.article-name');
-                const text = normalize(nameEl ? nameEl.textContent : tr.textContent);
-
-                const okCat = !currentCat || cat === currentCat;
-                const okSub = !currentSub || sub === currentSub;
-                const okSearch = !s || text.includes(s);
-
-                tr.style.display = (okCat && okSub && okSearch) ? '' : 'none';
-            });
-        }
-
-        // Catégories (délégation)
-        $catsWrap.addEventListener('click', (e) => {
-            const btn = e.target.closest('button[data-cat]');
-            if (!btn) return;
-            // état visuel
-            $catsWrap.querySelectorAll('button').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-
-            currentCat = btn.dataset.cat || '';
-            currentSub = '';
-            renderSubCats(currentCat);
-            // reset état visuel sous-cats
-            $subsWrap.querySelectorAll('button').forEach(b => b.classList.remove('active'));
-            applyFilters();
-        });
-
-        // Sous-catégories
-        $subsWrap.addEventListener('click', (e) => {
-            const btn = e.target.closest('button[data-subcat]');
-            if (!btn) return;
-            $subsWrap.querySelectorAll('button').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-
-            currentSub = btn.dataset.subcat || '';
-            applyFilters();
-        });
-
-        // Recherche
-        $search.addEventListener('input', (e) => {
-            searchTerm = e.target.value || '';
-            applyFilters();
-        });
-
-        // Activer "Tous" par défaut
-        const firstCatBtn = $catsWrap.querySelector('button[data-cat=""]');
-        if (firstCatBtn) firstCatBtn.classList.add('active');
-
-    })();
+  // Injection des sous-catégories pour JS
+  window.subCategories = <?= json_encode($subCategoriesGrouped) ?>;
 </script>
+<script src="/js/depot_contenu.js"></script>
+
 
 <?php require_once __DIR__ . '/templates/footer.php'; ?>

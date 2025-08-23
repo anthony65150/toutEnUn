@@ -67,22 +67,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['transfert_id'])) {
         }
         // Si source = dépôt, ne rien faire ici (déjà décrémenté à l’envoi)
 
-        // 🧾 Enregistrer l'historique du mouvement
+        // 🧾 Enregistrer l'historique du mouvement (validation par l'admin)
+        // -> on garde toujours les IDs source/dest (même si ce sont des dépôts)
+        // -> on enregistre aussi le DEMANDEUR et le commentaire (si présent)
+        $commentaire = $transfert['commentaire'] ?? null;
+
         $stmtMv = $pdo->prepare("
-            INSERT INTO stock_mouvements
-                (stock_id, type, source_type, source_id, dest_type, dest_id, quantite, statut, utilisateur_id, created_at)
-            VALUES
-                (:stock_id, 'transfert', :src_type, :src_id, :dest_type, :dest_id, :qte, 'valide', :user_id, NOW())
-        ");
+    INSERT INTO stock_mouvements
+        (stock_id, type, source_type, source_id, dest_type, dest_id, quantite, statut, commentaire, utilisateur_id, demandeur_id, created_at)
+    VALUES
+        (:stock_id, 'transfert', :src_type, :src_id, :dest_type, :dest_id, :qte, 'valide', :commentaire, :validateur_id, :demandeur_id, NOW())
+");
         $stmtMv->execute([
-            ':stock_id' => $articleId,
-            ':src_type' => $sourceType,
-            ':src_id'   => ($sourceType === 'chantier') ? $sourceId : null,   // null si dépôt
-            ':dest_type'=> $destinationType,
-            ':dest_id'  => ($destinationType === 'chantier') ? $destinationId : null, // null si dépôt
-            ':qte'      => $quantite,
-            ':user_id'  => $validatorUserId,
+            ':stock_id'      => $articleId,
+            ':src_type'      => $sourceType,          // 'depot' | 'chantier'
+            ':src_id'        => $sourceId,            // ✅ plus de NULL si dépôt
+            ':dest_type'     => $destinationType,     // 'depot' | 'chantier'
+            ':dest_id'       => $destinationId,       // ✅ plus de NULL si dépôt
+            ':qte'           => $quantite,
+            ':commentaire'   => $commentaire,
+            ':validateur_id' => $validatorUserId,     // colonne "Par"
+            ':demandeur_id'  => $demandeurId,         // ✅ qui a demandé (pour la colonne "De")
         ]);
+
 
         // ✅ Supprimer le transfert en attente
         $stmtDelete = $pdo->prepare("DELETE FROM transferts_en_attente WHERE id = ?");

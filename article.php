@@ -146,24 +146,95 @@ function human_filesize(?int $bytes): string
 $mouvements = [];
 try {
     $sql = "
-        SELECT sm.*,
-               us.nom AS user_nom, us.prenom AS user_prenom,
-               cs.nom AS source_chantier_nom,
-               cd.nom AS dest_chantier_nom
-        FROM stock_mouvements sm
-        LEFT JOIN utilisateurs us ON us.id = sm.utilisateur_id
-        LEFT JOIN chantiers cs ON (sm.source_type='chantier' AND cs.id = sm.source_id)
-        LEFT JOIN chantiers cd ON (sm.dest_type='chantier' AND cd.id = sm.dest_id)
-        WHERE sm.stock_id = :sid
-        ORDER BY sm.created_at DESC, sm.id DESC
-        LIMIT 200
-    ";
+    SELECT
+        sm.*,
+
+        /* VALIDATEUR */
+        us.prenom    AS user_prenom,
+        us.fonction  AS user_fonction,
+        d_us.nom     AS validateur_depot_nom,
+        c_us.nom     AS validateur_chantier_nom,
+
+        /* DEMANDEUR (peut être admin) */
+        dem.prenom   AS dem_prenom,
+        dem.fonction AS dem_fonction,
+
+        /* Lieux */
+        cs.nom       AS source_chantier_nom,
+        cd.nom       AS dest_chantier_nom,
+        ds.nom       AS source_depot_nom,
+        dd.nom       AS dest_depot_nom,
+
+        /* Responsables standard (si on n'affiche pas le demandeur admin) */
+        us_src.prenom     AS src_respo_prenom,
+        uc_src_u.prenom   AS src_chef_prenom,
+        us_dst.prenom     AS dst_respo_prenom,
+        uc_dst_u.prenom   AS dst_chef_prenom,
+
+        /* Clés d'affichage 'De' (si demandeur admin -> son prénom, sinon responsable du lieu) */
+        CASE
+          WHEN dem.fonction = 'administrateur' THEN dem.prenom
+          WHEN sm.source_type = 'depot'        THEN us_src.prenom
+          WHEN sm.source_type = 'chantier'     THEN uc_src_u.prenom
+          ELSE NULL
+        END AS src_actor_prenom,
+
+        /* Clés d'affichage 'Vers' (responsable du lieu) */
+        CASE
+          WHEN sm.dest_type = 'depot'      THEN us_dst.prenom
+          WHEN sm.dest_type = 'chantier'   THEN uc_dst_u.prenom
+          ELSE NULL
+        END AS dst_actor_prenom
+
+    FROM stock_mouvements sm
+
+    /* VALIDATEUR */
+    LEFT JOIN utilisateurs us ON us.id = sm.utilisateur_id
+    LEFT JOIN depots d_us ON (us.fonction = 'depot' AND d_us.responsable_id = us.id)
+    LEFT JOIN (
+        SELECT uc.utilisateur_id, MIN(uc.chantier_id) AS chantier_id
+        FROM utilisateur_chantiers uc GROUP BY uc.utilisateur_id
+    ) uc_us ON (us.fonction = 'chef' AND uc_us.utilisateur_id = us.id)
+    LEFT JOIN chantiers c_us ON (c_us.id = uc_us.chantier_id)
+
+    /* DEMANDEUR */
+    LEFT JOIN utilisateurs dem ON dem.id = sm.demandeur_id
+
+    /* Lieux */
+    LEFT JOIN chantiers cs ON (sm.source_type = 'chantier' AND cs.id = sm.source_id)
+    LEFT JOIN chantiers cd ON (sm.dest_type   = 'chantier' AND cd.id = sm.dest_id)
+    LEFT JOIN depots    ds ON (sm.source_type = 'depot'    AND ds.id = sm.source_id)
+    LEFT JOIN depots    dd ON (sm.dest_type   = 'depot'    AND dd.id = sm.dest_id)
+
+    /* Responsables standard (source) */
+    LEFT JOIN utilisateurs us_src ON (sm.source_type='depot'    AND us_src.id = ds.responsable_id)
+    LEFT JOIN (
+        SELECT uc.chantier_id, MIN(uc.utilisateur_id) AS chef_id
+        FROM utilisateur_chantiers uc GROUP BY uc.chantier_id
+    ) uc_src  ON (sm.source_type='chantier' AND uc_src.chantier_id = sm.source_id)
+    LEFT JOIN utilisateurs uc_src_u ON (uc_src_u.id = uc_src.chef_id)
+
+    /* Responsables standard (dest) */
+    LEFT JOIN utilisateurs us_dst ON (sm.dest_type='depot'     AND us_dst.id = dd.responsable_id)
+    LEFT JOIN (
+        SELECT uc.chantier_id, MIN(uc.utilisateur_id) AS chef_id
+        FROM utilisateur_chantiers uc GROUP BY uc.chantier_id
+    ) uc_dst  ON (sm.dest_type='chantier' AND uc_dst.chantier_id = sm.dest_id)
+    LEFT JOIN utilisateurs uc_dst_u ON (uc_dst_u.id = uc_dst.chef_id)
+
+    WHERE sm.stock_id = :sid
+    ORDER BY sm.created_at DESC, sm.id DESC
+    LIMIT 200
+";
+
+
     $stmt = $pdo->prepare($sql);
     $stmt->execute(['sid' => $articleId]);
     $mouvements = $stmt->fetchAll(PDO::FETCH_ASSOC);
 } catch (Throwable $e) {
     $mouvements = [];
 }
+
 
 /* Helpers historique */
 function label_lieu(?string $type, ?int $id, ?string $chantierNom): string
@@ -195,6 +266,64 @@ if ($depotId > 0) {
 
 /* Historique : toujours affiché (comme admin/chef) */
 $showHistorique = true;
+
+/**
+ * Construit "Prénom (dépôt X)" ou "Prénom (chantier Y)" pour Source/Destination
+ * $prefix = 'source' | 'dest' pour choisir les colonnes.
+ */
+function label_personne_lieu(?string $type, array $row, string $prefix): string
+{
+    $actorPrenom = $row[$prefix === 'source' ? 'src_actor_prenom' : 'dst_actor_prenom'] ?? null;
+
+    if ($type === 'depot') {
+        $depot = $row[$prefix === 'source' ? 'source_depot_nom' : 'dest_depot_nom'] ?? null;
+        if ($actorPrenom && $depot) return htmlspecialchars("$actorPrenom (dépôt $depot)");
+        if ($depot)                 return htmlspecialchars("Dépôt ($depot)");
+        return 'Dépôt';
+    }
+
+    if ($type === 'chantier') {
+        $chantier = $row[$prefix === 'source' ? 'source_chantier_nom' : 'dest_chantier_nom'] ?? null;
+        if ($actorPrenom && $chantier) return htmlspecialchars("$actorPrenom (chantier $chantier)");
+        if ($chantier)                 return htmlspecialchars("Chantier : $chantier");
+        return 'Chantier';
+    }
+
+    return '-';
+}
+
+
+
+
+/** Construit "Prénom (dépôt X/chantier Y/admin)" pour le VALIDATEUR (colonne "Par") */
+function label_validateur(array $row): string
+{
+    $prenom = trim($row['user_prenom'] ?? '');
+    if ($prenom === '') return '-';
+
+    $suffix = '';
+    switch ($row['user_fonction'] ?? '') {
+        case 'depot':
+            if (!empty($row['validateur_depot_nom'])) {
+                $suffix = ' (dépôt ' . $row['validateur_depot_nom'] . ')';
+            }
+            break;
+        case 'chef':
+            $ch = $row['validateur_chantier_nom']
+               ?? $row['source_chantier_nom']
+               ?? $row['dest_chantier_nom']
+               ?? null;
+            if ($ch) $suffix = ' (chantier ' . $ch . ')';
+            break;
+        case 'administrateur':
+            $suffix = ''; // prénom seul
+            break;
+    }
+    return htmlspecialchars($prenom . $suffix);
+}
+
+
+
 ?>
 <div class="container mt-4">
     <!-- En-tête -->
@@ -382,11 +511,10 @@ $showHistorique = true;
                                 <tbody>
                                     <?php foreach ($mouvements as $mv):
                                         $date = date('d/m/Y H:i', strtotime($mv['created_at']));
-                                        $from = label_lieu($mv['source_type'], $mv['source_id'], $mv['source_chantier_nom'] ?? null);
-                                        $to   = label_lieu($mv['dest_type'],   $mv['dest_id'],   $mv['dest_chantier_nom']   ?? null);
+                                        $from = label_personne_lieu($mv['source_type'] ?? null, $mv, 'source'); // De
+                                        $to   = label_personne_lieu($mv['dest_type']   ?? null, $mv, 'dest');   // Vers
                                         $qte  = (int)$mv['quantite'];
-                                        $by   = trim(($mv['user_prenom'] ?? '') . ' ' . ($mv['user_nom'] ?? ''));
-                                        $by   = $by !== '' ? htmlspecialchars($by) : '-';
+                                        $by   = label_validateur($mv);                                          // Par (VALIDATEUR)
                                     ?>
                                         <tr>
                                             <td><?= $date ?></td>
