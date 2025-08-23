@@ -60,7 +60,7 @@ $utilisateurs = $pdo->query("
                 echo "<tr class='align-middle $highlight'>";
 
                 echo '<td>
-                <a class="text-decoration-none" href="depot_contenu.php?depot_id=' . (int)$depot['id'] . '">'
+                <a class="link-primary fw-semibold text-decoration-none" href="depot_contenu.php?depot_id=' . (int)$depot['id'] . '">'
                     . htmlspecialchars($depot['nom']) .
                     '</a>
               </td>';

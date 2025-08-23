@@ -263,3 +263,43 @@ body.dark-mode .navbar-toggler-icon {
   .depot-nom .name-full  { display: none; }
   .depot-nom .name-short { display: inline; }
 }
+
+
+
+/* Table d'historique : empiler en mobile */
+@media (max-width: 576px) {
+  .history-table thead { 
+    display: none; 
+  }
+  .history-table tbody tr {
+    display: block;
+    border: 1px solid #e9ecef;
+    border-radius: .5rem;
+    padding: .5rem .75rem;
+    margin-bottom: .75rem;
+    background: #fff;
+  }
+  .history-table tbody tr td {
+    display: flex;
+    justify-content: space-between;
+    gap: .75rem;
+    padding: .35rem 0 !important;
+    border: 0 !important;
+    white-space: normal; /* autoriser le retour à la ligne du contenu */
+  }
+  .history-table tbody tr td::before {
+    content: attr(data-label);
+    font-weight: 600;
+    color: #6c757d;
+  }
+  /* Aligner la quantité et le badge proprement */
+  .history-table td[data-label="Qté"],
+  .history-table td[data-label="Statut"] {
+    align-items: center;
+  }
+}
+
+/* Desktop/tablette : éviter les sauts bizarres */
+.history-table td.text-nowrap {
+  white-space: nowrap;
+}

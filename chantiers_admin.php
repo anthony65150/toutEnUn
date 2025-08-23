@@ -56,7 +56,14 @@ if (!isset($_SESSION['utilisateurs']) || $_SESSION['utilisateurs']['fonction'] !
                 $highlight = (isset($_GET['highlight']) && $_GET['highlight'] == $chantier['id']) ? 'table-success' : '';
                 echo "<tr class='align-middle $highlight'>";
 
-                echo '<td>' . htmlspecialchars($chantier['nom']) . '</td>';
+                echo '<td>
+  <a class="link-primary fw-semibold text-decoration-none"
+     href="chantier_contenu.php?id=' . (int)$chantier['id'] . '">
+     ' . htmlspecialchars($chantier['nom']) . '
+  </a>
+</td>';
+
+
                 echo '<td>' . $chefsText . '</td>';
                 echo '<td>' . htmlspecialchars($chantier['date_debut']) . '</td>';
                 echo '<td>' . htmlspecialchars($chantier['date_fin']) . '</td>';

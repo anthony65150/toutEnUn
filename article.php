@@ -138,6 +138,24 @@ function human_filesize(?int $bytes): string
     }
     return round($bytes, 1) . ' ' . $units[$i];
 }
+// --- Pagination ---
+$perPage = 10;
+$page = max(1, (int)($_GET['hpage'] ?? 1));
+$offset = ($page - 1) * $perPage;
+
+// total pour savoir s’il y a une page suivante
+$stmtCnt = $pdo->prepare("SELECT COUNT(*) FROM stock_mouvements WHERE stock_id = :sid");
+$stmtCnt->execute([':sid' => $articleId]);
+$totalRows = (int)$stmtCnt->fetchColumn();
+
+// helper pour reconstruire l’URL avec hpage + #history
+function historyUrl(int $p): string
+{
+    $qs = $_GET;                 // conserve id, chantier_id, depot_id, etc.
+    $qs['hpage'] = $p;
+    return basename($_SERVER['PHP_SELF']) . '?' . http_build_query($qs) . '#history';
+}
+
 
 /* ================================
    5) HISTORIQUE (stock_mouvements)
@@ -222,12 +240,9 @@ try {
     ) uc_dst  ON (sm.dest_type='chantier' AND uc_dst.chantier_id = sm.dest_id)
     LEFT JOIN utilisateurs uc_dst_u ON (uc_dst_u.id = uc_dst.chef_id)
 
-    WHERE sm.stock_id = :sid
-    ORDER BY sm.created_at DESC, sm.id DESC
-    LIMIT 200
-";
-
-
+   WHERE sm.stock_id = :sid
+        ORDER BY sm.created_at DESC, sm.id DESC
+        LIMIT $perPage OFFSET $offset";
     $stmt = $pdo->prepare($sql);
     $stmt->execute(['sid' => $articleId]);
     $mouvements = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -310,9 +325,9 @@ function label_validateur(array $row): string
             break;
         case 'chef':
             $ch = $row['validateur_chantier_nom']
-               ?? $row['source_chantier_nom']
-               ?? $row['dest_chantier_nom']
-               ?? null;
+                ?? $row['source_chantier_nom']
+                ?? $row['dest_chantier_nom']
+                ?? null;
             if ($ch) $suffix = ' (chantier ' . $ch . ')';
             break;
         case 'administrateur':
@@ -490,13 +505,14 @@ function label_validateur(array $row): string
                 <div class="card shadow-sm p-3">
                     <h5 class="fw-bold mb-3">Historique des transferts</h5>
 
+
                     <?php if (empty($mouvements)): ?>
                         <div class="alert alert-light border d-flex align-items-center mb-0">
                             <span class="me-2">🕘</span> Aucun mouvement enregistré pour cet article.
                         </div>
                     <?php else: ?>
                         <div class="table-responsive">
-                            <table class="table align-middle">
+                            <table class="table align-middle history-table">
                                 <thead class="table-light">
                                     <tr>
                                         <th>Date</th>
@@ -505,35 +521,68 @@ function label_validateur(array $row): string
                                         <th class="text-end">Qté</th>
                                         <th>Statut</th>
                                         <th>Par</th>
-                                        <th>Note</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     <?php foreach ($mouvements as $mv):
                                         $date = date('d/m/Y H:i', strtotime($mv['created_at']));
-                                        $from = label_personne_lieu($mv['source_type'] ?? null, $mv, 'source'); // De
-                                        $to   = label_personne_lieu($mv['dest_type']   ?? null, $mv, 'dest');   // Vers
+                                        $from = label_personne_lieu($mv['source_type'] ?? null, $mv, 'source');
+                                        $to   = label_personne_lieu($mv['dest_type']   ?? null, $mv, 'dest');
                                         $qte  = (int)$mv['quantite'];
-                                        $by   = label_validateur($mv);                                          // Par (VALIDATEUR)
+                                        $by   = label_validateur($mv);
                                     ?>
                                         <tr>
-                                            <td><?= $date ?></td>
-                                            <td><?= htmlspecialchars($from) ?></td>
-                                            <td><?= htmlspecialchars($to) ?></td>
-                                            <td class="text-end fw-bold"><?= $qte ?></td>
-                                            <td><?= badge_statut($mv['statut']) ?></td>
-                                            <td><?= $by ?></td>
-                                            <td class="text-muted"><?= htmlspecialchars($mv['commentaire'] ?? '') ?></td>
+                                            <td class="text-nowrap" data-label="Date"><?= $date ?></td>
+                                            <td data-label="De"><?= htmlspecialchars($from) ?></td>
+                                            <td data-label="Vers"><?= htmlspecialchars($to) ?></td>
+                                            <td class="text-end fw-bold text-nowrap" data-label="Qté"><?= $qte ?></td>
+                                            <td class="text-nowrap" data-label="Statut"><?= badge_statut($mv['statut']) ?></td>
+                                            <td class="text-nowrap" data-label="Par"><?= $by ?></td>
                                         </tr>
                                     <?php endforeach; ?>
                                 </tbody>
                             </table>
+                            <?php
+                            $hasPrev = $page > 1;
+                            $hasNext = ($offset + count($mouvements)) < $totalRows;
+                            if ($hasPrev || $hasNext): ?>
+                                <nav class="d-flex justify-content-center mt-2">
+                                    <ul class="pagination pagination-sm mb-0">
+                                        <li class="page-item <?= $hasPrev ? '' : 'disabled' ?>">
+                                            <a class="page-link" href="<?= $hasPrev ? historyUrl($page - 1) : '#' ?>" aria-label="Précédent">
+                                                &laquo; Précédent
+                                            </a>
+                                        </li>
+                                        <li class="page-item disabled">
+                                            <span class="page-link">
+                                                Page <?= $page ?> / <?= max(1, (int)ceil($totalRows / $perPage)) ?>
+                                            </span>
+                                        </li>
+                                        <li class="page-item <?= $hasNext ? '' : 'disabled' ?>">
+                                            <a class="page-link" href="<?= $hasNext ? historyUrl($page + 1) : '#' ?>" aria-label="Suivant">
+                                                Suivant &raquo;
+                                            </a>
+                                        </li>
+                                    </ul>
+                                </nav>
+                            <?php endif; ?>
+
                         </div>
+
                     <?php endif; ?>
                 </div>
             </div>
         <?php endif; ?>
     </div>
 </div>
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        if (location.hash === '#history') {
+            const t = document.querySelector('[data-bs-target="#history"]');
+            if (t) new bootstrap.Tab(t).show();
+        }
+    });
+</script>
+
 
 <?php require_once __DIR__ . '/templates/footer.php'; ?>
