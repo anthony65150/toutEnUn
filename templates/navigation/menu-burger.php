@@ -39,7 +39,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
 
             <?php if (in_array($_SESSION['utilisateurs']['fonction'] ?? '', ['administrateur', 'chef'])) : ?>
                 <li class="p-2">
-                    <a href="/admin/pointage.php" class="nav-link <?= ($current_page == 'pointage.php') ? 'active' : '' ?> text-center">
+                    <a href="/pointage.php" class="nav-link <?= ($current_page == 'pointage.php') ? 'active' : '' ?> text-center">
                         Pointage
                     </a>
                 </li>
