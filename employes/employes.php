@@ -1,10 +1,13 @@
 <?php
-require_once "./config/init.php";
-require_once __DIR__ . "/templates/header.php";
-require_once __DIR__ . "/templates/navigation/navigation.php";
 
-if (!isset($_SESSION['utilisateurs']) || $_SESSION['utilisateurs']['fonction'] !== 'administrateur') {
-    header("Location: connexion.php");
+declare(strict_types=1);
+
+require_once __DIR__ . '/../config/init.php';
+require_once __DIR__ . '/../templates/header.php';
+require_once __DIR__ . '/../templates/navigation/navigation.php';
+
+if (!isset($_SESSION['utilisateurs']) || ($_SESSION['utilisateurs']['fonction'] ?? null) !== 'administrateur') {
+    header("Location: /connexion.php");
     exit;
 }
 
@@ -56,13 +59,13 @@ function badgeRole($role)
             + Ajouter un employé
         </button>
     </div>
+
     <input
         type="text"
         id="employeSearchInput"
         class="form-control mb-4"
         placeholder="Rechercher un employé (nom, email, rôle)..."
         autocomplete="off" />
-
 
     <div class="table-responsive">
         <table class="table table-bordered table-striped align-middle">
@@ -139,7 +142,6 @@ function badgeRole($role)
                         <input type="password" name="password" id="emp_password" class="form-control" placeholder="Mot de passe">
                         <div class="form-text">Obligatoire à la création. Laissez vide en modification si vous ne souhaitez pas changer le mot de passe.</div>
                     </div>
-
                 </div>
             </div>
             <div class="modal-footer">
@@ -171,8 +173,7 @@ function badgeRole($role)
     </div>
 </div>
 
-<script src="js/employesGestion_admin.js?v=2"></script>
+<!-- IMPORTANT : chemin corrigé car le fichier est dans /employes/ -->
+<script src="js/employesGestion_admin.js"></script>
 
-
-
-<?php require_once __DIR__ . "/templates/footer.php"; ?>
+<?php require_once __DIR__ . '/../templates/footer.php'; ?>
