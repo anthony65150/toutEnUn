@@ -1,8 +1,8 @@
 <?php
-require_once "./config/init.php";
+require_once __DIR__ . '/../config/init.php';
 
 if (!isset($_SESSION['utilisateurs'])) {
-    header("Location: connexion.php");
+    header("Location: /connexion.php");
     exit;
 }
 
@@ -16,7 +16,7 @@ $depotId = $depot ? (int)$depot['id'] : null;
 
 if (!$depotId) {
     $_SESSION['error_message'] = "Dépôt introuvable pour cet utilisateur.";
-    header("Location: stock_depot.php");
+    header("Location: /stock/stock_depot.php");
     exit;
 }
 
@@ -44,7 +44,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['transfert_id'])) {
         if (!$transfert) {
             $pdo->rollBack();
             $_SESSION['error_message'] = "Transfert introuvable ou déjà traité.";
-            header("Location: stock_depot.php");
+            header("Location: /stock/stock_depot.php");
             exit;
         }
 
@@ -99,26 +99,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['transfert_id'])) {
         // Si source = dépôt, la décrémentation a normalement été faite à l’envoi
 
         // 🧾 Historique du mouvement (validation par le dépôt)
-        // -> on enregistre aussi le DEMANDEUR et on garde le source_id même si la source est un dépôt
         $commentaire = $transfert['commentaire'] ?? null;
 
         $stmtMv = $pdo->prepare("
-    INSERT INTO stock_mouvements
-        (stock_id, type, source_type, source_id, dest_type, dest_id, quantite, statut, commentaire, utilisateur_id, demandeur_id, created_at)
-    VALUES
-        (:stock_id, 'transfert', :src_type, :src_id, 'depot', :dest_id, :qte, 'valide', :commentaire, :validateur_id, :demandeur_id, NOW())
-");
+            INSERT INTO stock_mouvements
+                (stock_id, type, source_type, source_id, dest_type, dest_id, quantite, statut, commentaire, utilisateur_id, demandeur_id, created_at)
+            VALUES
+                (:stock_id, 'transfert', :src_type, :src_id, 'depot', :dest_id, :qte, 'valide', :commentaire, :validateur_id, :demandeur_id, NOW())
+        ");
         $stmtMv->execute([
             ':stock_id'      => $articleId,
-            ':src_type'      => $sourceType,            // 'depot' | 'chantier'
-            ':src_id'        => $sourceId,              // ✅ on enregistre l'ID même si c'est un dépôt
-            ':dest_id'       => $depotId,               // destination = ce dépôt
+            ':src_type'      => $sourceType,   // 'depot' | 'chantier'
+            ':src_id'        => $sourceId,     // garder l'ID même si dépôt
+            ':dest_id'       => $depotId,      // destination = ce dépôt
             ':qte'           => $quantite,
             ':commentaire'   => $commentaire,
-            ':validateur_id' => $userId,                // celui qui valide (colonne "Par")
-            ':demandeur_id'  => $demandeurId,           // ✅ NOUVEAU : qui a demandé (sert à afficher "De")
+            ':validateur_id' => $userId,       // celui qui valide
+            ':demandeur_id'  => $demandeurId,  // qui a demandé
         ]);
-
 
         // ✅ Terminer : supprimer le transfert en attente
         $stmtDelete = $pdo->prepare("DELETE FROM transferts_en_attente WHERE id = ?");
@@ -142,5 +140,5 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['transfert_id'])) {
 }
 
 // Redirection (pas de chantier_id ici)
-header("Location: stock_depot.php");
+header("Location: /stock/stock_depot.php");
 exit;

@@ -1,59 +1,59 @@
 document.addEventListener('DOMContentLoaded', () => {
   // --- Utils ---
-  const asWebPath = (p) => (!p ? '' : (p.startsWith('/') ? p : '/' + p));
+  // IMPORTANT: on ne force plus de "/" au début : on respecte ../, ./, http(s), data:
+  const asWebPath = (p) => {
+    if (!p) return '';
+    if (p.startsWith('../') || p.startsWith('./') || p.startsWith('http') || p.startsWith('data:') || p.startsWith('/')) {
+      return p;
+    }
+    // Si ta BDD stocke "uploads/..." sans slash, depuis /stock/ il faut remonter d'un cran :
+    return '../' + p;
+  };
 
   // --- Modals ---
   const transferModal = new bootstrap.Modal(document.getElementById('transferModal'));
   const modifyModal   = new bootstrap.Modal(document.getElementById('modifyModal'));
   const deleteModal   = new bootstrap.Modal(document.getElementById('confirmDeleteModal'));
 
-
   function attachRowHandlers(row) {
-  // Transfer
-  const tBtn = row.querySelector('.transfer-btn');
-  if (tBtn) {
-    tBtn.addEventListener('click', () => {
-      document.getElementById('modalStockId').value = tBtn.dataset.stockId;
-      document.getElementById('sourceChantier').value = '';
-      document.getElementById('destinationChantier').value = '';
-      document.getElementById('transferQty').value = '';
-      transferModal.show();
-    });
-  }
-
-  // Delete
-  const dBtn = row.querySelector('.delete-btn');
-  if (dBtn) {
-    dBtn.addEventListener('click', () => {
-      currentDeleteId = dBtn.dataset.stockId;
-      document.getElementById('deleteItemName').textContent = dBtn.dataset.stockNom;
-      currentRow = row;
-      deleteModal.show();
-    });
-  }
-}
-
-// Force l'alignement attendu sur une ligne (Photo & Actions centrés, le reste à gauche)
-function normalizeRowAlignment(row) {
-  if (!row) return;
-  const tds = row.querySelectorAll('td');
-  if (!tds.length) return;
-
-  tds.forEach((td, i) => {
-    td.classList.remove('text-center', 'text-start');
-    // 1ère cellule = Photo, dernière = Actions
-    if (i === 0 || i === tds.length - 1) {
-      td.classList.add('text-center');
-    } else {
-      td.classList.add('text-start');
+    // Transfer
+    const tBtn = row.querySelector('.transfer-btn');
+    if (tBtn) {
+      tBtn.addEventListener('click', () => {
+        document.getElementById('modalStockId').value = tBtn.dataset.stockId;
+        document.getElementById('sourceChantier').value = '';
+        document.getElementById('destinationChantier').value = '';
+        document.getElementById('transferQty').value = '';
+        transferModal.show();
+      });
     }
-  });
-}
 
-// Optionnel : normalise toute la table si besoin
-function normalizeTable() {
-  document.querySelectorAll('#stockTableBody > tr').forEach(normalizeRowAlignment);
-}
+    // Delete
+    const dBtn = row.querySelector('.delete-btn');
+    if (dBtn) {
+      dBtn.addEventListener('click', () => {
+        currentDeleteId = dBtn.dataset.stockId;
+        document.getElementById('deleteItemName').textContent = dBtn.dataset.stockNom;
+        currentRow = row;
+        deleteModal.show();
+      });
+    }
+  }
+
+  // Force l'alignement attendu (optionnel)
+  function normalizeRowAlignment(row) {
+    if (!row) return;
+    const tds = row.querySelectorAll('td');
+    if (!tds.length) return;
+    tds.forEach((td, i) => {
+      td.classList.remove('text-center', 'text-start');
+      if (i === 0 || i === tds.length - 1) td.classList.add('text-center');
+      else td.classList.add('text-start');
+    });
+  }
+  function normalizeTable() {
+    document.querySelectorAll('#stockTableBody > tr').forEach(normalizeRowAlignment);
+  }
 
   let currentRow = null;
   let currentDeleteId = null;
@@ -100,6 +100,7 @@ function normalizeTable() {
       return;
     }
 
+    // Endpoints dans /stock/
     fetch('transferStock_admin.php', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -111,6 +112,7 @@ function normalizeTable() {
         transferModal.hide();
         showToast('modifyToast');
 
+        // MAJ visuelle rapide côté "chantier" (si c'est la source)
         const qtyCell = document.querySelector(`#qty-source-${sourceType}-${sourceId}-${stockId}`);
         if (qtyCell) {
           const currentQty = parseInt(qtyCell.textContent, 10);
@@ -156,19 +158,15 @@ function normalizeTable() {
 
   const markDocLine = (lineEl, marked) => {
     if (!lineEl) return;
-    if (marked) {
-      lineEl.classList.add('opacity-50');
-      lineEl.classList.add('text-decoration-line-through');
-    } else {
-      lineEl.classList.remove('opacity-50');
-      lineEl.classList.remove('text-decoration-line-through');
-    }
+    lineEl.classList.toggle('opacity-50', marked);
+    lineEl.classList.toggle('text-decoration-line-through', marked);
   };
 
   const loadExistingDocs = (stockId) => {
     const docsDiv = document.getElementById('existingDocs');
     docsDiv.innerHTML = '<span class="text-muted">Chargement…</span>';
 
+    // Endpoint dans /stock/
     return fetch(`article_documents.php?id=${encodeURIComponent(stockId)}`)
       .then(r => r.json())
       .then(renderExistingDocs)
@@ -191,9 +189,7 @@ function normalizeTable() {
     const nomInput          = document.getElementById('modifyNom');
     const qtyInput          = document.getElementById('modifyQty');
     const filePhotoInput    = document.getElementById('modifyPhoto');
-
     const delPhotoInput     = document.getElementById('deletePhoto'); // hidden global
-
     const photoDiv          = document.getElementById('existingPhoto');
 
     // Multi-docs elements
@@ -201,24 +197,20 @@ function normalizeTable() {
     const newDocsPreview    = document.getElementById('newDocsPreview');
     const deleteDocIdsInput = document.getElementById('deleteDocIds');     // hidden JSON "[]"
 
-    // Reset set de suppression docs
     docsToDelete = new Set();
     deleteDocIdsInput.value = '[]';
 
-    // Renseigner
     idInput.value  = btn.dataset.stockId;
     nomInput.value = btn.dataset.stockNom || '';
     qtyInput.value = btn.dataset.stockQuantite || '';
 
-    // Reset fichiers + flags de suppression
     filePhotoInput.value = '';
     delPhotoInput.value  = '0';
 
-    // Reset docs (input + preview)
     fileDocsInput.value  = '';
     newDocsPreview.innerHTML = '';
 
-    // ----- PHOTO EXISTANTE -----
+    // PHOTO EXISTANTE
     photoDiv.innerHTML = '';
     if (btn.dataset.stockPhoto) {
       const src = asWebPath(btn.dataset.stockPhoto);
@@ -248,12 +240,10 @@ function normalizeTable() {
       if (delPhotoInput.value === '1') delPhotoInput.value = '0';
     }, { once: true });
 
-    // ----- DOCS EXISTANTS (fetch depuis endpoint dédié) -----
-    loadExistingDocs(idInput.value).then(() => {
-      // une fois chargés, rien à faire ici pour l’instant
-    });
+    // DOCS EXISTANTS
+    loadExistingDocs(idInput.value).then(() => {});
 
-    // ----- Ajouter de NOUVEAUX DOCS : preview + retrait avant envoi -----
+    // NOUVEAUX DOCS : preview + retrait
     fileDocsInput.onchange = () => {
       newDocsPreview.innerHTML = '';
       const files = Array.from(fileDocsInput.files);
@@ -269,7 +259,6 @@ function normalizeTable() {
         newDocsPreview.appendChild(row);
       });
 
-      // Gestion du retrait d’un seul fichier (recréation du FileList via DataTransfer)
       newDocsPreview.querySelectorAll('.btnRemoveNewDoc').forEach(btnRm => {
         btnRm.addEventListener('click', () => {
           const removeIdx = Number(btnRm.dataset.index);
@@ -279,8 +268,6 @@ function normalizeTable() {
           });
           fileDocsInput.files = dt.files;
           btnRm.closest('.d-flex').remove();
-
-          // Re-indexer les data-index restants
           [...newDocsPreview.querySelectorAll('.btnRemoveNewDoc')].forEach((b, i) => b.dataset.index = String(i));
         });
       });
@@ -312,139 +299,123 @@ function normalizeTable() {
     }
   });
 
-// =========================================================
-// ENREGISTRER MODIFS (submit)
-// =========================================================
-document.getElementById('modifyForm').addEventListener('submit', (e) => {
-  e.preventDefault();
+  // =========================================================
+  // ENREGISTRER MODIFS (submit)
+  // =========================================================
+  document.getElementById('modifyForm').addEventListener('submit', (e) => {
+    e.preventDefault();
 
-  const form = e.currentTarget;
-  const submitBtn = document.getElementById('confirmModify');
+    const form = e.currentTarget;
+    const submitBtn = document.getElementById('confirmModify');
 
-  // Injecter la liste des documents à supprimer
-  const deleteDocIdsInput = document.getElementById('deleteDocIds');
-  deleteDocIdsInput.value = JSON.stringify(Array.from(docsToDelete).map(Number));
+    const deleteDocIdsInput = document.getElementById('deleteDocIds');
+    deleteDocIdsInput.value = JSON.stringify(Array.from(docsToDelete).map(Number));
 
-  const fd = new FormData(form); // stockId, nom, quantite, photo, documents[], deletePhoto, deleteDocIds
+    const fd = new FormData(form); // stockId, nom, quantite, photo, documents[], deletePhoto, deleteDocIds
 
-  // 👉 FORCER deletePhoto à la valeur actuelle du hidden (au cas où)
-  const delPhotoInput = document.getElementById('deletePhoto');
-  fd.set('deletePhoto', delPhotoInput ? delPhotoInput.value : '0');
+    const delPhotoInput = document.getElementById('deletePhoto');
+    fd.set('deletePhoto', delPhotoInput ? delPhotoInput.value : '0');
 
-  // Vérifs rapides…
-  const nom = (fd.get('nom') || '').toString().trim();
-  const qte = Number(fd.get('quantite'));
-  if (!nom || Number.isNaN(qte) || qte < 0) {
-    showErrorToast('Vérifie le nom et la quantité.');
-    return;
-  }
+    const nom = (fd.get('nom') || '').toString().trim();
+    const qte = Number(fd.get('quantite'));
+    if (!nom || Number.isNaN(qte) || qte < 0) {
+      showErrorToast('Vérifie le nom et la quantité.');
+      return;
+    }
 
-  submitBtn.disabled = true;
+    submitBtn.disabled = true;
 
-  fetch('modifierStock.php', { method: 'POST', body: fd })
-    .then(res => res.json())
-    .then(data => {
-      if (!data.success) throw new Error(data.message || 'Erreur inconnue');
+    // Endpoint dans /stock/
+    fetch('modifierStock.php', { method: 'POST', body: fd })
+      .then(res => res.json())
+      .then(data => {
+        if (!data.success) throw new Error(data.message || 'Erreur inconnue');
 
-      // 1) Si le serveur renvoie la ligne complète => on remplace le <tr>
-      if (currentRow && data.rowHtml) {
-        const tmp = document.createElement('tbody');
-        tmp.innerHTML = data.rowHtml.trim();
-        const newRow = tmp.querySelector('tr');
+        // 1) Remplacement de ligne si le serveur renvoie rowHtml
+        if (currentRow && data.rowHtml) {
+          const tmp = document.createElement('tbody');
+          tmp.innerHTML = data.rowHtml.trim();
+          const newRow = tmp.querySelector('tr');
 
-        currentRow.replaceWith(newRow);
-        currentRow = newRow;
+          currentRow.replaceWith(newRow);
+          currentRow = newRow;
+          attachRowHandlers(currentRow);
 
-        // Ré-attacher les handlers spécifiques (si tu n'as pas mis de délégation)
-        attachRowHandlers(currentRow);
+          currentRow.classList.add('table-success');
+          setTimeout(() => currentRow.classList.remove('table-success'), 3000);
+          modifyModal.hide();
+          showToast('modifyToast');
 
-        // Surlignage + fermeture
-        currentRow.classList.add('table-success');
-        setTimeout(() => currentRow.classList.remove('table-success'), 3000);
+          if (Array.isArray(data.docsAll)) renderExistingDocs(data.docsAll);
+          return;
+        }
+
+        // 2) Fallback : MAJ manuelle
+        if (currentRow) {
+          const stockId = currentRow.dataset.rowId;
+
+          // ARTICLE (nom + total)
+          const articleCell = currentRow.querySelector('td.td-article');
+          if (articleCell) {
+            const newName = (data.newNom || '').toString();
+            const capName = newName ? (newName.charAt(0).toUpperCase() + newName.slice(1)) : '';
+            articleCell.innerHTML = `
+              <a href="article.php?id=${encodeURIComponent(stockId)}"
+                 class="fw-semibold text-decoration-none">${capName}</a>
+              <span class="ms-1 text-muted">(${data.newQuantiteTotale})</span>
+              <div class="small text-muted">${
+                [currentRow.dataset.cat, currentRow.dataset.subcat].filter(Boolean).join(' • ') || '—'
+              }</div>
+            `;
+          }
+
+          // PHOTO (anti-cache)
+          const imgEl = currentRow.querySelector('td.col-photo img.article-photo, td.col-photo img');
+          if (imgEl) {
+            if (data.newPhotoUrl) {
+              const url = asWebPath(data.newPhotoUrl);
+              imgEl.src = url + (url.includes('?') ? '&' : '?') + 't=' + Date.now();
+              imgEl.classList.remove('d-none');
+              imgEl.style.display = '';
+            } else {
+              imgEl.src = '';
+              imgEl.classList.add('d-none');
+              imgEl.style.display = 'none';
+            }
+          }
+
+          // Dataset du bouton éditer
+          const editBtn = currentRow.querySelector('.edit-btn');
+          if (editBtn) {
+            editBtn.dataset.stockNom      = data.newNom ?? editBtn.dataset.stockNom;
+            editBtn.dataset.stockQuantite = data.newQuantiteTotale ?? editBtn.dataset.stockQuantite;
+            editBtn.dataset.stockPhoto    = data.newPhotoUrl ? asWebPath(data.newPhotoUrl) : '';
+          }
+
+          currentRow.classList.add('table-success');
+          setTimeout(() => currentRow.classList.remove('table-success'), 3000);
+        }
+
+        if (Array.isArray(data.docsAll)) renderExistingDocs(data.docsAll);
+
         modifyModal.hide();
         showToast('modifyToast');
-
-        // MAJ docs dans la modale si dispo (optionnel)
-        if (Array.isArray(data.docsAll)) {
-          renderExistingDocs(data.docsAll);
-        }
-        return; // on a fini
-      }
-
-      // 2) Fallback : MAJ manuelle si pas de rowHtml
-      if (currentRow) {
-        const stockId = currentRow.dataset.rowId;
-
-        // ARTICLE (nom + total)
-        const articleCell = currentRow.querySelector('td.td-article');
-        if (articleCell) {
-          const newName = (data.newNom || '').toString();
-          const capName = newName.charAt(0).toUpperCase() + newName.slice(1).toLowerCase();
-          articleCell.innerHTML = `
-            <a href="article.php?id=${encodeURIComponent(stockId)}"
-               class="fw-semibold text-decoration-none">${capName}</a>
-            <span class="ms-1 text-muted">(${data.newQuantiteTotale})</span>
-            <div class="small text-muted">${
-              [currentRow.dataset.cat, currentRow.dataset.subcat].filter(Boolean).join(' • ') || '—'
-            }</div>
-          `;
-        }
-
-        // PHOTO (force anti-cache)
-        const imgEl = currentRow.querySelector('td.col-photo img.article-photo, td.col-photo img');
-        if (imgEl) {
-          if (data.newPhotoUrl) {
-            const url = asWebPath(data.newPhotoUrl);
-            imgEl.src = url + (url.includes('?') ? '&' : '?') + 't=' + Date.now();
-            imgEl.classList.remove('d-none');
-            imgEl.style.display = '';
-          } else {
-            imgEl.src = '';
-            imgEl.classList.add('d-none');
-            imgEl.style.display = 'none';
-          }
-        }
-
-        // Dataset du bouton éditer (pour prochaine ouverture)
-        const editBtn = currentRow.querySelector('.edit-btn');
-        if (editBtn) {
-          editBtn.dataset.stockNom = data.newNom ?? editBtn.dataset.stockNom;
-          editBtn.dataset.stockQuantite = data.newQuantiteTotale ?? editBtn.dataset.stockQuantite;
-          editBtn.dataset.stockPhoto = data.newPhotoUrl ? asWebPath(data.newPhotoUrl) : '';
-        }
-
-        // Surlignage
-        currentRow.classList.add('table-success');
-        setTimeout(() => currentRow.classList.remove('table-success'), 3000);
-      }
-
-      // MAJ docs dans la modale si dispo
-      if (Array.isArray(data.docsAll)) {
-        renderExistingDocs(data.docsAll);
-      }
-
-      // Ferme + toast
-      modifyModal.hide();
-      showToast('modifyToast');
-    })
-    .catch(err => {
-      console.error(err);
-      showErrorToast(err.message || 'Erreur lors de la modification.');
-    })
-    .finally(() => {
-      submitBtn.disabled = false;
-      // Reset des nouveaux fichiers + set de suppression (modale)
-      const inputDocs = document.getElementById('modifierDocument');
-      const newDocsPreview = document.getElementById('newDocsPreview');
-      if (inputDocs) inputDocs.value = '';
-      if (newDocsPreview) newDocsPreview.innerHTML = '';
-      docsToDelete.clear();
-      const deleteDocIdsInput = document.getElementById('deleteDocIds');
-      if (deleteDocIdsInput) deleteDocIdsInput.value = '[]';
-    });
-});
-
-
+      })
+      .catch(err => {
+        console.error(err);
+        showErrorToast(err.message || 'Erreur lors de la modification.');
+      })
+      .finally(() => {
+        submitBtn.disabled = false;
+        const inputDocs = document.getElementById('modifierDocument');
+        const newDocsPreview = document.getElementById('newDocsPreview');
+        if (inputDocs) inputDocs.value = '';
+        if (newDocsPreview) newDocsPreview.innerHTML = '';
+        docsToDelete.clear();
+        const deleteDocIdsInput2 = document.getElementById('deleteDocIds');
+        if (deleteDocIdsInput2) deleteDocIdsInput2.value = '[]';
+      });
+  });
 
   // =========================================================
   // SUPPRIMER (article)
@@ -459,6 +430,7 @@ document.getElementById('modifyForm').addEventListener('submit', (e) => {
   });
 
   document.getElementById('confirmDeleteButton').addEventListener('click', () => {
+    // Endpoint dans /stock/
     fetch(`supprimerStock.php?id=${currentDeleteId}`)
       .then(res => res.json())
       .then(() => location.reload())
@@ -502,23 +474,24 @@ document.getElementById('modifyForm').addEventListener('submit', (e) => {
 
   function filterRows(subCat = '') {
     tableRows.forEach(row => {
-      const rowCat = row.dataset.cat;
-      const rowSub = row.dataset.subcat;
+      const rowCat = row.dataset.cat || '';
+      const rowSub = row.dataset.subcat || '';
       const matchCat = !currentCategory || rowCat === currentCategory;
       const matchSub = !subCat || rowSub === subCat;
-      row.style.display = (matchCat && matchSub) ? "" : "none";
+      // Couplé avec la recherche (si active)
+      const search = searchInput.value.toLowerCase();
+      const nameCell = row.querySelector("td.td-article");
+      const name = (nameCell ? nameCell.textContent : "").toLowerCase();
+      const matchSearch = !search || name.includes(search);
+
+      row.style.display = (matchCat && matchSub && matchSearch) ? "" : "none";
     });
   }
 
-  searchInput.addEventListener("input", () => {
-    const search = searchInput.value.toLowerCase();
-    tableRows.forEach(row => {
-      const nameCell = row.querySelector("td.td-article");
-const name = (nameCell ? nameCell.textContent : "").toLowerCase();
-
-      row.style.display = name.includes(search) ? "" : "none";
-    });
-  });
+  searchInput.addEventListener("input", () => filterRows(
+    (document.querySelector("#subCategoriesSlide button.active")?.textContent || '')
+  ));
 
   filterByCategory('');
+  normalizeTable(); // optionnel
 });

@@ -1,9 +1,8 @@
 <?php
-require_once "./config/init.php";
-
+require_once __DIR__ . '/../config/init.php';
 
 if (!isset($_SESSION['utilisateurs'])) {
-    header("Location: index.php");
+    header("Location: ../index.php");
     exit;
 }
 
@@ -27,7 +26,6 @@ if (!$utilisateurChantierId && !empty($_SESSION['utilisateurs']['chantiers'])) {
     }
 }
 
-
 // Si un seul chantier, rediriger automatiquement
 if (!$utilisateurChantierId && count($chefChantiers) === 1) {
     $chantierId = $chefChantiers[0];
@@ -35,25 +33,20 @@ if (!$utilisateurChantierId && count($chefChantiers) === 1) {
     exit;
 }
 
-
-
 // ⛔ Si aucun chantier ou accès non autorisé, on bloque
 if (!$utilisateurChantierId || !in_array($utilisateurChantierId, $chefChantiers)) {
     $_SESSION['error_message'] = "Accès à ce chantier non autorisé.";
-    header("Location: index.php");
+    header("Location: ../index.php");
     exit;
 }
-
 
 // Chantiers disponibles
 $allChantiers = $pdo->query("SELECT id, nom FROM chantiers")->fetchAll(PDO::FETCH_KEY_PAIR);
 $allDepots = $pdo->query("SELECT id, nom FROM depots")->fetchAll(PDO::FETCH_KEY_PAIR);
 $pageTitle = "Stock - " . ($allChantiers[$utilisateurChantierId] ?? "Chantier inconnu");
 
-
-require_once __DIR__ . '/templates/header.php';
-require_once __DIR__ . '/templates/navigation/navigation.php';
-
+require_once __DIR__ . '/../templates/header.php';
+require_once __DIR__ . '/../templates/navigation/navigation.php';
 
 $inClause = implode(',', array_map('intval', $chefChantiers));
 $stmt = $pdo->query("
@@ -73,7 +66,6 @@ $stmt = $pdo->query("
     JOIN chantiers c ON sc.chantier_id = c.id
 ");
 
-
 $chantierAssoc = [];
 foreach ($stmt as $row) {
     $chantierAssoc[$row['stock_id']][] = [
@@ -82,7 +74,6 @@ foreach ($stmt as $row) {
         'quantite' => max(0, (int)$row['quantite'])  // pour éviter d’afficher négatif
     ];
 }
-
 
 $stmt = $pdo->query("SELECT sd.stock_id, d.id AS depot_id, d.nom AS depot_nom, sd.quantite FROM stock_depots sd JOIN depots d ON sd.depot_id = d.id");
 $depotAssoc = [];
@@ -128,7 +119,6 @@ $stmt = $pdo->prepare("
 ");
 $stmt->execute([$utilisateurChantierId]);
 $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
 ?>
 
 <div class="container py-4">
@@ -143,7 +133,7 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
     <?php if (isset($_SESSION['error_message'])): ?>
         <div class="alert alert-danger alert-dismissible fade show" role="alert">
             <?= htmlspecialchars($_SESSION['error_message']) ?>
-            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Fermer"></button>
+            <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Fermer"></button>
         </div>
         <?php unset($_SESSION['error_message']); ?>
     <?php endif; ?>
@@ -159,7 +149,6 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
             <?php endforeach; ?>
         </div>
     <?php endif; ?>
-
 
     <div class="d-flex justify-content-center mb-3 flex-wrap gap-2" id="categoriesSlide">
         <button class="btn btn-outline-primary" onclick="filterByCategory('')">Tous</button>
@@ -228,7 +217,6 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
         </div>
     <?php endif; ?>
 
-
     <div class="table-responsive mb-4">
         <table class="table table-striped table-bordered table-hover text-center align-middle">
             <thead class="table-dark">
@@ -242,7 +230,6 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 </tr>
             </thead>
 
-
             <tbody class="stockTableBody">
                 <?php foreach ($stocks as $stock): ?>
                     <?php
@@ -251,6 +238,7 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
                     $depotsList = $depotAssoc[$stockId] ?? [];
                     $chantiersList = $chantierAssoc[$stockId] ?? [];
                     $quantiteMonChantier = 0;
+
                     $depotsHtml = $depotsList
                         ? implode('<br>', array_map(function ($d) {
                             $full  = trim((string)$d['nom']);
@@ -265,8 +253,6 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                 . '</span>';
                         }, $depotsList))
                         : '<span class="text-muted">Aucun</span>';
-
-
 
                     $chantiersHtml = '<span class="text-muted">Aucun</span>';
                     if ($chantiersList) {
@@ -294,13 +280,6 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
                         if (empty($chantiersHtml)) {
                             $chantiersHtml = '<span class="text-muted">Aucun</span>';
                         }
-
-
-                        if (empty($chantiersHtml)) {
-                            $chantiersHtml = '<span class="text-muted">Aucun</span>';
-                        }
-
-
                         if ($chantiersHtml === '') $chantiersHtml = '<span class="text-muted">Aucun</span>';
                     }
                     $badge = $quantiteMonChantier > 0 ? '<span class="badge bg-success">' . $quantiteMonChantier . '</span>' : '<span class="badge bg-danger">0</span>';
@@ -313,8 +292,6 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
                         data-subcat="<?= htmlspecialchars($subcatSafe) ?>"
                         class="<?= (isset($_SESSION['highlight_stock_id']) && $_SESSION['highlight_stock_id'] == $stock['id']) ? 'table-success highlight-row' : '' ?>">
 
-
-
                         <!-- PHOTO -->
                         <td class="text-center col-photo" style="width:64px">
                             <?php
@@ -322,7 +299,8 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
                             if (!empty($stock['photo'])) {
                                 $photoWeb = '/' . ltrim($stock['photo'], '/');
                             } else {
-                                $fallbackLocal = __DIR__ . "/uploads/photos/{$stockId}.jpg";
+                                // fichiers stockés en /uploads/photos/{id}.jpg à la racine
+                                $fallbackLocal = __DIR__ . "/../uploads/photos/{$stockId}.jpg";
                                 if (is_file($fallbackLocal)) {
                                     $photoWeb = "/uploads/photos/{$stockId}.jpg";
                                 }
@@ -338,10 +316,11 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
                                     style="width:56px;height:56px;">—</div>
                             <?php endif; ?>
                         </td>
+
                         <!-- ARTICLE (nom cliquable + sous-texte catégorie/sous-catégorie) -->
                         <td class="text-center td-article">
                             <a href="article.php?id=<?= (int)$stockId ?>&chantier_id=<?= (int)$utilisateurChantierId ?>"
-                                class="fw-semibold text-decoration-none">
+                               class="fw-semibold text-decoration-none">
                                 <?= htmlspecialchars($stock['nom']) ?>
                             </a>
                             <span class="ms-1 text-muted">(<?= (int)$quantiteTotale ?>)</span>
@@ -355,7 +334,6 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
                             </div>
                         </td>
 
-
                         <td><?= $depotsHtml ?></td>
                         <td><?= $chantiersHtml ?></td>
                         <td><?= $badge ?></td>
@@ -368,6 +346,7 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 <?php endforeach; ?>
             </tbody>
         </table>
+
         <?php if (isset($_SESSION['highlight_stock_id'])): ?>
             <script>
                 document.addEventListener("DOMContentLoaded", () => {
@@ -436,18 +415,13 @@ $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
     </div>
 </div>
 
-
-
 <script>
     window.isChef = true;
     window.chefChantierActuel = <?= (int)($_GET['chantier_id'] ?? 0) ?>;
 </script>
 
-
-
-
 <script>
     const subCategories = <?= json_encode($subCategoriesGrouped) ?>;
 </script>
-<script src="/js/stockGestion_chef.js"></script>
-<?php require_once __DIR__ . '/templates/footer.php'; ?>
+<script src="js/stockGestion_chef.js"></script>
+<?php require_once __DIR__ . '/../templates/footer.php'; ?>

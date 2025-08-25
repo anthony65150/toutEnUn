@@ -1,5 +1,6 @@
 <?php
-require_once "./config/init.php";
+// Fichier : /stock/get_documents.php (par ex.)
+require_once __DIR__ . '/../config/init.php';
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
@@ -27,14 +28,15 @@ $toWebUrl = function (?string $stored): ?string {
     return '/uploads/documents/' . ltrim($stored, '/');
 };
 
-// Helper: chemin absolu disque pour essayer de retrouver la taille si absente
+// Helper: chemin absolu disque pour retrouver la taille si absente
 $toAbsPath = function (?string $stored): ?string {
     if (!$stored) return null;
     if (strpos($stored, 'uploads/') === 0 || strpos($stored, '/uploads/') === 0) {
-        return __DIR__ . '/' . ltrim($stored, '/');
+        // On remonte d'un niveau car ce script est dans /stock/
+        return __DIR__ . '/../' . ltrim($stored, '/');
     }
     // Legacy
-    return __DIR__ . '/uploads/documents/' . ltrim($stored, '/');
+    return __DIR__ . '/../uploads/documents/' . ltrim($stored, '/');
 };
 
 try {
@@ -48,23 +50,23 @@ try {
 
     $out = [];
     while ($r = $stmt->fetch(PDO::FETCH_ASSOC)) {
-        $url = $toWebUrl($r['chemin_fichier']);
+        $url  = $toWebUrl($r['chemin_fichier'] ?? null);
         $size = isset($r['taille']) ? (int)$r['taille'] : null;
 
         // Si la taille n'est pas stockée, on tente de la déduire depuis le fichier (optionnel)
         if ($size === null) {
-            $abs = $toAbsPath($r['chemin_fichier']);
+            $abs = $toAbsPath($r['chemin_fichier'] ?? null);
             if ($abs && is_file($abs)) {
                 $size = (int) @filesize($abs);
             }
         }
 
         $out[] = [
-            'id'         => (int)$r['id'],
-            'nom'        => $r['nom_affichage'],
+            'id'         => (int)($r['id'] ?? 0),
+            'nom'        => $r['nom_affichage'] ?? null,
             'url'        => $url,
             'size'       => $size,
-            'created_at' => $r['created_at'],
+            'created_at' => $r['created_at'] ?? null,
         ];
     }
 

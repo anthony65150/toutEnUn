@@ -1,5 +1,6 @@
 <?php
-require_once "./config/init.php";
+// Fichier: /stock/annulerTransfert_depot.php (ou refuserReception_depot.php)
+require_once __DIR__ . '/../config/init.php';
 
 if (!isset($_SESSION['utilisateurs']) || $_SESSION['utilisateurs']['fonction'] !== 'depot') {
     $_SESSION['error_message'] = "Accès refusé.";
@@ -66,7 +67,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['transfert_id']) && $d
         // Si source = chantier → pas de remise ici (pas de décrément à l’envoi)
 
         // Historique : refus par le dépôt
-        // Table attendue: stock_mouvements(stock_id, type, source_type, source_id, dest_type, dest_id, quantite, statut, utilisateur_id, created_at)
+        // NOTE: si tu veux tracer l'ID du dépôt source aussi quand sourceType='depot',
+        // mets ':src_id' => $sourceId (au lieu de null).
         $stmtMv = $pdo->prepare("
             INSERT INTO stock_mouvements
                 (stock_id, type, source_type, source_id, dest_type, dest_id, quantite, statut, utilisateur_id, created_at)
@@ -76,7 +78,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['transfert_id']) && $d
         $stmtMv->execute([
             ':stock_id' => $articleId,
             ':src_type' => $sourceType,
-            ':src_id'   => ($sourceType === 'chantier') ? $sourceId : null, // null si dépôt
+            ':src_id'   => ($sourceType === 'chantier') ? $sourceId : null, // mets $sourceId si tu veux le garder aussi pour dépôt
             ':dest_id'  => $depotId,
             ':qte'      => $quantite,
             ':user_id'  => $userId,

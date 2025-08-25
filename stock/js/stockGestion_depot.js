@@ -60,7 +60,6 @@ document.addEventListener("DOMContentLoaded", () => {
       const rowCat = normalize(row.dataset.cat);
       const rowSub = normalize(row.dataset.subcat);
 
-      // On cible la cellule "Nom" si elle existe, sinon tout le texte de la ligne
       const nameCell = row.querySelector(".td-article");
       const hay = normalize((nameCell?.textContent || row.textContent || ""));
 
@@ -103,7 +102,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (window.isChef) {
       sourceType = 'chantier';
-      sourceId = window.chefChantierActuel; // <— corrige ici
+      sourceId = window.chefChantierActuel; // si utilisé côté chef
     }
 
     const [destinationType, destinationId] = destinationRaw.split('_');
@@ -117,7 +116,7 @@ document.addEventListener("DOMContentLoaded", () => {
       qty: parseInt(quantity)
     };
 
-    fetch('transferStock_depot.php', {
+    fetch('/stock/transferStock_depot.php', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)

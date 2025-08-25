@@ -1,20 +1,21 @@
 <?php
-require_once "./config/init.php";
+// Fichier: /stock/article.php
+require_once __DIR__ . '/../config/init.php';
 
 if (!isset($_SESSION['utilisateurs'])) {
-    header("Location: connexion.php");
+    header("Location: ../connexion.php");
     exit;
 }
 
-require_once __DIR__ . '/templates/header.php';
-require_once __DIR__ . '/templates/navigation/navigation.php';
+require_once __DIR__ . '/../templates/header.php';
+require_once __DIR__ . '/../templates/navigation/navigation.php';
 
 /* ================================
    Params + rôle + sécurités
 ================================ */
 if (!isset($_GET['id'])) {
     echo "<div class='container mt-4 alert alert-danger'>Aucun article sélectionné.</div>";
-    require_once __DIR__ . '/templates/footer.php';
+    require_once __DIR__ . '/../templates/footer.php';
     exit;
 }
 $articleId  = (int) $_GET['id'];
@@ -30,7 +31,7 @@ if ($fonction === 'chef' && $chantierId > 0) {
     $stmt->execute([$userId, $chantierId]);
     if (!$stmt->fetchColumn()) {
         echo "<div class='container mt-4 alert alert-danger'>Accès refusé à ce chantier.</div>";
-        require_once __DIR__ . '/templates/footer.php';
+        require_once __DIR__ . '/../templates/footer.php';
         exit;
     }
 }
@@ -40,7 +41,7 @@ if ($fonction === 'depot' && $depotId > 0) {
     $stmt->execute([$depotId, $userId]);
     if (!$stmt->fetchColumn()) {
         echo "<div class='container mt-4 alert alert-danger'>Accès refusé à ce dépôt.</div>";
-        require_once __DIR__ . '/templates/footer.php';
+        require_once __DIR__ . '/../templates/footer.php';
         exit;
     }
 }
@@ -54,7 +55,7 @@ $article = $stmt->fetch(PDO::FETCH_ASSOC);
 
 if (!$article) {
     echo "<div class='container mt-4 alert alert-warning'>Article introuvable.</div>";
-    require_once __DIR__ . '/templates/footer.php';
+    require_once __DIR__ . '/../templates/footer.php';
     exit;
 }
 
@@ -138,6 +139,7 @@ function human_filesize(?int $bytes): string
     }
     return round($bytes, 1) . ' ' . $units[$i];
 }
+
 // --- Pagination ---
 $perPage = 10;
 $page = max(1, (int)($_GET['hpage'] ?? 1));
@@ -159,7 +161,6 @@ function historyUrl(int $p): string
 
 /* ================================
    5) HISTORIQUE (stock_mouvements)
-   Afficher TOUT l'historique (admin / chef / dépôt)
 ================================ */
 $mouvements = [];
 try {
@@ -284,7 +285,6 @@ $showHistorique = true;
 
 /**
  * Construit "Prénom (dépôt X)" ou "Prénom (chantier Y)" pour Source/Destination
- * $prefix = 'source' | 'dest' pour choisir les colonnes.
  */
 function label_personne_lieu(?string $type, array $row, string $prefix): string
 {
@@ -307,10 +307,7 @@ function label_personne_lieu(?string $type, array $row, string $prefix): string
     return '-';
 }
 
-
-
-
-/** Construit "Prénom (dépôt X/chantier Y/admin)" pour le VALIDATEUR (colonne "Par") */
+/** Validateur (colonne "Par") */
 function label_validateur(array $row): string
 {
     $prenom = trim($row['user_prenom'] ?? '');
@@ -331,14 +328,11 @@ function label_validateur(array $row): string
             if ($ch) $suffix = ' (chantier ' . $ch . ')';
             break;
         case 'administrateur':
-            $suffix = ''; // prénom seul
+            $suffix = '';
             break;
     }
     return htmlspecialchars($prenom . $suffix);
 }
-
-
-
 ?>
 <div class="container mt-4">
     <!-- En-tête -->
@@ -403,9 +397,7 @@ function label_validateur(array $row): string
                 </div>
 
                 <?php if ($currentQtyContext !== null): ?>
-                    <?php
-                    $alertClass = $currentQtyContext > 0 ? 'alert-success' : 'alert-danger';
-                    ?>
+                    <?php $alertClass = $currentQtyContext > 0 ? 'alert-success' : 'alert-danger'; ?>
                     <div class="alert <?= $alertClass ?> mt-3 mb-0 py-2">
                         <?= htmlspecialchars($currentLabelContext) ?> : <strong><?= (int)$currentQtyContext ?></strong>
                     </div>
@@ -414,7 +406,7 @@ function label_validateur(array $row): string
         </div>
     </div>
 
-    <!-- Onglets (sans "Actions") -->
+    <!-- Onglets -->
     <ul class="nav nav-tabs mb-3" id="articleTabs" role="tablist">
         <li class="nav-item" role="presentation">
             <button class="nav-link active" id="details-tab" data-bs-toggle="tab" data-bs-target="#details" type="button" role="tab">Détails</button>
@@ -422,11 +414,9 @@ function label_validateur(array $row): string
         <li class="nav-item" role="presentation">
             <button class="nav-link" id="files-tab" data-bs-toggle="tab" data-bs-target="#files" type="button" role="tab">Documents</button>
         </li>
-        <?php if ($showHistorique): ?>
-            <li class="nav-item" role="presentation">
-                <button class="nav-link" id="history-tab" data-bs-toggle="tab" data-bs-target="#history" type="button" role="tab">Historique</button>
-            </li>
-        <?php endif; ?>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="history-tab" data-bs-toggle="tab" data-bs-target="#history" type="button" role="tab">Historique</button>
+        </li>
     </ul>
 
     <div class="tab-content" id="articleTabContent">
@@ -500,89 +490,85 @@ function label_validateur(array $row): string
         </div>
 
         <!-- Historique -->
-        <?php if ($showHistorique): ?>
-            <div class="tab-pane fade" id="history" role="tabpanel">
-                <div class="card shadow-sm p-3">
-                    <h5 class="fw-bold mb-3">Historique des transferts</h5>
+        <div class="tab-pane fade" id="history" role="tabpanel">
+            <div class="card shadow-sm p-3">
+                <h5 class="fw-bold mb-3">Historique des transferts</h5>
 
-
-                    <?php if (empty($mouvements)): ?>
-                        <div class="alert alert-light border d-flex align-items-center mb-0">
-                            <span class="me-2">🕘</span> Aucun mouvement enregistré pour cet article.
-                        </div>
-                    <?php else: ?>
-                        <div class="table-responsive">
-                            <table class="table align-middle history-table">
-                                <thead class="table-light">
+                <?php if (empty($mouvements)): ?>
+                    <div class="alert alert-light border d-flex align-items-center mb-0">
+                        <span class="me-2">🕘</span> Aucun mouvement enregistré pour cet article.
+                    </div>
+                <?php else: ?>
+                    <div class="table-responsive">
+                        <table class="table align-middle history-table">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Date</th>
+                                    <th>De</th>
+                                    <th>Vers</th>
+                                    <th class="text-end">Qté</th>
+                                    <th>Statut</th>
+                                    <th>Par</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($mouvements as $mv):
+                                    $date = date('d/m/Y H:i', strtotime($mv['created_at']));
+                                    $from = label_personne_lieu($mv['source_type'] ?? null, $mv, 'source');
+                                    $to   = label_personne_lieu($mv['dest_type']   ?? null, $mv, 'dest');
+                                    $qte  = (int)$mv['quantite'];
+                                    $by   = label_validateur($mv);
+                                ?>
                                     <tr>
-                                        <th>Date</th>
-                                        <th>De</th>
-                                        <th>Vers</th>
-                                        <th class="text-end">Qté</th>
-                                        <th>Statut</th>
-                                        <th>Par</th>
+                                        <td class="text-nowrap" data-label="Date"><?= $date ?></td>
+                                        <td data-label="De"><?= htmlspecialchars($from) ?></td>
+                                        <td data-label="Vers"><?= htmlspecialchars($to) ?></td>
+                                        <td class="text-end fw-bold text-nowrap" data-label="Qté"><?= $qte ?></td>
+                                        <td class="text-nowrap" data-label="Statut"><?= badge_statut($mv['statut']) ?></td>
+                                        <td class="text-nowrap" data-label="Par"><?= $by ?></td>
                                     </tr>
-                                </thead>
-                                <tbody>
-                                    <?php foreach ($mouvements as $mv):
-                                        $date = date('d/m/Y H:i', strtotime($mv['created_at']));
-                                        $from = label_personne_lieu($mv['source_type'] ?? null, $mv, 'source');
-                                        $to   = label_personne_lieu($mv['dest_type']   ?? null, $mv, 'dest');
-                                        $qte  = (int)$mv['quantite'];
-                                        $by   = label_validateur($mv);
-                                    ?>
-                                        <tr>
-                                            <td class="text-nowrap" data-label="Date"><?= $date ?></td>
-                                            <td data-label="De"><?= htmlspecialchars($from) ?></td>
-                                            <td data-label="Vers"><?= htmlspecialchars($to) ?></td>
-                                            <td class="text-end fw-bold text-nowrap" data-label="Qté"><?= $qte ?></td>
-                                            <td class="text-nowrap" data-label="Statut"><?= badge_statut($mv['statut']) ?></td>
-                                            <td class="text-nowrap" data-label="Par"><?= $by ?></td>
-                                        </tr>
-                                    <?php endforeach; ?>
-                                </tbody>
-                            </table>
-                            <?php
-                            $hasPrev = $page > 1;
-                            $hasNext = ($offset + count($mouvements)) < $totalRows;
-                            if ($hasPrev || $hasNext): ?>
-                                <nav class="d-flex justify-content-center mt-2">
-                                    <ul class="pagination pagination-sm mb-0">
-                                        <li class="page-item <?= $hasPrev ? '' : 'disabled' ?>">
-                                            <a class="page-link" href="<?= $hasPrev ? historyUrl($page - 1) : '#' ?>" aria-label="Précédent">
-                                                &laquo; Précédent
-                                            </a>
-                                        </li>
-                                        <li class="page-item disabled">
-                                            <span class="page-link">
-                                                Page <?= $page ?> / <?= max(1, (int)ceil($totalRows / $perPage)) ?>
-                                            </span>
-                                        </li>
-                                        <li class="page-item <?= $hasNext ? '' : 'disabled' ?>">
-                                            <a class="page-link" href="<?= $hasNext ? historyUrl($page + 1) : '#' ?>" aria-label="Suivant">
-                                                Suivant &raquo;
-                                            </a>
-                                        </li>
-                                    </ul>
-                                </nav>
-                            <?php endif; ?>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                        <?php
+                        $hasPrev = $page > 1;
+                        $hasNext = ($offset + count($mouvements)) < $totalRows;
+                        if ($hasPrev || $hasNext): ?>
+                            <nav class="d-flex justify-content-center mt-2">
+                                <ul class="pagination pagination-sm mb-0">
+                                    <li class="page-item <?= $hasPrev ? '' : 'disabled' ?>">
+                                        <a class="page-link" href="<?= $hasPrev ? historyUrl($page - 1) : '#' ?>" aria-label="Précédent">
+                                            &laquo; Précédent
+                                        </a>
+                                    </li>
+                                    <li class="page-item disabled">
+                                        <span class="page-link">
+                                            Page <?= $page ?> / <?= max(1, (int)ceil($totalRows / $perPage)) ?>
+                                        </span>
+                                    </li>
+                                    <li class="page-item <?= $hasNext ? '' : 'disabled' ?>">
+                                        <a class="page-link" href="<?= $hasNext ? historyUrl($page + 1) : '#' ?>" aria-label="Suivant">
+                                            Suivant &raquo;
+                                        </a>
+                                    </li>
+                                </ul>
+                            </nav>
+                        <?php endif; ?>
 
-                        </div>
+                    </div>
 
-                    <?php endif; ?>
-                </div>
+                <?php endif; ?>
             </div>
-        <?php endif; ?>
+        </div>
     </div>
 </div>
 <script>
-    document.addEventListener('DOMContentLoaded', () => {
-        if (location.hash === '#history') {
-            const t = document.querySelector('[data-bs-target="#history"]');
-            if (t) new bootstrap.Tab(t).show();
-        }
-    });
+document.addEventListener('DOMContentLoaded', () => {
+  if (location.hash === '#history') {
+    const t = document.querySelector('[data-bs-target="#history"]');
+    if (t) new bootstrap.Tab(t).show();
+  }
+});
 </script>
 
-
-<?php require_once __DIR__ . '/templates/footer.php'; ?>
+<?php require_once __DIR__ . '/../templates/footer.php'; ?>

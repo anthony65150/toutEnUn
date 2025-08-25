@@ -1,5 +1,6 @@
 <?php
-require_once "./config/init.php";
+// Fichier : /stock/annulerTransfert_chef.php
+require_once __DIR__ . '/../config/init.php';
 
 if (!isset($_SESSION['utilisateurs']) || $_SESSION['utilisateurs']['fonction'] !== 'chef') {
     $_SESSION['error_message'] = "Accès refusé.";
@@ -87,7 +88,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['transfert_id'])) {
         $stmtMv->execute([
             ':stock_id' => $articleId,
             ':src_type' => $sourceType,
-            ':src_id'   => ($sourceType === 'chantier') ? $sourceId : null, // null si dépôt
+            ':src_id'   => ($sourceType === 'chantier') ? $sourceId : null, // null si dépôt (garde tel quel si tu ne veux pas tracer l'ID dépôt)
             ':dest_id'  => $destChantierId,
             ':qte'      => $quantite,
             ':user_id'  => $chefId,

@@ -1,8 +1,9 @@
 <?php
-require_once "./config/init.php";
-header('Content-Type: application/json');
+// Fichier: /stock/transferStock_chef.php
+require_once __DIR__ . '/../config/init.php';
+header('Content-Type: application/json; charset=utf-8');
 
-// (au cas où) remonter les erreurs PDO clairement
+// Lever clairement les erreurs PDO
 if (isset($pdo)) { $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION); }
 
 try {
@@ -28,7 +29,7 @@ try {
     $userId = (int)($_SESSION['utilisateurs']['id'] ?? 0);
     $role   = $_SESSION['utilisateurs']['fonction'] ?? null;
 
-    // === Validation détaillée pour savoir ce qui manque ===
+    // Validations
     $missing = [];
     if (!$userId)          $missing[] = 'userId';
     if (!$stockId)         $missing[] = 'stockId/article_id';
@@ -50,7 +51,7 @@ try {
         throw new Exception("Source et destination identiques.");
     }
 
-    // 🔒 Autorisations : admin passe, sinon le chef doit être assigné si SOURCE=chantier
+    // Autorisations : admin passe, sinon le chef doit être assigné si SOURCE=chantier
     if ($role !== 'administrateur' && $sourceType === 'chantier') {
         $stmtChef = $pdo->prepare("
             SELECT 1 FROM utilisateur_chantiers 
@@ -77,7 +78,7 @@ try {
         throw new Exception("Stock insuffisant à la source. Disponible : {$quantiteSource}.");
     }
 
-    // Réservations en attente (ignorer si la table n'existe pas)
+    // Réservations en attente
     $enAttente = 0;
     try {
         $stmt = $pdo->prepare("
@@ -96,17 +97,28 @@ try {
         throw new Exception("Stock insuffisant (après réservations). Disponible : {$disponibleApresAttente}.");
     }
 
-    // Enregistrer le transfert en attente de validation
-    $stmt = $pdo->prepare("
+    // Enregistrer le transfert en attente de validation (placeholders nommés)
+    $sql = "
         INSERT INTO transferts_en_attente 
             (article_id, source_type, source_id, destination_type, destination_id, quantite, demandeur_id, statut)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'en_attente')
-    ");
-    $stmt->execute([$stockId, $sourceType, $sourceId, $destinationType, $destinationId, $qty, $userId]);
+        VALUES 
+            (:article_id, :source_type, :source_id, :destination_type, :destination_id, :quantite, :demandeur_id, 'en_attente')
+    ";
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([
+        ':article_id'       => $stockId,
+        ':source_type'      => $sourceType,
+        ':source_id'        => $sourceId,
+        ':destination_type' => $destinationType,
+        ':destination_id'   => $destinationId,
+        ':quantite'         => $qty,
+        ':demandeur_id'     => $userId,
+    ]);
 
     $pdo->commit();
     echo json_encode(["success" => true, "message" => "Transfert enregistré et en attente de validation."]);
 } catch (Throwable $e) {
     if (isset($pdo) && $pdo->inTransaction()) { $pdo->rollBack(); }
+    http_response_code(400);
     echo json_encode(["success" => false, "message" => $e->getMessage()]);
 }

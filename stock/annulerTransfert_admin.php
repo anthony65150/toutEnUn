@@ -1,5 +1,6 @@
 <?php
-require_once "./config/init.php";
+// Fichier : /stock/annulerTransfert_admin.php
+require_once __DIR__ . '/../config/init.php';
 
 if (!isset($_SESSION['utilisateurs']) || $_SESSION['utilisateurs']['fonction'] !== 'administrateur') {
     $_SESSION['error_message'] = "Accès refusé.";
@@ -55,10 +56,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['transfert_id'])) {
                 ':depot'   => $sourceId
             ]);
         }
-        // (Si source = chantier, rien à remettre ici : la décrémentation n'avait pas eu lieu)
+        // (Si source = chantier, rien à remettre ici : pas de décrémentation à l’envoi)
 
         // 3) Historique : on trace l'annulation
-        // Table attendue: stock_mouvements(stock_id, type, source_type, source_id, dest_type, dest_id, quantite, statut, utilisateur_id, created_at)
+        // Table attendue :
+        // stock_mouvements(stock_id, type, source_type, source_id, dest_type, dest_id, quantite, statut, utilisateur_id, created_at)
         $stmtMv = $pdo->prepare("
             INSERT INTO stock_mouvements
                 (stock_id, type, source_type, source_id, dest_type, dest_id, quantite, statut, utilisateur_id, created_at)
@@ -68,9 +70,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['transfert_id'])) {
         $stmtMv->execute([
             ':stock_id'  => $articleId,
             ':src_type'  => $sourceType,
-            ':src_id'    => ($sourceType === 'chantier') ? $sourceId : null,              // null si dépôt
+            // Si tu veux TOUJOURS tracer l'ID du dépôt source, remplace la ligne suivante par ':src_id' => $sourceId
+            ':src_id'    => ($sourceType === 'chantier') ? $sourceId : null,           // null si dépôt
             ':dest_type' => $destinationType,
-            ':dest_id'   => ($destinationType === 'chantier') ? $destinationId : null,    // null si dépôt
+            ':dest_id'   => ($destinationType === 'chantier') ? $destinationId : null, // null si dépôt
             ':qte'       => $quantite,
             ':user_id'   => $adminId,
         ]);

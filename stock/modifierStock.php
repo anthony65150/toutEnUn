@@ -1,10 +1,17 @@
 <?php
-require_once "./config/init.php";
-file_put_contents('debug_post.txt', var_export($_POST, true));
+declare(strict_types=1);
 
+require_once __DIR__ . '/../config/init.php';
 header('Content-Type: application/json');
 
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+// ---- Sécurité (admin uniquement) ----
+if (!isset($_SESSION['utilisateurs']) || ($_SESSION['utilisateurs']['fonction'] ?? null) !== 'administrateur') {
+    echo json_encode(['success' => false, 'message' => 'Non autorisé']);
+    exit;
+}
+
+// ---- Méthode ----
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
     echo json_encode(['success' => false, 'message' => 'Méthode non autorisée']);
     exit;
 }
@@ -12,19 +19,15 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 /* =========================================================
    Helpers
    ========================================================= */
-function resolveStoredPathToAbsolute(string $stored = null): ?string {
+// Chemin absolu disque depuis un chemin stocké en BDD (/uploads/... ou uploads/...)
+function abs_from_stored(?string $stored): ?string {
     if (!$stored) return null;
-    if (strpos($stored, 'uploads/') === 0) {
-        return __DIR__ . '/' . $stored;
-    }
-    if (strpos($stored, '/uploads/') === 0) {
-        return __DIR__ . $stored;
-    }
-    return __DIR__ . '/uploads/photos/' . $stored; // legacy
+    $rel = ltrim($stored, '/'); // retire le slash initial s'il existe
+    return rtrim($_SERVER['DOCUMENT_ROOT'], '/') . '/' . $rel;
 }
-function absFromRel(?string $rel): ?string {
+function abs_from_rel(?string $rel): ?string {
     if (!$rel) return null;
-    return __DIR__ . '/' . ltrim($rel, '/');
+    return rtrim($_SERVER['DOCUMENT_ROOT'], '/') . '/' . ltrim($rel, '/');
 }
 function boolish($v): bool {
     return in_array($v, [1, '1', true, 'true', 'on', 'yes'], true);
@@ -33,11 +36,11 @@ function boolish($v): bool {
 /* =========================================================
    Inputs
    ========================================================= */
-$stockId  = isset($_POST['stockId']) ? (int)$_POST['stockId'] : null;
+$stockId  = isset($_POST['stockId']) ? (int)$_POST['stockId'] : 0;
 $nom      = trim($_POST['nom'] ?? '');
 $quantite = isset($_POST['quantite']) ? (int)$_POST['quantite'] : null;
 
-if (!$stockId || $nom === '' || $quantite === null || $quantite < 0) {
+if ($stockId <= 0 || $nom === '' || $quantite === null || $quantite < 0) {
     echo json_encode(['success' => false, 'message' => 'Données invalides']);
     exit;
 }
@@ -45,7 +48,7 @@ if (!$stockId || $nom === '' || $quantite === null || $quantite < 0) {
 /* =========================================================
    Documents (multi)
    ========================================================= */
-$allowedDocExt = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'png', 'jpg', 'jpeg', 'webp'];
+$allowedDocExt = ['pdf','doc','docx','xls','xlsx','png','jpg','jpeg','webp'];
 $docsAdded   = [];
 $docsDeleted = [];
 $docsAll     = [];
@@ -62,8 +65,9 @@ $legacySingle = $_FILES['document']  ?? null; // compat
 
 $pendingInserts = [];
 
-$docsDirRel = "uploads/documents/articles/" . $stockId . "/";
-$docsDirAbs = __DIR__ . '/' . $docsDirRel;
+// Dossier documents web & disque
+$docsDirRel = "uploads/documents/articles/{$stockId}/";
+$docsDirAbs = abs_from_rel($docsDirRel);
 if (!is_dir($docsDirAbs)) {
     @mkdir($docsDirAbs, 0775, true);
 }
@@ -115,20 +119,20 @@ if ($legacySingle && $legacySingle['error'] === UPLOAD_ERR_OK) {
 /* =========================================================
    Photo
    ========================================================= */
-$photo            = $_FILES['photo'] ?? null;
-$deletePhoto      = boolish($_POST['deletePhoto'] ?? '0');
-$nom_photo_db     = null;
+$photo                 = $_FILES['photo'] ?? null;
+$deletePhoto           = boolish($_POST['deletePhoto'] ?? '0');
+$nom_photo_db          = null;
 $photoDeletedPhysically = false;
 
 try {
     // ancienne photo
     $stmt = $pdo->prepare("SELECT photo FROM stock WHERE id = ?");
     $stmt->execute([$stockId]);
-    $anciennePhotoStored = $stmt->fetchColumn();
+    $anciennePhotoStored = $stmt->fetchColumn() ?: null;
 
     // suppression demandée ?
     if ($deletePhoto && $anciennePhotoStored) {
-        $abs = resolveStoredPathToAbsolute($anciennePhotoStored);
+        $abs = abs_from_stored($anciennePhotoStored);
         if ($abs && is_file($abs)) {
             @unlink($abs);
             $photoDeletedPhysically = true;
@@ -138,14 +142,14 @@ try {
     // upload nouvelle photo
     if ($photo && $photo['error'] === UPLOAD_ERR_OK) {
         $extensionPhoto = strtolower(pathinfo($photo['name'], PATHINFO_EXTENSION));
-        $extensionsAutorisees = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
+        $extensionsAutorisees = ['jpg','jpeg','png','gif','webp'];
         if (!in_array($extensionPhoto, $extensionsAutorisees)) {
             echo json_encode(['success' => false, 'message' => 'Format d’image non autorisé.']);
             exit;
         }
 
-        $dirRel  = "uploads/photos/articles/" . $stockId . "/";
-        $dirAbs  = __DIR__ . '/' . $dirRel;
+        $dirRel  = "uploads/photos/articles/{$stockId}/";
+        $dirAbs  = abs_from_rel($dirRel);
         if (!is_dir($dirAbs)) {
             if (!@mkdir($dirAbs, 0775, true) && !is_dir($dirAbs)) {
                 echo json_encode(['success' => false, 'message' => 'Impossible de créer le dossier de destination.']);
@@ -162,12 +166,12 @@ try {
 
         // supprime l’ancienne si on remplace (et pas déjà supprimée via flag)
         if ($anciennePhotoStored && !$deletePhoto) {
-            $abs = resolveStoredPathToAbsolute($anciennePhotoStored);
+            $abs = abs_from_stored($anciennePhotoStored);
             if ($abs && is_file($abs)) {
                 @unlink($abs);
             }
         }
-        $nom_photo_db = $dirRel . $nomFic;
+        $nom_photo_db = $dirRel . $nomFic; // chemin web stocké en BDD
     }
 
     /* =========================================================
@@ -176,14 +180,18 @@ try {
     $pdo->beginTransaction();
 
     // ancienne quantité
-    $stmt = $pdo->prepare("SELECT quantite_totale FROM stock WHERE id = ?");
+    $stmt = $pdo->prepare("SELECT quantite_totale, quantite_disponible FROM stock WHERE id = ?");
     $stmt->execute([$stockId]);
-    $ancienneQuantite = (int)$stmt->fetchColumn();
-    $diff = $quantite - $ancienneQuantite;
+    $rowBefore = $stmt->fetch(PDO::FETCH_ASSOC);
+    $ancienneQuantite   = (int)($rowBefore['quantite_totale'] ?? 0);
+    $ancienneDispo      = (int)($rowBefore['quantite_disponible'] ?? 0);
+    $diff               = $quantite - $ancienneQuantite;
 
-    // update stock
-    $updateSql = "UPDATE stock SET nom = ?, quantite_totale = ?, quantite_disponible = quantite_disponible + ?";
-    $params    = [$nom, $quantite, $diff];
+    // update stock (on évite de rendre dispo < 0)
+    $newDispo = max(0, $ancienneDispo + $diff);
+
+    $updateSql = "UPDATE stock SET nom = ?, quantite_totale = ?, quantite_disponible = ?";
+    $params    = [$nom, $quantite, $newDispo];
 
     if ($nom_photo_db !== null) {
         $updateSql .= ", photo = ?";
@@ -197,7 +205,7 @@ try {
     $stmt = $pdo->prepare($updateSql);
     $stmt->execute($params);
 
-    // MAJ stock_depots pour depot_id=1 (si présent)
+    // MAJ stock_depots pour depot_id=1 (si présent), sinon création (logique existante)
     $stmtDepotCheck = $pdo->prepare("SELECT quantite FROM stock_depots WHERE stock_id = ? AND depot_id = 1");
     $stmtDepotCheck->execute([$stockId]);
     $quantiteDepot = $stmtDepotCheck->fetchColumn();
@@ -264,7 +272,7 @@ try {
 
     // supprimer fichiers docs après commit
     foreach ($filesToUnlink as $r) {
-        $abs = absFromRel($r['chemin_fichier']);
+        $abs = abs_from_rel($r['chemin_fichier']);
         if ($abs && is_file($abs)) {
             @unlink($abs);
         }
@@ -275,7 +283,7 @@ try {
        ========================================================= */
     $stmt = $pdo->prepare("SELECT quantite_disponible, photo, categorie, sous_categorie FROM stock WHERE id = ?");
     $stmt->execute([$stockId]);
-    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
 
     $stmt = $pdo->prepare("SELECT id, nom_affichage, chemin_fichier, taille FROM stock_documents WHERE stock_id = ? ORDER BY id DESC");
     $stmt->execute([$stockId]);
@@ -333,7 +341,7 @@ try {
     data-cat="<?= htmlspecialchars($stk['categorie'] ?? '') ?>"
     data-subcat="<?= htmlspecialchars($stk['sous_categorie'] ?? '') ?>">
 
-  <!-- PHOTO (identique à la page) -->
+  <!-- PHOTO -->
   <td class="text-center" style="width:82px">
     <?php $photoWeb = !empty($stk['photo']) ? '/'.ltrim($stk['photo'],'/') : ''; ?>
     <?php if ($photoWeb): ?>
@@ -347,7 +355,7 @@ try {
     <?php endif; ?>
   </td>
 
-  <!-- ARTICLE (identique à la page) -->
+  <!-- ARTICLE -->
   <td class="td-article text-center">
     <a href="article.php?id=<?= (int)$stk['id'] ?>" class="fw-semibold text-decoration-none">
       <?= htmlspecialchars($stk['nom']) ?>
@@ -363,7 +371,7 @@ try {
     </div>
   </td>
 
-  <!-- DÉPÔTS (aucun d-flex / aucune rounded-pill) -->
+  <!-- DEPOTS -->
   <td class="text-center">
     <?php if ($depotsList): foreach ($depotsList as $d): ?>
       <div>
@@ -378,7 +386,7 @@ try {
     <?php endif; ?>
   </td>
 
-  <!-- CHANTIERS (même parenthèsage serré que ta page) -->
+  <!-- CHANTIERS -->
   <td class="text-center">
     <?php
       $chWith = array_values(array_filter($chantiersList, fn($c)=>$c['quantite']>0));
@@ -398,7 +406,7 @@ try {
     <?php endif; ?>
   </td>
 
-  <!-- ACTIONS (pas de div flex) -->
+  <!-- ACTIONS -->
   <td class="text-center">
     <button class="btn btn-sm btn-primary transfer-btn" data-stock-id="<?= (int)$stk['id'] ?>">
       <i class="bi bi-arrow-left-right"></i>
@@ -420,26 +428,25 @@ try {
 <?php
 $rowHtml = ob_get_clean();
 
+// Réponse JSON finale
+echo json_encode([
+    'success'            => true,
+    'rowHtml'            => $rowHtml,
+    'rowId'              => (int)$stk['id'],
 
-    // Réponse JSON finale
-    echo json_encode([
-        'success'            => true,
-        'rowHtml'            => $rowHtml,
-        'rowId'              => (int)$stk['id'],
+    'newNom'             => $nom,
+    'newQuantiteTotale'  => $quantite,
+    'quantiteDispo'      => (int)($row['quantite_disponible'] ?? 0),
+    'newPhotoUrl'        => !empty($row['photo']) ? '/' . ltrim($row['photo'], '/') : null,
 
-        'newNom'             => $nom,
-        'newQuantiteTotale'  => $quantite,
-        'quantiteDispo'      => (int)($row['quantite_disponible'] ?? 0),
-        'newPhotoUrl'        => !empty($row['photo']) ? '/' . ltrim($row['photo'], '/') : null,
+    'docsAdded'          => $docsAdded,
+    'docsDeleted'        => $docsDeleted,
+    'docsAll'            => $docsAll,
 
-        'docsAdded'          => $docsAdded,
-        'docsDeleted'        => $docsDeleted,
-        'docsAll'            => $docsAll,
+    'photoDeleted'       => (bool)$photoDeletedPhysically,
+]);
 
-        'photoDeleted'       => (bool)$photoDeletedPhysically,
-    ]);
-
-} catch (Exception $e) {
+} catch (Throwable $e) {
     if ($pdo->inTransaction()) $pdo->rollBack();
     echo json_encode(['success' => false, 'message' => $e->getMessage()]);
 }

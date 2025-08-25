@@ -10,75 +10,96 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // ----- Toast + modal setup -----
   const toastElement = document.getElementById('toastMessage');
-  const toastBootstrap = new bootstrap.Toast(toastElement);
-  const toastBody = toastElement.querySelector('.toast-body');
+  const toastBootstrap = toastElement ? new bootstrap.Toast(toastElement) : null;
+  const toastBody = toastElement ? toastElement.querySelector('.toast-body') : null;
 
   function showToast(message, isSuccess = true) {
+    if (!toastElement || !toastBootstrap || !toastBody) return;
     toastElement.classList.remove('text-bg-success', 'text-bg-danger');
     toastElement.classList.add(isSuccess ? 'text-bg-success' : 'text-bg-danger');
     toastBody.textContent = message;
     toastBootstrap.show();
   }
 
-  const transferModal = new bootstrap.Modal(document.getElementById('transferModal'));
+  const transferModalEl = document.getElementById('transferModal');
+  const transferModal = transferModalEl ? new bootstrap.Modal(transferModalEl) : null;
 
   // ----- Ouvrir le modal -----
   document.querySelectorAll('.transfer-btn').forEach(button => {
     button.addEventListener('click', () => {
       const stockId = button.dataset.stockId;
-      document.getElementById('articleId').value = stockId;
+      const inputId = document.getElementById('articleId');
+      if (inputId) inputId.value = stockId;
 
       const tr = button.closest('tr');
       const nameCell = tr?.querySelector('.td-article');
       const articleName = (nameCell?.querySelector('a')?.textContent || nameCell?.textContent || '').trim();
 
-      document.getElementById('transferModalLabel').textContent = `Transférer : ${articleName}`;
-      transferModal.show();
+      const titleEl = document.getElementById('transferModalLabel');
+      if (titleEl) titleEl.textContent = `Transférer : ${articleName}`;
+
+      transferModal?.show();
     });
   });
 
   // ----- Soumission du transfert -----
-  document.getElementById('transferForm').addEventListener('submit', (e) => {
+  const transferForm = document.getElementById('transferForm');
+  transferForm?.addEventListener('submit', (e) => {
     e.preventDefault();
 
-    const stockId = document.getElementById('articleId').value;
-    const destinationRaw = document.getElementById('destinationChantier').value;
-    const quantity = document.getElementById('quantity').value;
+    const stockId = document.getElementById('articleId')?.value;
+    const destinationRaw = document.getElementById('destinationChantier')?.value || '';
+    const quantity = document.getElementById('quantity')?.value;
+
+    if (!destinationRaw) {
+      showToast('❌ Choisis une destination', false);
+      return;
+    }
+    if (!quantity || parseInt(quantity, 10) <= 0) {
+      showToast('❌ Quantité invalide', false);
+      return;
+    }
 
     let sourceType = 'depot';
     let sourceId = null;
 
     if (window.isChef) { // chef : ID du chantier courant
       sourceType = 'chantier';
-      sourceId = parseInt(window.chefChantierActuel);
+      sourceId = parseInt(window.chefChantierActuel || '0', 10);
     } else {
-      // dépôt : lire l’input caché
+      // dépôt : lire l’input caché (non utilisé ici, mais on garde le fallback)
       sourceId = parseInt(document.getElementById('sourceDepotId')?.value || '0', 10);
     }
 
-    const [destinationType, destinationId] = destinationRaw.split('_');
+    const parts = destinationRaw.split('_');
+    if (parts.length !== 2) {
+      showToast('❌ Destination invalide', false);
+      return;
+    }
+    const [destinationType, destinationIdStr] = parts;
 
-    const data = {
-      stockId: parseInt(stockId),
+    const payload = {
+      stockId: parseInt(stockId, 10),
       sourceType,
-      sourceId: parseInt(sourceId),
+      sourceId: parseInt(sourceId, 10),
       destinationType,
-      destinationId: parseInt(destinationId),
-      qty: parseInt(quantity)
+      destinationId: parseInt(destinationIdStr, 10),
+      qty: parseInt(quantity, 10)
     };
 
-    fetch('transferStock_depot.php', {
+    // ✅ Côté chef → fichier PHP dans /stock/
+    fetch('transferStock_chef.php', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
+      body: JSON.stringify(payload)
     })
     .then(res => res.json())
     .then(data => {
-      if (data.success) {
-        showToast('✅ ' + data.message, true);
+      if (data?.success) {
+        showToast('✅ ' + (data.message || 'Transfert envoyé'), true);
         setTimeout(() => location.reload(), 1500);
       } else {
-        showToast('❌ ' + (data.message || 'Échec du transfert'), false);
+        showToast('❌ ' + (data?.message || 'Échec du transfert'), false);
       }
     })
     .catch(err => {
@@ -99,16 +120,18 @@ document.addEventListener("DOMContentLoaded", () => {
     currentCategory = (cat || "").toLowerCase().trim();
     currentSubCategory = "";
 
+    // état visuel des boutons catégories
     document.querySelectorAll("#categoriesSlide button").forEach(b => b.classList.remove("active"));
-    [...document.querySelectorAll("#categoriesSlide button")]
-      .find(b => b.textContent.toLowerCase().trim() === currentCategory)
-      ?.classList.add("active");
+    const btnToActivate = [...document.querySelectorAll("#categoriesSlide button")]
+      .find(b => b.textContent.toLowerCase().trim() === currentCategory);
+    btnToActivate?.classList.add("active");
 
     updateSubCategories(currentCategory);
     filterRows();
   };
 
   function updateSubCategories(cat) {
+    if (!subCategoriesSlide) return;
     subCategoriesSlide.innerHTML = '';
     if (!cat) return;
 

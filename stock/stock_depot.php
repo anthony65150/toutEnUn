@@ -1,10 +1,10 @@
 <?php
-require_once "./config/init.php";
-require_once __DIR__ . '/templates/header.php';
-require_once __DIR__ . '/templates/navigation/navigation.php';
+require_once __DIR__ . '/../config/init.php';
+require_once __DIR__ . '/../templates/header.php';
+require_once __DIR__ . '/../templates/navigation/navigation.php';
 
 if (!isset($_SESSION['utilisateurs']) || $_SESSION['utilisateurs']['fonction'] !== 'depot') {
-  header('Location: ../index.php');
+  header('Location: /index.php');
   exit;
 }
 
@@ -34,7 +34,6 @@ foreach ($stmt as $row) {
     'quantite' => (int)$row['quantite']
   ];
 }
-
 
 $pdo->query("SET SESSION group_concat_max_len = 8192");
 
@@ -108,15 +107,12 @@ $stmt = $pdo->prepare("
 $stmt->execute([$depotId]);
 $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-
-
 $depotNom = '';
 if ($depotId) {
   $stmt = $pdo->prepare("SELECT nom FROM depots WHERE id = ?");
   $stmt->execute([$depotId]);
   $depotNom = (string) $stmt->fetchColumn();
 }
-
 ?>
 
 <div class="container py-5">
@@ -183,7 +179,6 @@ if ($depotId) {
                 }
                 ?>
               </td>
-
               <td>
                 <form method="post" action="validerReception_depot.php" style="display:inline;">
                   <input type="hidden" name="transfert_id" value="<?= $t['transfert_id'] ?>">
@@ -195,14 +190,12 @@ if ($depotId) {
                   <button type="submit" class="btn btn-danger btn-sm">❌ Refuser</button>
                 </form>
               </td>
-
             </tr>
           <?php endforeach; ?>
         </tbody>
       </table>
     </div>
   <?php endif; ?>
-
 
   <div class="table-responsive">
     <table class="table table-striped table-bordered table-hover align-middle text-center" id="stockTableBody">
@@ -237,7 +230,8 @@ if ($depotId) {
               if (!empty($stock['photo'])) {
                 $photoWeb = '/' . ltrim($stock['photo'], '/');
               } else {
-                $fallbackLocal = __DIR__ . "/uploads/photos/{$stockId}.jpg";
+                // fallback legacy sur /uploads/photos/{id}.jpg à partir de la racine web
+                $fallbackLocal = rtrim($_SERVER['DOCUMENT_ROOT'], '/') . "/uploads/photos/{$stockId}.jpg";
                 if (is_file($fallbackLocal)) {
                   $photoWeb = "/uploads/photos/{$stockId}.jpg";
                 }
@@ -254,8 +248,7 @@ if ($depotId) {
               <?php endif; ?>
             </td>
 
-
-            <!-- ARTICLE (nom cliquable + sous-texte catégorie/sous-catégorie) -->
+            <!-- ARTICLE -->
             <td class="text-center td-article">
               <a href="article.php?id=<?= (int)$stockId ?>&depot_id=<?= (int)$depotId ?>"
                 class="fw-semibold text-decoration-none">
@@ -272,9 +265,8 @@ if ($depotId) {
               </div>
             </td>
 
-
-
             <td><span class="badge quantite-disponible <?= $dispoDepot < 10 ? 'bg-danger' : 'bg-success' ?>"><?= $dispoDepot ?></span></td>
+
             <td>
               <?php
               $autres = $stock['autres_depots'] ?? '';
@@ -302,11 +294,8 @@ if ($depotId) {
 
             <td>
               <?php
-              // 🔽 Filtrer les chantiers avec quantité > 0
               $chantiersAvecStock = array_filter($chantierList, fn($c) => $c['quantite'] > 0);
-
               if (count($chantiersAvecStock)):
-                // 🔽 Trier par quantité décroissante
                 usort($chantiersAvecStock, fn($a, $b) => $b['quantite'] <=> $a['quantite']);
                 foreach ($chantiersAvecStock as $chantier):
               ?>
@@ -319,7 +308,6 @@ if ($depotId) {
               <?php endif; ?>
             </td>
 
-
             <td>
               <button
                 class="btn btn-sm btn-primary transfer-btn"
@@ -330,7 +318,6 @@ if ($depotId) {
                 <i class="bi bi-arrow-left-right"></i>
               </button>
             </td>
-
           </tr>
         <?php endforeach; ?>
       </tbody>
@@ -409,5 +396,5 @@ if ($depotId) {
 <script>
   const subCategories = <?= json_encode($subCategoriesGrouped) ?>;
 </script>
-<script src="/js/stockGestion_depot.js"></script>
-<?php require_once __DIR__ . '/templates/footer.php'; ?>
+<script src="/stock/js/stockGestion_depot.js"></script>
+<?php require_once __DIR__ . '/../templates/footer.php'; ?>
