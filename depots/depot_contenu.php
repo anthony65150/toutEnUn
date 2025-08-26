@@ -1,10 +1,12 @@
 <?php
-require_once "./config/init.php";
-require_once __DIR__ . '/templates/header.php';
-require_once __DIR__ . '/templates/navigation/navigation.php';
+declare(strict_types=1);
+
+require_once __DIR__ . '/../config/init.php';
+require_once __DIR__ . '/../templates/header.php';
+require_once __DIR__ . '/../templates/navigation/navigation.php';
 
 if (!isset($_SESSION['utilisateurs'])) {
-    header("Location: connexion.php");
+    header("Location: ../connexion.php");
     exit;
 }
 
@@ -22,7 +24,6 @@ if (isset($_GET['depot_id'])) {
 $allChantiers = $pdo->query("SELECT id, nom FROM chantiers")->fetchAll(PDO::FETCH_KEY_PAIR);
 $allDepots    = $pdo->query("SELECT id, nom FROM depots")->fetchAll(PDO::FETCH_KEY_PAIR);
 
-
 // Récup infos dépôt
 $stmtDepot = $pdo->prepare("SELECT id, nom, responsable_id FROM depots WHERE id = ?");
 $stmtDepot->execute([$depotId]);
@@ -30,7 +31,7 @@ $depot = $stmtDepot->fetch(PDO::FETCH_ASSOC);
 
 if (!$depot) {
     echo '<div class="container mt-4 alert alert-danger">Dépôt introuvable.</div>';
-    require_once __DIR__ . '/templates/footer.php';
+    require_once __DIR__ . '/../templates/footer.php';
     exit;
 }
 
@@ -38,7 +39,7 @@ if (!$depot) {
 $allowed = ($role === 'administrateur') || ($role === 'depot' && (int)$depot['responsable_id'] === (int)$user['id']);
 if (!$allowed) {
     echo '<div class="container mt-4 alert alert-danger">Accès refusé.</div>';
-    require_once __DIR__ . '/templates/footer.php';
+    require_once __DIR__ . '/../templates/footer.php';
     exit;
 }
 
@@ -47,10 +48,10 @@ if (!$allowed) {
 // Articles présents dans le dépôt (quantité > 0)
 $sql = "
     SELECT 
-        s.id           AS article_id,
-        s.nom          AS article_nom,
-        s.photo        AS photo,
-        s.categorie    AS categorie,
+        s.id             AS article_id,
+        s.nom            AS article_nom,
+        s.photo          AS photo,
+        s.categorie      AS categorie,
         s.sous_categorie AS sous_categorie,
         SUM(COALESCE(sd.quantite,0)) AS quantite
     FROM stock s
@@ -95,15 +96,12 @@ foreach ($stmtSubs->fetchAll(PDO::FETCH_ASSOC) as $r) {
 foreach ($subCategoriesGrouped as $k => $arr) {
     $subCategoriesGrouped[$k] = array_values(array_unique($arr));
 }
-
-
 ?>
 
 <div class="container mt-4">
     <div class="mb-4 text-center">
         <h1 class="mb-4 text-center">Stock du dépôt : <?= htmlspecialchars($depot['nom']) ?></h1>
     </div>
-
 
     <!-- Filtres catégories/sous-catégories (identiques à la page admin) -->
     <div class="d-flex justify-content-center mb-3 flex-wrap gap-2" id="categoriesSlide">
@@ -141,6 +139,7 @@ foreach ($subCategoriesGrouped as $k => $arr) {
                         $photoWeb = !empty($r['photo']) ? '/' . ltrim($r['photo'], '/') : '';
                         $cat = $r['categorie'] ?? '';
                         $sub = $r['sous_categorie'] ?? '';
+                        $qte = (int)$r['quantite'];
                         ?>
                         <tr
                             data-cat="<?= htmlspecialchars($cat) ?>"
@@ -153,7 +152,7 @@ foreach ($subCategoriesGrouped as $k => $arr) {
                                 <?php endif; ?>
                             </td>
                             <td class="text-center">
-                                <a href="article.php?id=<?= (int)$r['article_id'] ?>" class="text-decoration-underline fw-bold text-primary article-name">
+                                <a href="../stock/article.php?id=<?= (int)$r['article_id'] ?>" class="text-decoration-underline fw-bold text-primary article-name">
                                     <?= htmlspecialchars(ucfirst(strtolower($r['article_nom']))) ?>
                                 </a>
                                 <?php if ($cat || $sub): ?>
@@ -164,7 +163,6 @@ foreach ($subCategoriesGrouped as $k => $arr) {
                             </td>
 
                             <td class="text-center fw-semibold">
-                                <?php $qte = (int)$r['quantite']; ?>
                                 <span class="badge <?= $qte < 10 ? 'bg-danger' : 'bg-success' ?>"><?= $qte ?></span>
                             </td>
 
@@ -178,9 +176,6 @@ foreach ($subCategoriesGrouped as $k => $arr) {
                                     <i class="bi bi-arrow-left-right"></i>
                                 </button>
                             </td>
-
-
-
                         </tr>
                     <?php endforeach; ?>
                 <?php endif; ?>
@@ -200,21 +195,21 @@ foreach ($subCategoriesGrouped as $k => $arr) {
             <div class="modal-body">
                 <form id="transferForm">
                     <input type="hidden" id="articleId" name="article_id">
-                    <input type="hidden" id="sourceDepotId" name="source_depot_id" value="<?= $depotId ?>">
+                    <input type="hidden" id="sourceDepotId" name="source_depot_id" value="<?= (int)$depotId ?>">
                     <div class="mb-3">
                         <label>Destination</label>
                         <select class="form-select" id="destinationChantier">
                             <option value="" disabled selected>Choisir la destination</option>
                             <optgroup label="Dépôts">
                                 <?php foreach ($allDepots as $id => $nom): ?>
-                                    <?php if ($id != $depotId): ?>
-                                        <option value="depot_<?= $id ?>"><?= htmlspecialchars($nom) ?></option>
+                                    <?php if ((int)$id !== (int)$depotId): ?>
+                                        <option value="depot_<?= (int)$id ?>"><?= htmlspecialchars($nom) ?></option>
                                     <?php endif; ?>
                                 <?php endforeach; ?>
                             </optgroup>
                             <optgroup label="Chantiers">
                                 <?php foreach ($allChantiers as $id => $nom): ?>
-                                    <option value="chantier_<?= $id ?>"><?= htmlspecialchars($nom) ?></option>
+                                    <option value="chantier_<?= (int)$id ?>"><?= htmlspecialchars($nom) ?></option>
                                 <?php endforeach; ?>
                             </optgroup>
                         </select>
@@ -230,6 +225,7 @@ foreach ($subCategoriesGrouped as $k => $arr) {
     </div>
 </div>
 
+<!-- Toast -->
 <div class="position-fixed bottom-0 end-0 p-3" style="z-index: 1100">
   <div id="toastMessage" class="toast align-items-center text-bg-primary border-0" role="alert" aria-live="assertive" aria-atomic="true">
     <div class="d-flex">
@@ -243,7 +239,10 @@ foreach ($subCategoriesGrouped as $k => $arr) {
   // Injection des sous-catégories pour JS
   window.subCategories = <?= json_encode($subCategoriesGrouped) ?>;
 </script>
+<!-- Si le JS reste dans /js : -->
 <script src="/js/depot_contenu.js"></script>
+<!-- Si tu préfères déplacer le JS dans /depots, renomme le fichier en /depots/depot_contenu.js et remplace la ligne ci-dessus par :
+<script src="./depot_contenu.js"></script>
+-->
 
-
-<?php require_once __DIR__ . '/templates/footer.php'; ?>
+<?php require_once __DIR__ . '/../templates/footer.php'; ?>

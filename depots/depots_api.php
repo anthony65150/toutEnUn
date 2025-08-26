@@ -1,8 +1,14 @@
 <?php
-require_once './config/init.php';
+declare(strict_types=1);
+
+require_once __DIR__ . '/../config/init.php';
 header('Content-Type: application/json; charset=utf-8');
 
-if (!isset($_SESSION['utilisateurs']) || $_SESSION['utilisateurs']['fonction'] !== 'administrateur') {
+// Méthode et autorisation
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+  echo json_encode(['ok' => false, 'error' => 'Méthode non autorisée']); exit;
+}
+if (!isset($_SESSION['utilisateurs']) || ($_SESSION['utilisateurs']['fonction'] ?? '') !== 'administrateur') {
   echo json_encode(['ok' => false, 'error' => 'Non autorisé']); exit;
 }
 
@@ -36,8 +42,8 @@ try {
       $resp = $_POST['responsable_id'] ?? '';
       $resp = ($resp === '' ? null : (int)$resp);
 
-      if ($id <= 0)       throw new Exception('ID manquant');
-      if ($nom === '')    throw new Exception('Nom obligatoire');
+      if ($id <= 0)    throw new Exception('ID manquant');
+      if ($nom === '') throw new Exception('Nom obligatoire');
 
       $stmt = $pdo->prepare(
         "UPDATE depots SET nom = :nom, responsable_id = :resp WHERE id = :id"
@@ -48,7 +54,6 @@ try {
       $stmt->bindValue(':id', $id, PDO::PARAM_INT);
       $stmt->execute();
 
-      // Vérif: lignes affectées (si 0, c’est possiblement un no-op — mêmes valeurs)
       echo json_encode(['ok' => true, 'id' => $id, 'rows' => $stmt->rowCount()]);
       break;
     }
@@ -57,8 +62,9 @@ try {
       $id = (int)($_POST['id'] ?? 0);
       if ($id <= 0) throw new Exception('ID manquant');
 
-      // Option: vérifier contraintes FK ici si besoin
+      // (Option) vérifier des contraintes avant suppression si nécessaire
       $pdo->prepare("DELETE FROM depots WHERE id = ?")->execute([$id]);
+
       echo json_encode(['ok' => true]);
       break;
     }

@@ -17,7 +17,7 @@ document.addEventListener("DOMContentLoaded", () => {
       .toString()
       .toLowerCase()
       .normalize("NFD")
-      .replace(/\p{Diacritic}/gu, "");
+      .replace(/[\u0300-\u036f]/g, ""); // retire accents (compatible large)
   }
 
   function renderSubCats(cat) {
@@ -90,16 +90,17 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // ===========================
   // MODALE TRANSFÉRER
-  // (identique à stock_depot.php)
   // ===========================
-  const transferModalEl = document.getElementById("transferModal");
-  const transferForm = document.getElementById("transferForm");
-  const articleIdInput = document.getElementById("articleId");
+  const ENDPOINT = "./transferStock_depot.php"; // même dossier que /depots/depot_contenu.php
+
+  const transferModalEl   = document.getElementById("transferModal");
+  const transferForm      = document.getElementById("transferForm");
+  const articleIdInput    = document.getElementById("articleId");
   const destinationSelect = document.getElementById("destinationChantier");
-  const quantityInput = document.getElementById("quantity");
-  const toastEl = document.getElementById("toastMessage");
-  const toast = toastEl ? new bootstrap.Toast(toastEl) : null;
-  const toastBody = toastEl ? toastEl.querySelector(".toast-body") : null;
+  const quantityInput     = document.getElementById("quantity");
+  const toastEl           = document.getElementById("toastMessage");
+  const toast             = toastEl ? new bootstrap.Toast(toastEl) : null;
+  const toastBody         = toastEl ? toastEl.querySelector(".toast-body") : null;
 
   let currentRow = null; // pour MAJ visuelle après transfert
 
@@ -124,7 +125,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
     currentRow = btn.closest("tr");
 
-    // Optionnel: mettre le nom dans le titre si besoin
     const title = transferModalEl.querySelector(".modal-title");
     if (title && stockNom) {
       title.textContent = "Transférer — " + stockNom;
@@ -135,37 +135,39 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   // Soumission du transfert
-transferForm.addEventListener("submit", async (e) => {
-  e.preventDefault();
+  transferForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
 
-  const dest = destinationSelect.value;
-  const qty = parseInt(quantityInput.value, 10);
+    const dest = destinationSelect.value;
+    const qty = parseInt(quantityInput.value, 10);
 
-  if (!dest) { showToast("Choisis une destination.", false); return; }
-  if (!qty || qty < 1) { showToast("Quantité invalide.", false); return; }
+    if (!dest) { showToast("Choisis une destination.", false); return; }
+    if (!qty || qty < 1) { showToast("Quantité invalide.", false); return; }
 
-  // Découper valeur du select (ex: "depot_2" -> type="depot", id=2)
-  const [destType, destId] = dest.split("_");
-  const fd = new FormData(transferForm);
-  fd.append("destination_type", destType);
-  fd.append("destination_id", destId);
+    // "depot_2" -> type="depot", id=2
+    const [destType, destId] = dest.split("_");
+    const fd = new FormData(transferForm);
+    fd.append("destination_type", destType);
+    fd.append("destination_id", destId);
 
-  try {
-    const res = await fetch("transferStock_depot.php", { method: "POST", body: fd });
-    const data = await res.json();
+    try {
+      const res = await fetch(ENDPOINT, { method: "POST", body: fd });
+      const data = await res.json().catch(() => null);
 
-    if (!data || !data.success) {
-      throw new Error(data?.message || "Erreur transfert.");
-    }
+      if (!data || !data.success) {
+        throw new Error((data && data.message) || "Erreur transfert.");
+      }
 
       // MAJ quantité dans la ligne
       if (currentRow) {
         const badge = currentRow.querySelector("td:nth-child(3) .badge");
         if (badge) {
           if (typeof data.new_quantite_depot !== "undefined") {
-            badge.textContent = data.new_quantite_depot;
-            badge.classList.toggle("bg-danger", data.new_quantite_depot < 10);
-            badge.classList.toggle("bg-success", data.new_quantite_depot >= 10);
+            const nv = parseInt(data.new_quantite_depot, 10);
+            badge.textContent = isNaN(nv) ? badge.textContent : nv;
+            const val = isNaN(nv) ? parseInt(badge.textContent, 10) : nv;
+            badge.classList.toggle("bg-danger", val < 10);
+            badge.classList.toggle("bg-success", val >= 10);
           } else {
             // fallback: décrémente localement
             const oldVal = parseInt(badge.textContent || "0", 10);
@@ -175,7 +177,7 @@ transferForm.addEventListener("submit", async (e) => {
             badge.classList.toggle("bg-success", newVal >= 10);
           }
         }
-        // Surbrillance
+        // Surbrillance 3s
         currentRow.classList.add("table-success");
         setTimeout(() => currentRow && currentRow.classList.remove("table-success"), 3000);
       }

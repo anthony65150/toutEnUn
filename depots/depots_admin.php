@@ -1,11 +1,14 @@
 <?php
-require_once "./config/init.php";
-require_once "templates/header.php";
-require_once "templates/navigation/navigation.php";
+
+declare(strict_types=1);
+
+require_once __DIR__ . '/../config/init.php';
+require_once __DIR__ . '/../templates/header.php';
+require_once __DIR__ . '/../templates/navigation/navigation.php';
 
 // Vérifier si admin connecté
-if (!isset($_SESSION['utilisateurs']) || $_SESSION['utilisateurs']['fonction'] !== 'administrateur') {
-    header("Location: connexion.php");
+if (!isset($_SESSION['utilisateurs']) || ($_SESSION['utilisateurs']['fonction'] ?? '') !== 'administrateur') {
+    header("Location: ../connexion.php");
     exit;
 }
 
@@ -15,7 +18,6 @@ $utilisateurs = $pdo->query("
     FROM utilisateurs 
     ORDER BY nom, prenom
 ")->fetchAll(PDO::FETCH_ASSOC);
-
 ?>
 
 <div class="container mt-4">
@@ -56,35 +58,36 @@ $utilisateurs = $pdo->query("
                     $resp = $st->fetch(PDO::FETCH_ASSOC);
                 }
                 $respText = $resp ? htmlspecialchars($resp['prenom'] . ' ' . $resp['nom']) : '—';
-                $highlight = (isset($_GET['highlight']) && $_GET['highlight'] == $depot['id']) ? 'table-success' : '';
+                $highlight = (isset($_GET['highlight']) && (int)$_GET['highlight'] === (int)$depot['id']) ? 'table-success' : '';
                 echo "<tr class='align-middle $highlight'>";
 
+                // Lien vers la page de contenu du dépôt DANS le même dossier /depots
                 echo '<td>
-                <a class="link-primary fw-semibold text-decoration-none" href="depot_contenu.php?depot_id=' . (int)$depot['id'] . '">'
+                        <a class="link-primary fw-semibold text-decoration-none" href="./depot_contenu.php?depot_id=' . (int)$depot['id'] . '">'
                     . htmlspecialchars($depot['nom']) .
                     '</a>
-              </td>';
+                      </td>';
 
                 echo '<td>' . $respText . '</td>';
                 echo '<td>' . htmlspecialchars(date('d/m/Y', strtotime($depot['created_at']))) . '</td>';
                 echo '<td>
-                <button class="btn btn-sm btn-warning edit-depot-btn"
-                        data-bs-toggle="modal"
-                        data-bs-target="#modalDepotEdit"
-                        data-id="' . (int)$depot['id'] . '"
-                        data-nom="' . htmlspecialchars($depot['nom'], ENT_QUOTES) . '"
-                        data-resp="' . (int)($depot['responsable_id'] ?? 0) . '"
-                        title="Modifier">
-                  <i class="bi bi-pencil-fill"></i>
-                </button>
-                <button class="btn btn-sm btn-danger delete-depot-btn"
-                        data-bs-toggle="modal"
-                        data-bs-target="#modalDepotDelete"
-                        data-id="' . (int)$depot['id'] . '"
-                        title="Supprimer">
-                  <i class="bi bi-trash-fill"></i>
-                </button>
-              </td>';
+                        <button class="btn btn-sm btn-warning edit-depot-btn"
+                                data-bs-toggle="modal"
+                                data-bs-target="#modalDepotEdit"
+                                data-id="' . (int)$depot['id'] . '"
+                                data-nom="' . htmlspecialchars($depot['nom'], ENT_QUOTES) . '"
+                                data-resp="' . (int)($depot['responsable_id'] ?? 0) . '"
+                                title="Modifier">
+                          <i class="bi bi-pencil-fill"></i>
+                        </button>
+                        <button class="btn btn-sm btn-danger delete-depot-btn"
+                                data-bs-toggle="modal"
+                                data-bs-target="#modalDepotDelete"
+                                data-id="' . (int)$depot['id'] . '"
+                                title="Supprimer">
+                          <i class="bi bi-trash-fill"></i>
+                        </button>
+                      </td>';
 
                 echo '</tr>';
             }
@@ -134,8 +137,6 @@ $utilisateurs = $pdo->query("
     </div>
 </div>
 
-
-
 <!-- Modal modification -->
 <div class="modal fade" id="modalDepotEdit" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog">
@@ -172,7 +173,6 @@ $utilisateurs = $pdo->query("
     </div>
 </div>
 
-
 <!-- Modal confirmation suppression -->
 <div class="modal fade" id="modalDepotDelete" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog">
@@ -193,7 +193,6 @@ $utilisateurs = $pdo->query("
     </div>
 </div>
 
-
 <!-- Toast succès -->
 <div class="position-fixed bottom-0 end-0 p-3" style="z-index: 1055">
     <div id="depotToast" class="toast align-items-center text-white bg-success border-0" role="alert">
@@ -209,7 +208,7 @@ $utilisateurs = $pdo->query("
 <?php if (isset($_GET['success'])): ?>
     <script>
         document.addEventListener('DOMContentLoaded', () => {
-            const msgType = "<?php echo $_GET['success']; ?>";
+            const msgType = "<?php echo htmlspecialchars($_GET['success'] ?? '', ENT_QUOTES); ?>";
             let message = "Dépôt enregistré avec succès.";
             if (msgType === "create") message = "Dépôt créé avec succès.";
             else if (msgType === "update") message = "Dépôt modifié avec succès.";
@@ -223,7 +222,8 @@ $utilisateurs = $pdo->query("
     </script>
 <?php endif; ?>
 
-<script src="/js/depotsGestion_admin.js?v=3"></script>
+<!-- JS admin dépôts : chemin relatif depuis /depots -->
+<script src="./js/depotsGestion_admin.js?v=7"></script>
 
 <script>
     document.addEventListener('DOMContentLoaded', () => {
@@ -236,4 +236,4 @@ $utilisateurs = $pdo->query("
     });
 </script>
 
-<?php require_once "templates/footer.php"; ?>
+<?php require_once __DIR__ . '/../templates/footer.php'; ?>

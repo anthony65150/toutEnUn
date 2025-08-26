@@ -33,7 +33,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
           <a href="/chantiers_admin.php" class="nav-link <?= ($current_page === 'chantiers_admin.php') ? 'active' : '' ?>">Chantiers</a>
         </li>
         <li class="nav-item p-2">
-          <a href="/depots_admin.php" class="nav-link <?= ($current_page === 'depots_admin.php') ? 'active' : '' ?>">Dépôts</a>
+          <a href="/depots/depots_admin.php" class="nav-link <?= ($current_page === 'depots_admin.php') ? 'active' : '' ?>">Dépôts</a>
         </li>
         <li class="nav-item p-2">
           <a href="/employes/employes.php" class="nav-link <?= ($current_page === 'employes.php') ? 'active' : '' ?>">Employés</a>
