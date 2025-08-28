@@ -35,7 +35,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
 
             <?php if (($_SESSION['utilisateurs']['fonction'] ?? '') === 'administrateur'): ?>
                 <li class="p-2">
-                    <a href="/chantiers_admin.php" class="nav-link <?= ($current_page === 'chantiers_admin.php') ? 'active' : '' ?>">Chantiers</a>
+                    <a href="/chantiers/chantiers_admin.php" class="nav-link <?= ($current_page === 'chantiers_admin.php') ? 'active' : '' ?>">Chantiers</a>
                 </li>
                 <li class="p-2">
                     <a href="/depots/depots_admin.php" class="nav-link <?= ($current_page === 'depots_admin.php') ? 'active' : '' ?>">Dépôts</a>

@@ -1,10 +1,10 @@
 <?php
-require_once "./config/init.php";
-require_once __DIR__ . '/templates/header.php';
-require_once __DIR__ . '/templates/navigation/navigation.php';
+require_once __DIR__ . '/../config/init.php';
+require_once __DIR__ . '/../templates/header.php';
+require_once __DIR__ . '/../templates/navigation/navigation.php';
 
 if (!isset($_SESSION['utilisateurs'])) {
-    header("Location: connexion.php");
+    header("Location: /connexion.php");
     exit;
 }
 
@@ -18,7 +18,13 @@ if (isset($_GET['chantier_id'])) {
     $chantierId = (int)$_GET['id'];
 }
 
-// Listes pour la modale (identique au dépôt)
+if (!$chantierId) {
+    echo '<div class="container mt-4 alert alert-danger">ID de chantier manquant.</div>';
+    require_once __DIR__ . '/../templates/footer.php';
+    exit;
+}
+
+// Listes pour la modale transfert
 $allChantiers = $pdo->query("SELECT id, nom FROM chantiers")->fetchAll(PDO::FETCH_KEY_PAIR);
 $allDepots    = $pdo->query("SELECT id, nom FROM depots")->fetchAll(PDO::FETCH_KEY_PAIR);
 
@@ -29,7 +35,7 @@ $chantier = $stmtCh->fetch(PDO::FETCH_ASSOC);
 
 if (!$chantier) {
     echo '<div class="container mt-4 alert alert-danger">Chantier introuvable.</div>';
-    require_once __DIR__ . '/templates/footer.php';
+    require_once __DIR__ . '/../templates/footer.php';
     exit;
 }
 
@@ -51,13 +57,13 @@ if ($role === 'administrateur') {
 }
 if (!$allowed) {
     echo '<div class="container mt-4 alert alert-danger">Accès refusé.</div>';
-    require_once __DIR__ . '/templates/footer.php';
+    require_once __DIR__ . '/../templates/footer.php';
     exit;
 }
 
 /** ----------------- Données (uniquement pour CE chantier) ----------------- */
 
-// Articles présents sur le chantier (quantité > 0)
+// Articles présents sur le chantier
 $sql = "
     SELECT 
         s.id             AS article_id,
@@ -90,7 +96,7 @@ $stmtCats = $pdo->prepare("
 $stmtCats->execute([':chantier_id' => $chantierId]);
 $categories = $stmtCats->fetchAll(PDO::FETCH_COLUMN);
 
-// Sous-catégories groupées par catégorie (pour CE chantier)
+// Sous-catégories groupées
 $stmtSubs = $pdo->prepare("
     SELECT DISTINCT s.categorie, s.sous_categorie
     FROM stock s
@@ -124,7 +130,7 @@ foreach ($subCategoriesGrouped as $k => $arr) {
         <h1 class="mb-4 text-center">Stock du chantier : <?= htmlspecialchars($chantier['nom']) ?></h1>
     </div>
 
-    <!-- Filtres catégories/sous-catégories (identiques au dépôt) -->
+    <!-- Filtres -->
     <div class="d-flex justify-content-center mb-3 flex-wrap gap-2" id="categoriesSlide">
         <button class="btn btn-outline-primary" data-cat="">Tous</button>
         <?php foreach ($categories as $cat): ?>
@@ -135,7 +141,7 @@ foreach ($subCategoriesGrouped as $k => $arr) {
     </div>
     <div id="subCategoriesSlide" class="d-flex justify-content-center mb-4 flex-wrap gap-2"></div>
 
-    <!-- Recherche instantanée -->
+    <!-- Recherche -->
     <input type="text" id="searchInput" class="form-control mb-4" placeholder="Rechercher un article...">
 
     <div class="table-responsive">
@@ -162,9 +168,7 @@ foreach ($subCategoriesGrouped as $k => $arr) {
                         $sub = $r['sous_categorie'] ?? '';
                         $qte = (int)$r['quantite'];
                         ?>
-                        <tr
-                            data-cat="<?= htmlspecialchars($cat) ?>"
-                            data-subcat="<?= htmlspecialchars($sub) ?>">
+                        <tr data-cat="<?= htmlspecialchars($cat) ?>" data-subcat="<?= htmlspecialchars($sub) ?>">
                             <td class="text-center" style="width:64px">
                                 <?php if (!empty($photoWeb)): ?>
                                     <img src="<?= htmlspecialchars($photoWeb) ?>" alt="" class="img-thumbnail" style="width:56px;height:56px;object-fit:cover;">
@@ -173,7 +177,7 @@ foreach ($subCategoriesGrouped as $k => $arr) {
                                 <?php endif; ?>
                             </td>
                             <td class="text-center">
-                                <a href="article.php?id=<?= (int)$r['article_id'] ?>" class="link-primary fw-semibold text-decoration-none article-name">
+                                <a href="../stock/article.php?id=<?= (int)$r['article_id'] ?>" class="link-primary fw-semibold text-decoration-none article-name">
                                     <?= htmlspecialchars(ucfirst(strtolower($r['article_nom']))) ?>
                                 </a>
                                 <?php if ($cat || $sub): ?>
@@ -182,26 +186,22 @@ foreach ($subCategoriesGrouped as $k => $arr) {
                                     </div>
                                 <?php endif; ?>
                             </td>
-
                             <td class="text-center fw-semibold">
                                 <span class="badge <?= $qte < 10 ? 'bg-danger' : 'bg-success' ?>"><?= $qte ?></span>
                             </td>
-
                             <td class="text-center">
                                 <button
                                     class="btn btn-sm btn-primary transfer-btn"
                                     data-bs-toggle="modal"
                                     data-bs-target="#transferModal"
-                                    data-stock-id="<?= (int)$r['article_id'] ?>" 
-                                    data-stock-nom="<?= htmlspecialchars($r['article_nom']) ?>" 
+                                    data-stock-id="<?= (int)$r['article_id'] ?>"
+                                    data-stock-nom="<?= htmlspecialchars($r['article_nom']) ?>"
                                     data-source-type="chantier"
                                     data-source-id="<?= (int)$chantier['id'] ?>"
                                     title="Transférer"
                                     aria-label="Transférer">
                                     <i class="bi bi-arrow-left-right"></i>
                                 </button>
-
-
                             </td>
                         </tr>
                     <?php endforeach; ?>
@@ -211,7 +211,7 @@ foreach ($subCategoriesGrouped as $k => $arr) {
     </div>
 </div>
 
-<!-- Modal Transfert (même rendu que dépôt, source = chantier courant) -->
+<!-- Modal Transfert -->
 <div class="modal fade" id="transferModal" tabindex="-1" aria-labelledby="transferModalLabel" aria-hidden="true">
     <div class="modal-dialog">
         <div class="modal-content">
@@ -220,21 +220,22 @@ foreach ($subCategoriesGrouped as $k => $arr) {
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
             </div>
             <div class="modal-body">
-                <form id="transferForm">
+                <form id="transferForm" action="./transferStock_chef.php" method="post">
                     <input type="hidden" id="articleId" name="article_id">
-                    <input type="hidden" id="sourceChantierId" name="source_chantier_id" value="<?= $chantierId ?>">
+                    <input type="hidden" id="sourceChantierId" name="source_chantier_id" value="<?= (int)$chantierId ?>">
+                    <?php if (!empty($_SESSION['csrf_token'])): ?>
+                        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token']) ?>">
+                    <?php endif; ?>
 
                     <div class="mb-3">
                         <label>Destination</label>
                         <select class="form-select" id="destinationSelect">
                             <option value="" disabled selected>Choisir la destination</option>
-
                             <optgroup label="Dépôts">
                                 <?php foreach ($allDepots as $id => $nom): ?>
                                     <option value="depot_<?= (int)$id ?>"><?= htmlspecialchars($nom) ?></option>
                                 <?php endforeach; ?>
                             </optgroup>
-
                             <optgroup label="Chantiers">
                                 <?php foreach ($allChantiers as $id => $nom): ?>
                                     <?php if ((int)$id !== (int)$chantierId): ?>
@@ -268,10 +269,8 @@ foreach ($subCategoriesGrouped as $k => $arr) {
 </div>
 
 <script>
-    // Injection des sous-catégories pour JS
     window.subCategories = <?= json_encode($subCategoriesGrouped) ?>;
 </script>
-<script src="/js/chantier_contenu.js"></script>
+<script src="./js/chantier_contenu.js"></script>
 
-
-<?php require_once __DIR__ . '/templates/footer.php'; ?>
+<?php require_once __DIR__ . '/../templates/footer.php'; ?>
