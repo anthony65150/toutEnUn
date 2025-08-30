@@ -42,15 +42,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Force l'alignement attendu (optionnel)
   function normalizeRowAlignment(row) {
-    if (!row) return;
-    const tds = row.querySelectorAll('td');
-    if (!tds.length) return;
-    tds.forEach((td, i) => {
-      td.classList.remove('text-center', 'text-start');
-      if (i === 0 || i === tds.length - 1) td.classList.add('text-center');
-      else td.classList.add('text-start');
-    });
-  }
+  if (!row) return;
+  const tds = row.querySelectorAll('td');
+  if (!tds.length) return;
+  tds.forEach((td, i) => {
+    td.classList.remove('text-center', 'text-start');
+    // Colonnes 0 (Photo), 1 (Articles), 2 (Dépôts), 3 (Chantiers), et la dernière (Actions) => centrées
+    if (i === 0 || i === 1 || i === 2 || i === 3 || i === tds.length - 1) {
+      td.classList.add('text-center');
+    } else {
+      td.classList.add('text-start');
+    }
+  });
+}
+
   function normalizeTable() {
     document.querySelectorAll('#stockTableBody > tr').forEach(normalizeRowAlignment);
   }

@@ -240,7 +240,7 @@ foreach ($subCategoriesGrouped as $k => $arr) {
   window.subCategories = <?= json_encode($subCategoriesGrouped) ?>;
 </script>
 <!-- Si le JS reste dans /js : -->
-<script src="/js/depot_contenu.js"></script>
+<script src="./js/depot_contenu.js"></script>
 <!-- Si tu préfères déplacer le JS dans /depots, renomme le fichier en /depots/depot_contenu.js et remplace la ligne ci-dessus par :
 <script src="./depot_contenu.js"></script>
 -->

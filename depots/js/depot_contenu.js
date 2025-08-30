@@ -91,7 +91,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // ===========================
   // MODALE TRANSFÉRER
   // ===========================
-  const ENDPOINT = "./transferStock_depot.php"; // même dossier que /depots/depot_contenu.php
+  const ENDPOINT = "/stock/transferStock_depot.php";
 
   const transferModalEl   = document.getElementById("transferModal");
   const transferForm      = document.getElementById("transferForm");
