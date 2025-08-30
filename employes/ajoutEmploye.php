@@ -10,6 +10,7 @@ if (!isset($_SESSION['utilisateurs']) || ($_SESSION['utilisateurs']['fonction'] 
     header('Location: /connexion.php');
     exit;
 }
+$entrepriseId = (int)($_SESSION['utilisateurs']['entreprise_id'] ?? 0);
 
 /* ========= Includes UI / helpers ========= */
 require_once __DIR__ . '/../templates/header.php';
@@ -43,8 +44,8 @@ function normalize_role_input(string $r): string {
 
 /* ========= Alias sécurité si fonction mal nommée ========= */
 if (!function_exists('ajoutUtilisateur') && function_exists('ajouUtilisateur')) {
-    function ajoutUtilisateur($pdo, $nom, $prenom, $email, $motDePasse, $fonction, $chantier_id = null) {
-        return ajoutUtilisateur($pdo, $nom, $prenom, $email, $motDePasse, $fonction, $chantier_id);
+    function ajoutUtilisateur($pdo, $nom, $prenom, $email, $motDePasse, $fonction, $chantier_id = null, $agence_id = null) {
+        return ajoutUtilisateur($pdo, $nom, $prenom, $email, $motDePasse, $fonction, $chantier_id, $agence_id);
     }
 }
 
@@ -66,8 +67,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Accepte "employé" ou "employe"
     $fonctionIn = $_POST['fonction'] ?? '';
     $fonction   = normalize_role_input($fonctionIn === 'employé' ? 'employe' : $fonctionIn);
-    $chantier_id = null;
 
+    // --- NOUVEAU : Agence
+    $agence_id = isset($_POST['agence_id']) && $_POST['agence_id'] !== '' ? (int)$_POST['agence_id'] : null;
+    if ($agence_id !== null) {
+        $chkAg = $pdo->prepare("SELECT 1 FROM agences WHERE id=? AND entreprise_id=? AND actif=1");
+        $chkAg->execute([$agence_id, $entrepriseId]);
+        if (!$chkAg->fetch()) {
+            $errors['agence_id'] = "Agence invalide.";
+        }
+    }
+
+    // Chantier si chef
+    $chantier_id = null;
     if ($fonction === 'chef') {
         $chantier_id = isset($_POST['chantier_id']) && $_POST['chantier_id'] !== '' ? (int)$_POST['chantier_id'] : null;
         if (!$chantier_id) {
@@ -94,12 +106,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Validation métier via ta fonction si dispo
     if (empty($errors) && function_exists('verifieUtilisateur')) {
         $verif = verifieUtilisateur([
-            'nom'        => $nom,
-            'prenom'     => $prenom,
-            'email'      => $email,
-            'motDePasse' => $motDePasse,
-            'fonction'   => $fonction,
-            'chantier_id'=> $chantier_id,
+            'nom'         => $nom,
+            'prenom'      => $prenom,
+            'email'       => $email,
+            'motDePasse'  => $motDePasse,
+            'fonction'    => $fonction,
+            'chantier_id' => $chantier_id,
+            'agence_id'   => $agence_id,
         ]);
         if ($verif !== true && is_array($verif)) {
             $errors = array_merge($errors, $verif);
@@ -115,10 +128,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $pdo->beginTransaction();
                 try {
                     $stmt = $pdo->prepare("
-                        INSERT INTO utilisateurs (nom, prenom, email, motDePasse, fonction)
-                        VALUES (?, ?, ?, ?, ?)
+                        INSERT INTO utilisateurs (nom, prenom, email, motDePasse, fonction, entreprise_id, agence_id)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
                     ");
-                    $stmt->execute([$nom, $prenom, $email, $hash, $fonction]);
+                    $stmt->execute([$nom, $prenom, $email, $hash, $fonction, $entrepriseId, $agence_id]);
 
                     $uid = (int)$pdo->lastInsertId();
                     // lier le chef au chantier (adapte le nom de table si différent)
@@ -132,18 +145,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             } else {
                 $stmt = $pdo->prepare("
-                    INSERT INTO utilisateurs (nom, prenom, email, motDePasse, fonction)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO utilisateurs (nom, prenom, email, motDePasse, fonction, entreprise_id, agence_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                 ");
-                $stmt->execute([$nom, $prenom, $email, $hash, $fonction]);
+                $stmt->execute([$nom, $prenom, $email, $hash, $fonction, $entrepriseId, $agence_id]);
             }
         } else {
-            // Utilise ton helper
-            ajoutUtilisateur($pdo, $nom, $prenom, $email, $motDePasse, $fonction, $chantier_id);
+            // Utilise ton helper (prévois de l’étendre pour agence_id)
+            ajoutUtilisateur($pdo, $nom, $prenom, $email, $motDePasse, $fonction, $chantier_id, $agence_id);
         }
 
         if (empty($errors)) {
-            // Redirige vers la liste employés (module central)
             header("Location: /employes/employes.php");
             exit;
         }
@@ -209,6 +221,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
           <?php endif; ?>
         </div>
 
+        <!-- NOUVEAU : Agence -->
+        <div class="mb-3">
+          <label for="agence_id" class="form-label">Agence</label>
+          <div class="d-flex gap-2">
+            <select name="agence_id" id="agence_id" class="form-select" style="min-width:280px;">
+              <option value="">-- Sélectionner une agence --</option>
+            </select>
+            <button type="button" class="btn btn-outline-secondary" id="openAgenceModal">+ Ajouter une agence</button>
+          </div>
+          <div class="form-text">Facultatif : rattache l’employé à une agence.</div>
+          <?php if (isset($errors['agence_id'])): ?>
+            <div class="alert alert-danger mt-2 p-2"><?= htmlspecialchars($errors['agence_id']) ?></div>
+          <?php endif; ?>
+        </div>
+
         <!-- Chantier à attribuer (uniquement si chef sélectionné) -->
         <div class="mb-3" id="chantierContainer" style="display:none;">
           <label for="chantier_id" class="form-label">Affecter au chantier</label>
@@ -233,6 +260,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   </div>
 </div>
 
+<!-- MINI-MODALE : Ajouter une agence -->
+<div class="modal fade" id="agenceModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <form id="agenceForm" class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Ajouter une agence</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf) ?>">
+        <div class="mb-3">
+          <label class="form-label">Nom de l’agence</label>
+          <input type="text" class="form-control" name="nom" required>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Adresse (optionnel)</label>
+          <input type="text" class="form-control" name="adresse">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-light" data-bs-dismiss="modal">Annuler</button>
+        <button type="submit" class="btn btn-primary">Enregistrer</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="/agences/js/agences.js"></script>
 <script>
 document.addEventListener("DOMContentLoaded", function () {
   const fonctionSelect = document.getElementById('fonction');
@@ -243,6 +298,42 @@ document.addEventListener("DOMContentLoaded", function () {
   }
   fonctionSelect.addEventListener('change', toggleChantier);
   toggleChantier(); // au chargement
+
+  // === Agences ===
+  const agenceSelect = document.getElementById('agence_id');
+  const openAgenceModalBtn = document.getElementById('openAgenceModal');
+  const agenceModalEl = document.getElementById('agenceModal');
+  const agenceModal = agenceModalEl ? new bootstrap.Modal(agenceModalEl) : null;
+  const agenceForm = document.getElementById('agenceForm');
+
+  // Charger la liste au chargement
+  if (agenceSelect && window.Agences) {
+    const pre = "<?= isset($_POST['agence_id']) ? htmlspecialchars((string)$_POST['agence_id']) : '' ?>";
+    Agences.loadIntoSelect(agenceSelect, { includePlaceholder:true, preselect: pre });
+  }
+
+  // Ouvrir mini-modale
+  openAgenceModalBtn?.addEventListener('click', () => {
+    agenceForm?.reset();
+    agenceModal?.show();
+  });
+
+  // Créer agence puis sélectionner
+  agenceForm?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(agenceForm);
+    fd.append('action','create');
+
+    try {
+      const res = await fetch('/agences/api.php', { method:'POST', body:fd, credentials:'same-origin' });
+      const data = await res.json();
+      if (!data.ok) { alert(data.msg || 'Erreur'); return; }
+      agenceModal?.hide();
+      await Agences.loadIntoSelect(agenceSelect, { includePlaceholder:true, preselect: String(data.id) });
+    } catch (err) {
+      console.error(err); alert('Erreur réseau');
+    }
+  });
 });
 </script>
 

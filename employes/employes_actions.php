@@ -4,7 +4,6 @@ declare(strict_types=1);
 require_once __DIR__ . '/../config/init.php';
 header('Content-Type: application/json; charset=utf-8');
 
-// --- Toujours capturer les fatales en JSON ---
 ini_set('display_errors', '0');
 error_reporting(E_ALL);
 register_shutdown_function(function () {
@@ -15,21 +14,18 @@ register_shutdown_function(function () {
     }
 });
 
-// --- Méthode requise ---
 if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
     http_response_code(405);
     echo json_encode(['success' => false, 'message' => 'Méthode non autorisée']);
     exit;
 }
 
-// --- Sécurité session/role ---
 if (!isset($_SESSION['utilisateurs']) || ($_SESSION['utilisateurs']['fonction'] ?? '') !== 'administrateur') {
     http_response_code(403);
     echo json_encode(['success' => false, 'message' => 'Accès refusé']);
     exit;
 }
 
-// --- CSRF ---
 $action = $_POST['action'] ?? null;
 $csrf   = $_POST['csrf_token'] ?? '';
 if (!hash_equals($_SESSION['csrf_token'] ?? '', $csrf)) {
@@ -38,14 +34,12 @@ if (!hash_equals($_SESSION['csrf_token'] ?? '', $csrf)) {
     exit;
 }
 
-// --- Helpers sans mbstring ---
 function lower_str($s) {
     if (function_exists('mb_strtolower')) return mb_strtolower((string)$s, 'UTF-8');
     return strtolower((string)$s);
 }
 function normalize_role($role) {
     $r = lower_str(trim((string)$role));
-    // enlever accents communs vers ascii pour fiabiliser
     $r = strtr($r, [
         'é' => 'e', 'è' => 'e', 'ê' => 'e', 'ë' => 'e',
         'à' => 'a', 'â' => 'a',
@@ -89,12 +83,15 @@ function rowHtml($u) {
     $prenom   = htmlspecialchars((string)($u['prenom'] ?? ''), ENT_QUOTES, 'UTF-8');
     $email    = htmlspecialchars((string)($u['email'] ?? ''), ENT_QUOTES, 'UTF-8');
     $fonction = htmlspecialchars((string)($u['fonction'] ?? ''), ENT_QUOTES, 'UTF-8');
+    $agenceId = (int)($u['agence_id'] ?? 0);
+
     return '
     <tr data-id="'.$id.'"
         data-nom="'.$nom.'"
         data-prenom="'.$prenom.'"
         data-email="'.$email.'"
-        data-fonction="'.$fonction.'">
+        data-fonction="'.$fonction.'"
+        data-agence-id="'.$agenceId.'">
       <td>'.$id.'</td>
       <td><strong>'.$nom.' '.$prenom.'</strong></td>
       <td>'.$email.'</td>
@@ -107,13 +104,16 @@ function rowHtml($u) {
 }
 
 try {
+    $entrepriseId = (int)($_SESSION['utilisateurs']['entreprise_id'] ?? 0);
+
     // ---------- CREATE ----------
     if ($action === 'create') {
-        $prenom   = trim((string)($_POST['prenom'] ?? ''));
-        $nom      = trim((string)($_POST['nom'] ?? ''));
-        $email    = trim((string)($_POST['email'] ?? ''));
-        $fonction = sanitize_role($_POST['fonction'] ?? 'autre', $ROLE_OPTIONS);
-        $password = (string)($_POST['password'] ?? '');
+        $prenom    = trim((string)($_POST['prenom'] ?? ''));
+        $nom       = trim((string)($_POST['nom'] ?? ''));
+        $email     = trim((string)($_POST['email'] ?? ''));
+        $fonction  = sanitize_role($_POST['fonction'] ?? 'autre', $ROLE_OPTIONS);
+        $password  = (string)($_POST['password'] ?? '');
+        $agence_id = isset($_POST['agence_id']) && $_POST['agence_id'] !== '' ? (int)$_POST['agence_id'] : null;
 
         if ($prenom === '' || $nom === '' || $email === '' || $fonction === '') {
             throw new Exception('Champs obligatoires manquants.');
@@ -125,7 +125,13 @@ try {
             throw new Exception('Mot de passe requis.');
         }
 
-        // unicité email
+        // Vérifier agence si fournie
+        if ($agence_id !== null) {
+            $chk = $pdo->prepare("SELECT 1 FROM agences WHERE id=? AND entreprise_id=? AND actif=1");
+            $chk->execute([$agence_id, $entrepriseId]);
+            if (!$chk->fetch()) $agence_id = null;
+        }
+
         $stmt = $pdo->prepare("SELECT id FROM utilisateurs WHERE email = ?");
         $stmt->execute([$email]);
         if ($stmt->fetch()) {
@@ -134,16 +140,15 @@ try {
 
         $hash = password_hash($password, PASSWORD_DEFAULT);
 
-        // NOTE: colonne motDePasse conforme à ton schéma
         $stmt = $pdo->prepare("
-            INSERT INTO utilisateurs (prenom, nom, email, motDePasse, fonction)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO utilisateurs (prenom, nom, email, motDePasse, fonction, entreprise_id, agence_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         ");
-        $stmt->execute([$prenom, $nom, $email, $hash, $fonction]);
+        $stmt->execute([$prenom, $nom, $email, $hash, $fonction, $entrepriseId, $agence_id]);
 
         $id = (int)$pdo->lastInsertId();
 
-        $u = $pdo->prepare("SELECT id, nom, prenom, email, fonction FROM utilisateurs WHERE id = ?");
+        $u = $pdo->prepare("SELECT id, nom, prenom, email, fonction, agence_id FROM utilisateurs WHERE id = ?");
         $u->execute([$id]);
         $user = $u->fetch(PDO::FETCH_ASSOC);
 
@@ -154,15 +159,14 @@ try {
     // ---------- UPDATE ----------
     if ($action === 'update') {
         $id = (int)($_POST['id'] ?? 0);
-        if ($id <= 0) {
-            throw new Exception('ID invalide.');
-        }
+        if ($id <= 0) throw new Exception('ID invalide.');
 
-        $prenom   = trim((string)($_POST['prenom'] ?? ''));
-        $nom      = trim((string)($_POST['nom'] ?? ''));
-        $email    = trim((string)($_POST['email'] ?? ''));
-        $fonction = sanitize_role($_POST['fonction'] ?? 'autre', $ROLE_OPTIONS);
-        $password = (string)($_POST['password'] ?? '');
+        $prenom    = trim((string)($_POST['prenom'] ?? ''));
+        $nom       = trim((string)($_POST['nom'] ?? ''));
+        $email     = trim((string)($_POST['email'] ?? ''));
+        $fonction  = sanitize_role($_POST['fonction'] ?? 'autre', $ROLE_OPTIONS);
+        $password  = (string)($_POST['password'] ?? '');
+        $agence_id = isset($_POST['agence_id']) && $_POST['agence_id'] !== '' ? (int)$_POST['agence_id'] : null;
 
         if ($prenom === '' || $nom === '' || $email === '' || $fonction === '') {
             throw new Exception('Champs obligatoires manquants.');
@@ -171,7 +175,12 @@ try {
             throw new Exception('Email invalide.');
         }
 
-        // unicité email (autres IDs)
+        if ($agence_id !== null) {
+            $chk = $pdo->prepare("SELECT 1 FROM agences WHERE id=? AND entreprise_id=? AND actif=1");
+            $chk->execute([$agence_id, $entrepriseId]);
+            if (!$chk->fetch()) $agence_id = null;
+        }
+
         $stmt = $pdo->prepare("SELECT id FROM utilisateurs WHERE email = ? AND id <> ?");
         $stmt->execute([$email, $id]);
         if ($stmt->fetch()) {
@@ -183,17 +192,17 @@ try {
                 throw new Exception('Mot de passe trop court (min 6).');
             }
             $hash = password_hash($password, PASSWORD_DEFAULT);
-            $sql = "UPDATE utilisateurs SET prenom = ?, nom = ?, email = ?, fonction = ?, motDePasse = ? WHERE id = ?";
-            $params = [$prenom, $nom, $email, $fonction, $hash, $id];
+            $sql = "UPDATE utilisateurs SET prenom=?, nom=?, email=?, fonction=?, motDePasse=?, agence_id=? WHERE id=?";
+            $params = [$prenom, $nom, $email, $fonction, $hash, $agence_id, $id];
         } else {
-            $sql = "UPDATE utilisateurs SET prenom = ?, nom = ?, email = ?, fonction = ? WHERE id = ?";
-            $params = [$prenom, $nom, $email, $fonction, $id];
+            $sql = "UPDATE utilisateurs SET prenom=?, nom=?, email=?, fonction=?, agence_id=? WHERE id=?";
+            $params = [$prenom, $nom, $email, $fonction, $agence_id, $id];
         }
 
         $upd = $pdo->prepare($sql);
         $upd->execute($params);
 
-        $u = $pdo->prepare("SELECT id, nom, prenom, email, fonction FROM utilisateurs WHERE id = ?");
+        $u = $pdo->prepare("SELECT id, nom, prenom, email, fonction, agence_id FROM utilisateurs WHERE id = ?");
         $u->execute([$id]);
         $user = $u->fetch(PDO::FETCH_ASSOC);
 
@@ -204,9 +213,7 @@ try {
     // ---------- DELETE ----------
     if ($action === 'delete') {
         $id = (int)($_POST['id'] ?? 0);
-        if ($id <= 0) {
-            throw new Exception('ID invalide.');
-        }
+        if ($id <= 0) throw new Exception('ID invalide.');
 
         $del = $pdo->prepare("DELETE FROM utilisateurs WHERE id = ?");
         $del->execute([$id]);

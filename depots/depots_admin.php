@@ -38,7 +38,7 @@ $utilisateurs = $pdo->query("
         placeholder="Rechercher un dépôt...">
 
     <!-- Tableau des dépôts -->
-    <table class="table table-striped table-bordered text-center">
+    <table class="table table-striped table-hover table-bordered text-center">
         <thead class="table-dark">
             <tr>
                 <th>Nom</th>

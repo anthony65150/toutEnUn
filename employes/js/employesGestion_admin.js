@@ -20,6 +20,18 @@ document.addEventListener('DOMContentLoaded', () => {
   const emp_fonction = document.getElementById('emp_fonction');
   const emp_password = document.getElementById('emp_password');
 
+// ---------- AGENCES : éléments ----------
+const emp_agence    = document.getElementById('emp_agence');
+const openAgenceEl  = document.getElementById('openAgenceLink'); // <-- nouveau (lien)
+const agenceModalEl = document.getElementById('agenceModal');
+const agenceModal   = agenceModalEl ? new bootstrap.Modal(agenceModalEl) : null;
+const agenceForm    = document.getElementById('agenceForm');
+const API_AGENCES   = '/agences/api.php';
+const filterWrap = document.getElementById('agenceFilters');
+let selectedAgence = ''; // '' = Tous
+
+
+
   // IMPORTANT: URL absolue pour éviter les problèmes de chemin
   const ACTION_URL = '/employes/employes_actions.php';
 
@@ -46,17 +58,27 @@ document.addEventListener('DOMContentLoaded', () => {
       .replace(/[\u0300-\u036f]/g, '')
       .trim();
 
-  const applyFilter = () => {
-    if (!searchInput || !tableBody) return;
-    const q = normalize(searchInput.value);
-    let visible = 0;
-    rows().forEach(tr => {
-      const show = !q || normalize(tr.textContent).includes(q);
-      tr.style.display = show ? '' : 'none';
-      if (show) visible++;
-    });
-    if (noRow) noRow.classList.toggle('d-none', visible !== 0);
-  };
+ const applyFilter = () => {
+  if (!searchInput || !tableBody) return;
+  const q = normalize(searchInput.value);
+  let visible = 0;
+
+  rows().forEach(tr => {
+    const agencyId = tr.getAttribute('data-agence-id') || '';
+    const matchesAgence =
+      selectedAgence === ''                       // Tous
+      || (selectedAgence === '0' && (agencyId === '' || agencyId === '0'))  // Sans agence
+      || agencyId === selectedAgence;            // Agence précise
+
+    const matchesSearch = (!q || normalize(tr.textContent).includes(q));
+
+    const show = matchesAgence && matchesSearch;
+    tr.style.display = show ? '' : 'none';
+    if (show) visible++;
+  });
+
+  if (noRow) noRow.classList.toggle('d-none', visible !== 0);
+};
 
   let debounce;
   searchInput?.addEventListener('input', () => {
@@ -65,17 +87,104 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   // ---------------------------------------
 
+  // ---------- AGENCES : helpers ----------
+  async function loadAgences(preselect = '') {
+    if (!emp_agence || !window.Agences) return;
+    await window.Agences.loadIntoSelect(emp_agence, {
+      includePlaceholder: true,
+      preselect: preselect ? String(preselect) : ''
+    });
+  }
+  // ---- OUVERTURE de la mini-modale "Ajouter une agence" ----
+openAgenceEl?.addEventListener('click', (e) => {
+  e.preventDefault();
+
+  const el = document.getElementById('agenceModal');
+  if (!el) return;
+
+  // Si par erreur la mini-modale est imbriquée dans la grande, on la déplace sous <body>
+  if (el.closest('#employeModal')) {
+    document.body.appendChild(el);
+  }
+
+  agenceForm?.reset();
+
+  // (Re)crée ou récupère l'instance au clic pour plus de fiabilité
+  const inst = bootstrap.Modal.getOrCreateInstance(el, { backdrop: true, keyboard: true });
+  inst.show();
+});
+
+// Récupère la liste des agences via l'API
+async function fetchAgences() {
+  try {
+    const res = await fetch('/agences/api.php?action=list', { credentials: 'same-origin' });
+    const data = await res.json();
+    return (data && data.ok && Array.isArray(data.items)) ? data.items : [];
+  } catch (e) {
+    console.error('fetchAgences error', e);
+    return [];
+  }
+}
+
+async function buildAgenceFilters() {
+  if (!filterWrap) return;
+  const agences = await fetchAgences();
+
+  const size = 'btn-md px-4 py-2'; // <- la taille des boutons (gros)
+  filterWrap.innerHTML = `
+    <button type="button" class="btn btn-primary ${size} filter-agence active" data-agence="">
+      Tous
+    </button>
+    <button type="button" class="btn btn-outline-secondary ${size} filter-agence" data-agence="0">
+      Sans agence
+    </button>
+    ${agences.map(a => `
+      <button type="button" class="btn btn-outline-primary ${size} filter-agence" data-agence="${a.id}">
+        ${a.nom}
+      </button>
+    `).join('')}
+  `;
+}
+
+
+// Gestion des clics sur la barre de filtres
+filterWrap?.addEventListener('click', (e) => {
+  const btn = e.target.closest('.filter-agence');
+  if (!btn) return;
+
+  selectedAgence = btn.getAttribute('data-agence') || '';
+
+  // État visuel
+  filterWrap.querySelectorAll('.filter-agence').forEach(b => {
+    b.classList.remove('active', 'btn-primary');
+    if (b.classList.contains('btn-outline-secondary')) return; // laisse le style "Sans agence"
+    b.classList.add('btn-outline-primary');
+  });
+  btn.classList.add('active');
+  if (btn.classList.contains('btn-outline-primary')) {
+    btn.classList.remove('btn-outline-primary');
+    btn.classList.add('btn-primary');
+  }
+
+  applyFilter();
+});
+
+
+
   // Ouvrir modale en création
-  document.querySelector('[data-bs-target="#employeModal"]')?.addEventListener('click', () => {
+  document.querySelector('[data-bs-target="#employeModal"]')?.addEventListener('click', async () => {
     if (!form) return;
     title && (title.textContent = 'Ajouter un employé');
     form.reset();
     if (emp_id) emp_id.value = '';
     if (emp_password) emp_password.required = true; // mdp requis en création
+
+    // AGENCES: charger la liste (pas de présélection)
+    await loadAgences('');
   });
 
   // Édition (délégation)
-  tableBody?.addEventListener('click', (e) => {
+  tableBody?.addEventListener('click', async (e) => {
     const btn = e.target.closest?.('.edit-btn');
     if (!btn) return;
 
@@ -93,8 +202,52 @@ document.addEventListener('DOMContentLoaded', () => {
       emp_password.required = false; // pas requis en modification
     }
 
+    // AGENCES: récupérer l'id stocké en data-agence-id sur la <tr> (ajoute l'attribut côté PHP)
+    const agenceIdFromRow = tr.getAttribute('data-agence-id') || '';
+
+    // On charge, puis on présélectionne la valeur existante (si présente)
+    await loadAgences(agenceIdFromRow);
+    await buildAgenceFilters();   // met à jour les chips avec la nouvelle agence
+
     employeModal.show();
   });
+
+// ---------- AGENCES : mini-modale ----------
+let creatingAgence = false; // <-- garde-fou global
+
+agenceForm?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (creatingAgence) return;
+  creatingAgence = true;
+
+  const submitBtn = agenceForm.querySelector('button[type="submit"]');
+  submitBtn?.setAttribute('disabled','disabled');
+
+  const fd = new FormData(agenceForm);
+  fd.append('action','create');
+
+  try {
+    const res = await fetch(API_AGENCES, { method:'POST', body: fd, credentials:'same-origin' });
+    const data = await res.json();
+
+    if (!data || !data.ok || !data.id) {
+      alert((data && data.msg) || 'Erreur lors de la création de l’agence');
+      return;
+    }
+
+    // Que l’agence soit nouvelle ou déjà existante -> on sélectionne et on ferme
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('agenceModal')).hide();
+    await loadAgences(String(data.id)); // recharge la liste et présélectionne
+  } catch (err) {
+    console.error(err);
+    alert('Erreur réseau (agences).');
+  } finally {
+    creatingAgence = false;
+    submitBtn?.removeAttribute('disabled');
+  }
+});
+
+
 
   // Suppression (délégation)
   tableBody?.addEventListener('click', (e) => {
@@ -212,6 +365,6 @@ document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => row.classList.remove('table-warning'), 3000);
   }
 
-  // Premier filtrage au chargement (si champ pré-rempli)
-  applyFilter();
-});
+// Construire les filtres puis appliquer le filtrage initial
+buildAgenceFilters().then(applyFilter);
+})

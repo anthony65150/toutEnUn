@@ -37,7 +37,7 @@ $chantiers = $pdo->query("SELECT id, nom, description, date_debut, date_fin FROM
   <input type="text" id="chantierSearchInput" class="form-control mb-4" placeholder="Rechercher un chantier..." autocomplete="off" />
 
   <!-- Tableau des chantiers -->
-  <table class="table table-striped table-bordered text-center">
+  <table class="table table-striped table-hover table-bordered text-center">
     <thead class="table-dark">
       <tr>
         <th>Nom</th>
