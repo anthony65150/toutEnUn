@@ -7,37 +7,43 @@ if (!isset($_SESSION['utilisateurs']) || ($_SESSION['utilisateurs']['fonction'] 
   exit;
 }
 
+$entrepriseId = (int)($_SESSION['entreprise_id'] ?? 0);
+if (!$entrepriseId) {
+  // Pas d'entreprise sélectionnée : on bloque proprement
+  http_response_code(403);
+  exit('Entreprise non définie dans la session.');
+}
+
 /* ====== CSRF ====== */
 if (empty($_SESSION['csrf_token'])) {
   $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
 }
 $csrf = $_SESSION['csrf_token'];
 
-/* ====== Liste des chefs (pour les modales) ====== */
-$chefsOptions = $pdo->query("
+/* ====== Liste des chefs (même entreprise) ====== */
+$stChefs = $pdo->prepare("
   SELECT id, prenom, nom
   FROM utilisateurs
-  WHERE fonction = 'chef'
+  WHERE fonction = 'chef' AND entreprise_id = :eid
   ORDER BY prenom, nom
-")->fetchAll(PDO::FETCH_ASSOC);
+");
+$stChefs->execute([':eid' => $entrepriseId]);
+$chefsOptions = $stChefs->fetchAll(PDO::FETCH_ASSOC);
 
 /* ====== Données chantiers ======
    Chef principal = chantiers.responsable_id
    Autres chefs   = utilisateur_chantiers (fonction = 'chef', hors responsable)
    Équipe         = affectations du jour (hors chefs)
 */
-$today        = (new DateTime('today'))->format('Y-m-d');
-$entrepriseId = (int)($_SESSION['entreprise_id'] ?? 0);
+$today = (new DateTime('today'))->format('Y-m-d');
 
 $sql = "
 SELECT
   c.id, c.nom, c.description, c.date_debut, c.date_fin,
 
-  -- Responsable (chef principal)
-  ur.id          AS resp_id,
+  ur.id AS resp_id,
   CONCAT(COALESCE(ur.prenom,''), ' ', COALESCE(ur.nom,'')) AS resp_nom,
 
-  -- Équipe du jour (hors chefs)
   GROUP_CONCAT(DISTINCT
     CASE WHEN u_all.fonction <> 'chef'
          THEN CONCAT(u_all.prenom,' ',u_all.nom)
@@ -45,7 +51,6 @@ SELECT
     ORDER BY u_all.prenom, u_all.nom SEPARATOR ', '
   ) AS equipe,
 
-  -- Autres chefs déclarés via liaisons (hors responsable)
   GROUP_CONCAT(DISTINCT
     CASE WHEN u_chef.id IS NOT NULL AND u_chef.id <> c.responsable_id
          THEN CONCAT(u_chef.prenom,' ',u_chef.nom)
@@ -53,33 +58,40 @@ SELECT
     ORDER BY u_chef.prenom, u_chef.nom SEPARATOR ', '
   ) AS autres_chefs,
 
-  -- Liste d'IDs pour pré-sélection dans la modale
   GROUP_CONCAT(DISTINCT u_chef.id) AS chef_ids_all
 
 FROM chantiers c
 LEFT JOIN utilisateurs ur
        ON ur.id = c.responsable_id
 
--- Affectations du jour (équipe)
 LEFT JOIN planning_affectations pa
        ON pa.chantier_id = c.id
       AND pa.date_jour   = :d
-      AND pa.entreprise_id = :eid
+      AND pa.entreprise_id = :eid1
 LEFT JOIN utilisateurs u_all
        ON u_all.id = pa.utilisateur_id
 
--- Chefs déclarés (liaisons)
 LEFT JOIN utilisateur_chantiers uc
        ON uc.chantier_id = c.id
+      AND uc.entreprise_id = :eid2
 LEFT JOIN utilisateurs u_chef
        ON u_chef.id = uc.utilisateur_id
       AND u_chef.fonction = 'chef'
+      AND u_chef.entreprise_id = :eid3
 
+WHERE c.entreprise_id = :eid4
 GROUP BY c.id
 ORDER BY c.nom
 ";
 $st = $pdo->prepare($sql);
-$st->execute([':d' => $today, ':eid' => $entrepriseId ?: 0]);
+$st->execute([
+  ':d'    => $today,
+  ':eid1' => $entrepriseId,
+  ':eid2' => $entrepriseId,
+  ':eid3' => $entrepriseId,
+  ':eid4' => $entrepriseId,
+]);
+
 $rows = $st->fetchAll(PDO::FETCH_ASSOC);
 
 require_once __DIR__ . '/../templates/header.php';
@@ -120,7 +132,6 @@ require_once __DIR__ . '/../templates/navigation/navigation.php';
 
           <td class="text-center">
             <?php if (!empty($c['resp_nom'])): ?>
-
               <?= htmlspecialchars($c['resp_nom']) ?>
               <?php if (!empty($c['autres_chefs'])): ?>
                 <div class="small text-muted">+ <?= htmlspecialchars($c['autres_chefs']) ?></div>
@@ -167,6 +178,7 @@ require_once __DIR__ . '/../templates/navigation/navigation.php';
   <div class="modal-dialog">
     <form method="post" action="ajouterChantier.php" id="chantierForm">
       <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf) ?>">
+      <input type="hidden" name="entreprise_id" value="<?= (int)$entrepriseId ?>">
       <div class="modal-content">
         <div class="modal-header">
           <h5 class="modal-title" id="chantierModalLabel">Créer un chantier</h5>
@@ -215,6 +227,7 @@ require_once __DIR__ . '/../templates/navigation/navigation.php';
   <div class="modal-dialog">
     <form method="post" action="ajouterChantier.php" id="chantierEditForm">
       <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf) ?>">
+      <input type="hidden" name="entreprise_id" value="<?= (int)$entrepriseId ?>">
       <input type="hidden" name="chantier_id" id="chantierIdEdit" value="">
       <div class="modal-content">
         <div class="modal-header">

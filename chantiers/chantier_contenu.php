@@ -1,69 +1,84 @@
 <?php
 require_once __DIR__ . '/../config/init.php';
-require_once __DIR__ . '/../templates/header.php';
-require_once __DIR__ . '/../templates/navigation/navigation.php';
 
 if (!isset($_SESSION['utilisateurs'])) {
     header("Location: /connexion.php");
     exit;
 }
+$entrepriseId = (int)($_SESSION['entreprise_id'] ?? 0);
+if (!$entrepriseId) {
+    http_response_code(403);
+    exit('Entreprise non définie.');
+}
 
 $user = $_SESSION['utilisateurs'];
 $role = $user['fonction'] ?? null;
 
+/* ===== ID chantier depuis ?id ou ?chantier_id ===== */
 $chantierId = 0;
 if (isset($_GET['chantier_id'])) {
     $chantierId = (int)$_GET['chantier_id'];
 } elseif (isset($_GET['id'])) {
     $chantierId = (int)$_GET['id'];
 }
-
 if (!$chantierId) {
+    require_once __DIR__ . '/../templates/header.php';
+    require_once __DIR__ . '/../templates/navigation/navigation.php';
     echo '<div class="container mt-4 alert alert-danger">ID de chantier manquant.</div>';
     require_once __DIR__ . '/../templates/footer.php';
     exit;
 }
 
-// Listes pour la modale transfert
-$allChantiers = $pdo->query("SELECT id, nom FROM chantiers")->fetchAll(PDO::FETCH_KEY_PAIR);
-$allDepots    = $pdo->query("SELECT id, nom FROM depots")->fetchAll(PDO::FETCH_KEY_PAIR);
-
-// Récup infos chantier
-$stmtCh = $pdo->prepare("SELECT id, nom FROM chantiers WHERE id = ?");
-$stmtCh->execute([$chantierId]);
-$chantier = $stmtCh->fetch(PDO::FETCH_ASSOC);
+/* ===== Charger le chantier de l’entreprise ===== */
+$stCh = $pdo->prepare("SELECT id, nom FROM chantiers WHERE id = ? AND entreprise_id = ?");
+$stCh->execute([$chantierId, $entrepriseId]);
+$chantier = $stCh->fetch(PDO::FETCH_ASSOC);
 
 if (!$chantier) {
-    echo '<div class="container mt-4 alert alert-danger">Chantier introuvable.</div>';
+    require_once __DIR__ . '/../templates/header.php';
+    require_once __DIR__ . '/../templates/navigation/navigation.php';
+    echo '<div class="container mt-4 alert alert-danger">Chantier introuvable pour cette entreprise.</div>';
     require_once __DIR__ . '/../templates/footer.php';
     exit;
 }
 
-/**
- * Sécurité :
- * - administrateur : OK
- * - chef : OK si assigné à ce chantier (utilisateur_chantiers)
- */
+/* ===== Droits d’accès =====
+   - admin : OK
+   - chef  : OK s’il est assigné à ce chantier dans la même entreprise
+*/
 $allowed = false;
 if ($role === 'administrateur') {
     $allowed = true;
 } elseif ($role === 'chef') {
+    // si votre table utilisateur_chantiers n’a pas entreprise_id, supprimez la condition AND entreprise_id = :eid
     $stmtAuth = $pdo->prepare("
-        SELECT 1 FROM utilisateur_chantiers 
-        WHERE utilisateur_id = ? AND chantier_id = ? LIMIT 1
+        SELECT 1 FROM utilisateur_chantiers
+        WHERE utilisateur_id = :uid AND chantier_id = :cid AND entreprise_id = :eid
+        LIMIT 1
     ");
-    $stmtAuth->execute([(int)$user['id'], $chantierId]);
+    $stmtAuth->execute([':uid' => (int)$user['id'], ':cid' => $chantierId, ':eid' => $entrepriseId]);
     $allowed = (bool)$stmtAuth->fetchColumn();
 }
 if (!$allowed) {
+    require_once __DIR__ . '/../templates/header.php';
+    require_once __DIR__ . '/../templates/navigation/navigation.php';
     echo '<div class="container mt-4 alert alert-danger">Accès refusé.</div>';
     require_once __DIR__ . '/../templates/footer.php';
     exit;
 }
 
-/** ----------------- Données (uniquement pour CE chantier) ----------------- */
+/* ===== Listes pour la modale transfert (scopées entreprise) ===== */
+$allChantiers = $pdo->prepare("SELECT id, nom FROM chantiers WHERE entreprise_id = ? ORDER BY nom");
+$allChantiers->execute([$entrepriseId]);
+$allChantiers = $allChantiers->fetchAll(PDO::FETCH_KEY_PAIR);
 
-// Articles présents sur le chantier
+$allDepots = $pdo->prepare("SELECT id, nom FROM depots WHERE entreprise_id = ? ORDER BY nom");
+$allDepots->execute([$entrepriseId]);
+$allDepots = $allDepots->fetchAll(PDO::FETCH_KEY_PAIR);
+
+/* ===== Données stock de CE chantier =====
+   Si stock_chantiers n’a pas entreprise_id, on sécurise via un JOIN chantiers c (qui lui l’a).
+*/
 $sql = "
     SELECT 
         s.id             AS article_id,
@@ -74,55 +89,58 @@ $sql = "
         SUM(COALESCE(sc.quantite,0)) AS quantite
     FROM stock s
     JOIN stock_chantiers sc ON sc.stock_id = s.id
-    WHERE sc.chantier_id = :chantier_id
+    JOIN chantiers c        ON c.id = sc.chantier_id
+    WHERE sc.chantier_id = :cid
+      AND c.entreprise_id = :eid
       AND COALESCE(sc.quantite,0) > 0
     GROUP BY s.id, s.nom, s.photo, s.categorie, s.sous_categorie
     ORDER BY s.nom ASC
 ";
 $stmt = $pdo->prepare($sql);
-$stmt->execute([':chantier_id' => $chantierId]);
+$stmt->execute([':cid' => $chantierId, ':eid' => $entrepriseId]);
 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Catégories présentes sur CE chantier
+/* Catégories présentes sur CE chantier */
 $stmtCats = $pdo->prepare("
     SELECT DISTINCT s.categorie
     FROM stock s
     JOIN stock_chantiers sc ON sc.stock_id = s.id
-    WHERE sc.chantier_id = :chantier_id
+    JOIN chantiers c        ON c.id = sc.chantier_id
+    WHERE sc.chantier_id = :cid
+      AND c.entreprise_id = :eid
       AND COALESCE(sc.quantite,0) > 0
       AND s.categorie IS NOT NULL AND s.categorie <> ''
     ORDER BY s.categorie
 ");
-$stmtCats->execute([':chantier_id' => $chantierId]);
+$stmtCats->execute([':cid' => $chantierId, ':eid' => $entrepriseId]);
 $categories = $stmtCats->fetchAll(PDO::FETCH_COLUMN);
 
-// Sous-catégories groupées
+/* Sous-catégories groupées */
 $stmtSubs = $pdo->prepare("
     SELECT DISTINCT s.categorie, s.sous_categorie
     FROM stock s
     JOIN stock_chantiers sc ON sc.stock_id = s.id
-    WHERE sc.chantier_id = :chantier_id
+    JOIN chantiers c        ON c.id = sc.chantier_id
+    WHERE sc.chantier_id = :cid
+      AND c.entreprise_id = :eid
       AND COALESCE(sc.quantite,0) > 0
       AND s.sous_categorie IS NOT NULL AND s.sous_categorie <> ''
 ");
-$stmtSubs->execute([':chantier_id' => $chantierId]);
+$stmtSubs->execute([':cid' => $chantierId, ':eid' => $entrepriseId]);
 $subCategoriesGrouped = [];
 foreach ($stmtSubs->fetchAll(PDO::FETCH_ASSOC) as $r) {
     $subCategoriesGrouped[$r['categorie']][] = $r['sous_categorie'];
 }
-// déduplication
 foreach ($subCategoriesGrouped as $k => $arr) {
     $subCategoriesGrouped[$k] = array_values(array_unique($arr));
 }
-?>
 
+/* ======= OUTPUT ======= */
+require_once __DIR__ . '/../templates/header.php';
+require_once __DIR__ . '/../templates/navigation/navigation.php';
+?>
 <style>
-    /* même rendu que dépôt : lien article bleu non souligné */
-    .article-name,
-    .article-name:hover,
-    .article-name:focus {
-        text-decoration: none !important;
-    }
+    .article-name, .article-name:hover, .article-name:focus { text-decoration: none !important; }
 </style>
 
 <div class="container mt-4">
@@ -267,6 +285,9 @@ foreach ($subCategoriesGrouped as $k => $arr) {
         </div>
     </div>
 </div>
+<script>
+  window.CSRF_TOKEN = "<?= htmlspecialchars($_SESSION['csrf_token'] ?? '') ?>";
+</script>
 
 <script>
     window.subCategories = <?= json_encode($subCategoriesGrouped) ?>;
