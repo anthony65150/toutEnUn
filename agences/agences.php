@@ -1,23 +1,27 @@
 <?php
 // /agences/agences.php
 require_once __DIR__ . '/../config/init.php';
+requireAuthPage();
 
-if (!isset($_SESSION['utilisateurs'])) { header('Location: /connexion.php'); exit; }
+if (!isset($_SESSION['utilisateurs']) || empty($_SESSION['entreprise_id'])) {
+  header('Location: /connexion.php'); exit;
+}
+
 // Option: restreindre aux admins
 // if (($_SESSION['utilisateurs']['fonction'] ?? '') !== 'administrateur') { header('Location: /'); exit; }
 
-$csrf = htmlspecialchars($_SESSION['csrf_token'] ?? '');
+$csrf = htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES, 'UTF-8');
 ?>
 <?php require_once __DIR__ . '/../templates/header.php'; ?>
 
 <div class="container my-4">
   <div class="d-flex align-items-center justify-content-between mb-3">
     <h1 class="h3 mb-0">Agences</h1>
-    <button class="btn btn-primary" id="btnNewAgence">+ Nouvelle agence</button>
+    <button class="btn btn-primary" id="btnNewAgence" type="button">+ Nouvelle agence</button>
   </div>
 
   <div class="mb-3">
-    <input id="agenceSearch" type="search" class="form-control" placeholder="Rechercher une agence...">
+    <input id="agenceSearch" type="search" class="form-control" placeholder="Rechercher une agence..." autocomplete="off">
   </div>
 
   <div class="table-responsive">
@@ -36,9 +40,9 @@ $csrf = htmlspecialchars($_SESSION['csrf_token'] ?? '');
 </div>
 
 <!-- Modal create/edit -->
-<div class="modal fade" id="agenceEditModal" tabindex="-1" aria-hidden="true">
+<div class="modal fade" id="agenceEditModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
   <div class="modal-dialog">
-    <form class="modal-content" id="agenceEditForm">
+    <form class="modal-content" id="agenceEditForm" novalidate>
       <div class="modal-header">
         <h5 class="modal-title">Agence</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
@@ -47,11 +51,12 @@ $csrf = htmlspecialchars($_SESSION['csrf_token'] ?? '');
         <input type="hidden" name="csrf_token" value="<?= $csrf ?>">
         <input type="hidden" name="id" id="agenceId">
         <div class="mb-3">
-          <label class="form-label">Nom</label>
+          <label for="agenceNom" class="form-label">Nom</label>
           <input type="text" name="nom" id="agenceNom" class="form-control" required>
+          <div class="invalid-feedback">Le nom est obligatoire.</div>
         </div>
         <div class="mb-3">
-          <label class="form-label">Adresse (optionnel)</label>
+          <label for="agenceAdresse" class="form-label">Adresse (optionnel)</label>
           <input type="text" name="adresse" id="agenceAdresse" class="form-control">
         </div>
       </div>
@@ -65,4 +70,5 @@ $csrf = htmlspecialchars($_SESSION['csrf_token'] ?? '');
 
 <?php require_once __DIR__ . '/../templates/footer.php'; ?>
 
-<script src="/agences/js/agences.js"></script>
+<!-- Important: même nom de champ CSRF que dans l'API -->
+<script defer src="/agences/js/agences.js?v=1"></script>

@@ -303,3 +303,87 @@ body.dark-mode .navbar-toggler-icon {
 .history-table td.text-nowrap {
   white-space: nowrap;
 }
+
+/* ============================
+   Planning (drag & drop employés)
+   ============================ */
+
+.dropzone {
+    min-height: 300px;
+    border: 1px dashed #cfd6e4;
+    border-radius: 12px;
+    padding: 8px;
+}
+
+.dropzone.empty::after {
+    content: "Glissez ici";
+    opacity: .5;
+    display: block;
+    text-align: center;
+    margin-top: 110px;
+}
+
+.emp-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: .5rem;
+    cursor: grab;
+}
+
+.emp-badge:active {
+    cursor: grabbing;
+}
+
+.emp-badge .avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: #0d6efd;
+    color: #fff;
+    display: inline-grid;
+    place-items: center;
+    font-weight: 700;
+}
+
+
+
+/* Pastilles Planning selon rôle */
+.emp-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  cursor: grab;
+}
+
+.emp-badge:active {
+  cursor: grabbing;
+}
+
+/* Chef : orange */
+.emp-chef {
+  background-color: #fd7e14 !important; /* orange bootstrap */
+  color: #fff !important;
+}
+
+/* Employé : bleu */
+.emp-employe {
+  background-color: #0d6efd !important; /* bleu bootstrap */
+  color: #fff !important;
+}
+
+/* Intérim : gris */
+.emp-interim {
+  background-color: #6c757d !important; /* gris bootstrap */
+  color: #fff !important;
+}
+
+.emp-badge .avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.3);
+  color: #fff;
+  display: inline-grid;
+  place-items: center;
+  font-weight: 700;
+}

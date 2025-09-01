@@ -55,11 +55,17 @@ function badgeRole($role)
 <div class="container mt-4">
     <h1 class="mb-4 text-center">Employés</h1>
 
-    <div class="d-flex justify-content-center mb-3">
+       <div class="d-flex justify-content-center mb-3 gap-2">
         <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#employeModal">
             + Ajouter un employé
         </button>
+
+        <!-- bouton Planning -->
+        <a href="planning.php" class="btn btn-success">
+            📅 Planning
+        </a>
     </div>
+    
     <div id="agenceFilters" class="mb-3 d-flex flex-wrap gap-2 justify-content-center"></div>
 
 
@@ -279,3 +285,5 @@ function badgeRole($role)
 
 
 <?php require_once __DIR__ . '/../templates/footer.php'; ?>
+
+

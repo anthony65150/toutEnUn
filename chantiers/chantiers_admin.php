@@ -1,11 +1,9 @@
 <?php
 require_once __DIR__ . '/../config/init.php';
-require_once __DIR__ . '/../templates/header.php';
-require_once __DIR__ . '/../templates/navigation/navigation.php';
 
-// Vérifier si admin connecté
+// === Sécurité : vérifier admin AVANT tout output ===
 if (!isset($_SESSION['utilisateurs']) || ($_SESSION['utilisateurs']['fonction'] ?? '') !== 'administrateur') {
-  header("Location: connexion.php");
+  header("Location: /connexion.php");
   exit;
 }
 
@@ -15,14 +13,77 @@ if (empty($_SESSION['csrf_token'])) {
 }
 $csrf = $_SESSION['csrf_token'];
 
-/* ====== Liste chefs (pour les modales) ====== */
-$chefsOptions = $pdo->query("SELECT id, prenom, nom FROM utilisateurs WHERE fonction = 'chef' ORDER BY prenom, nom")
-  ->fetchAll(PDO::FETCH_ASSOC);
+/* ====== Liste des chefs (pour les modales) ====== */
+$chefsOptions = $pdo->query("
+  SELECT id, prenom, nom
+  FROM utilisateurs
+  WHERE fonction = 'chef'
+  ORDER BY prenom, nom
+")->fetchAll(PDO::FETCH_ASSOC);
 
-/* ====== Données chantiers ====== */
-$chantiers = $pdo->query("SELECT id, nom, description, date_debut, date_fin FROM chantiers ORDER BY id DESC")
-  ->fetchAll(PDO::FETCH_ASSOC);
+/* ====== Données chantiers ======
+   Chef principal = chantiers.responsable_id
+   Autres chefs   = utilisateur_chantiers (fonction = 'chef', hors responsable)
+   Équipe         = affectations du jour (hors chefs)
+*/
+$today        = (new DateTime('today'))->format('Y-m-d');
+$entrepriseId = (int)($_SESSION['entreprise_id'] ?? 0);
 
+$sql = "
+SELECT
+  c.id, c.nom, c.description, c.date_debut, c.date_fin,
+
+  -- Responsable (chef principal)
+  ur.id          AS resp_id,
+  CONCAT(COALESCE(ur.prenom,''), ' ', COALESCE(ur.nom,'')) AS resp_nom,
+
+  -- Équipe du jour (hors chefs)
+  GROUP_CONCAT(DISTINCT
+    CASE WHEN u_all.fonction <> 'chef'
+         THEN CONCAT(u_all.prenom,' ',u_all.nom)
+         ELSE NULL END
+    ORDER BY u_all.prenom, u_all.nom SEPARATOR ', '
+  ) AS equipe,
+
+  -- Autres chefs déclarés via liaisons (hors responsable)
+  GROUP_CONCAT(DISTINCT
+    CASE WHEN u_chef.id IS NOT NULL AND u_chef.id <> c.responsable_id
+         THEN CONCAT(u_chef.prenom,' ',u_chef.nom)
+         ELSE NULL END
+    ORDER BY u_chef.prenom, u_chef.nom SEPARATOR ', '
+  ) AS autres_chefs,
+
+  -- Liste d'IDs pour pré-sélection dans la modale
+  GROUP_CONCAT(DISTINCT u_chef.id) AS chef_ids_all
+
+FROM chantiers c
+LEFT JOIN utilisateurs ur
+       ON ur.id = c.responsable_id
+
+-- Affectations du jour (équipe)
+LEFT JOIN planning_affectations pa
+       ON pa.chantier_id = c.id
+      AND pa.date_jour   = :d
+      AND pa.entreprise_id = :eid
+LEFT JOIN utilisateurs u_all
+       ON u_all.id = pa.utilisateur_id
+
+-- Chefs déclarés (liaisons)
+LEFT JOIN utilisateur_chantiers uc
+       ON uc.chantier_id = c.id
+LEFT JOIN utilisateurs u_chef
+       ON u_chef.id = uc.utilisateur_id
+      AND u_chef.fonction = 'chef'
+
+GROUP BY c.id
+ORDER BY c.nom
+";
+$st = $pdo->prepare($sql);
+$st->execute([':d' => $today, ':eid' => $entrepriseId ?: 0]);
+$rows = $st->fetchAll(PDO::FETCH_ASSOC);
+
+require_once __DIR__ . '/../templates/header.php';
+require_once __DIR__ . '/../templates/navigation/navigation.php';
 ?>
 <div class="container mt-4">
   <h1 class="mb-4 text-center">Gestion des chantiers</h1>
@@ -36,74 +97,67 @@ $chantiers = $pdo->query("SELECT id, nom, description, date_debut, date_fin FROM
 
   <input type="text" id="chantierSearchInput" class="form-control mb-4" placeholder="Rechercher un chantier..." autocomplete="off" />
 
-  <!-- Tableau des chantiers -->
   <table class="table table-striped table-hover table-bordered text-center">
     <thead class="table-dark">
       <tr>
         <th>Nom</th>
-        <th>Chefs assignés</th>
+        <th>Chef</th>
+        <th>Équipe (aujourd’hui)</th>
         <th>Date début</th>
         <th>Date fin</th>
         <th>Actions</th>
       </tr>
     </thead>
     <tbody id="chantiersTableBody">
-      <?php
-      // Préparer requête pour chefs par chantier
-      $stmtChefs = $pdo->prepare("
-            SELECT u.id, u.prenom, u.nom
-            FROM utilisateurs u
-            JOIN utilisateur_chantiers uc ON uc.utilisateur_id = u.id
-            WHERE uc.chantier_id = ?
-            ORDER BY u.prenom, u.nom
-        ");
+      <?php foreach ($rows as $c): ?>
+        <tr class="align-middle" data-row-id="<?= (int)$c['id'] ?>">
+          <td>
+            <a class="link-primary fw-semibold text-decoration-none"
+              href="chantier_contenu.php?id=<?= (int)$c['id'] ?>">
+              <?= htmlspecialchars($c['nom']) ?>
+            </a>
+          </td>
 
-      foreach ($chantiers as $chantier) {
-        $stmtChefs->execute([$chantier['id']]);
-        $chefsOf = $stmtChefs->fetchAll(PDO::FETCH_ASSOC);
-        $chefsText = $chefsOf
-          ? implode(', ', array_map(fn($c) => htmlspecialchars($c['prenom'] . ' ' . $c['nom']), $chefsOf))
-          : '<span class="text-muted">—</span>';
+          <td class="text-center">
+            <?php if (!empty($c['resp_nom'])): ?>
 
-        $highlight = (isset($_GET['highlight']) && (int)$_GET['highlight'] === (int)$chantier['id']) ? 'table-success' : '';
+              <?= htmlspecialchars($c['resp_nom']) ?>
+              <?php if (!empty($c['autres_chefs'])): ?>
+                <div class="small text-muted">+ <?= htmlspecialchars($c['autres_chefs']) ?></div>
+              <?php endif; ?>
+            <?php else: ?>
+              <span class="text-muted">—</span>
+            <?php endif; ?>
+          </td>
 
-        echo '<tr class="align-middle ' . $highlight . '" data-row-id="' . (int)$chantier['id'] . '">';
-        echo '<td>
-                    <a class="link-primary fw-semibold text-decoration-none"
-                       href="chantier_contenu.php?id=' . (int)$chantier['id'] . '">
-                       ' . htmlspecialchars($chantier['nom']) . '
-                    </a>
-                  </td>';
-        echo '<td>' . $chefsText . '</td>';
-        echo '<td>' . htmlspecialchars($chantier['date_debut'] ?? '') . '</td>';
-        echo '<td>' . htmlspecialchars($chantier['date_fin'] ?? '') . '</td>';
+          <td class="text-start">
+            <?= $c['equipe'] ? htmlspecialchars($c['equipe']) : '<span class="text-muted">—</span>' ?>
+          </td>
 
-        // Pour le bouton éditer, on passe aussi la liste des chefs (IDs) en data attr
-        $chefIds = $chefsOf ? implode(',', array_map(fn($c) => $c['id'], $chefsOf)) : '';
-        echo '<td>
-                    <button class="btn btn-sm btn-warning edit-btn"
-                        data-bs-toggle="modal"
-                        data-bs-target="#chantierEditModal"
-                        data-id="' . (int)$chantier['id'] . '"
-                        data-nom="' . htmlspecialchars($chantier['nom']) . '"
-                        data-description="' . htmlspecialchars($chantier['description'] ?? '') . '"
-                        data-debut="' . htmlspecialchars($chantier['date_debut'] ?? '') . '"
-                        data-fin="' . htmlspecialchars($chantier['date_fin'] ?? '') . '"
-                        data-chef-ids="' . $chefIds . '"
-                        title="Modifier">
-                        <i class="bi bi-pencil-fill"></i>
-                    </button>
-                    <button class="btn btn-sm btn-danger delete-btn"
-                        data-bs-toggle="modal"
-                        data-bs-target="#deleteModal"
-                        data-id="' . (int)$chantier['id'] . '"
-                        title="Supprimer">
-                        <i class="bi bi-trash-fill"></i>
-                    </button>
-                  </td>';
-        echo '</tr>';
-      }
-      ?>
+          <td><?= htmlspecialchars($c['date_debut'] ?? '') ?></td>
+          <td><?= htmlspecialchars($c['date_fin'] ?? '') ?></td>
+
+          <td>
+            <button class="btn btn-sm btn-warning edit-btn"
+              data-bs-toggle="modal" data-bs-target="#chantierEditModal"
+              data-id="<?= (int)$c['id'] ?>"
+              data-nom="<?= htmlspecialchars($c['nom']) ?>"
+              data-description="<?= htmlspecialchars($c['description'] ?? '') ?>"
+              data-debut="<?= htmlspecialchars($c['date_debut'] ?? '') ?>"
+              data-fin="<?= htmlspecialchars($c['date_fin'] ?? '') ?>"
+              data-chef-ids="<?= htmlspecialchars($c['chef_ids_all'] ?? '') ?>"
+              title="Modifier">
+              <i class="bi bi-pencil-fill"></i>
+            </button>
+
+            <button class="btn btn-sm btn-danger delete-btn"
+              data-bs-toggle="modal" data-bs-target="#deleteModal"
+              data-id="<?= (int)$c['id'] ?>" title="Supprimer">
+              <i class="bi bi-trash-fill"></i>
+            </button>
+          </td>
+        </tr>
+      <?php endforeach; ?>
     </tbody>
   </table>
 </div>
@@ -140,11 +194,11 @@ $chantiers = $pdo->query("SELECT id, nom, description, date_debut, date_fin FROM
           <div class="mb-3">
             <label for="chefChantier" class="form-label">Chef(s) de chantier</label>
             <select class="form-select" id="chefChantier" name="chefs[]" multiple size="6">
-              <?php foreach ($chefsOptions as $c): ?>
-                <option value="<?= (int)$c['id'] ?>"><?= htmlspecialchars($c['prenom'] . ' ' . $c['nom']) ?></option>
+              <?php foreach ($chefsOptions as $opt): ?>
+                <option value="<?= (int)$opt['id'] ?>"><?= htmlspecialchars($opt['prenom'] . ' ' . $opt['nom']) ?></option>
               <?php endforeach; ?>
             </select>
-            <small class="text-muted">Maintiens Ctrl/Cmd pour sélection multiple.</small>
+            <small class="text-muted">Maintiens Ctrl/Cmd pour sélection multiple. Le premier sera le responsable.</small>
           </div>
         </div>
         <div class="modal-footer">
@@ -187,11 +241,11 @@ $chantiers = $pdo->query("SELECT id, nom, description, date_debut, date_fin FROM
           <div class="mb-3">
             <label for="chefChantierEdit" class="form-label">Chef(s) de chantier</label>
             <select class="form-select" id="chefChantierEdit" name="chefs[]" multiple size="6">
-              <?php foreach ($chefsOptions as $c): ?>
-                <option value="<?= (int)$c['id'] ?>"><?= htmlspecialchars($c['prenom'] . ' ' . $c['nom']) ?></option>
+              <?php foreach ($chefsOptions as $opt): ?>
+                <option value="<?= (int)$opt['id'] ?>"><?= htmlspecialchars($opt['prenom'] . ' ' . $opt['nom']) ?></option>
               <?php endforeach; ?>
             </select>
-            <small class="text-muted">Maintiens Ctrl/Cmd pour sélection multiple.</small>
+            <small class="text-muted">Maintiens Ctrl/Cmd pour sélection multiple. Le premier sera le responsable.</small>
           </div>
         </div>
         <div class="modal-footer">
@@ -203,7 +257,7 @@ $chantiers = $pdo->query("SELECT id, nom, description, date_debut, date_fin FROM
   </div>
 </div>
 
-<!-- Modal confirmation suppression -->
+<!-- Modal suppression -->
 <div class="modal fade" id="deleteModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog">
     <form method="post" action="supprimerChantier.php" id="deleteForm">
@@ -214,9 +268,7 @@ $chantiers = $pdo->query("SELECT id, nom, description, date_debut, date_fin FROM
           <h5 class="modal-title">Confirmer la suppression</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
-        <div class="modal-body">
-          Es-tu sûr de vouloir supprimer ce chantier ? Cette action est irréversible.
-        </div>
+        <div class="modal-body">Es-tu sûr de vouloir supprimer ce chantier ? Cette action est irréversible.</div>
         <div class="modal-footer">
           <button type="submit" class="btn btn-danger">Supprimer</button>
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
@@ -231,7 +283,7 @@ $chantiers = $pdo->query("SELECT id, nom, description, date_debut, date_fin FROM
   <div id="chantierToast" class="toast align-items-center text-white bg-success border-0" role="alert">
     <div class="d-flex">
       <div class="toast-body" id="chantierToastMsg">Chantier enregistré avec succès.</div>
-      <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Fermer"></button>
+      <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
     </div>
   </div>
 </div>

@@ -38,19 +38,20 @@ function verifieUtilisateur(array $utilisateurs): array|bool
 
 function verifyUserLoginPassword(PDO $pdo, string $email, string $motDePasse): bool|array
 {
-    $query = $pdo->prepare("SELECT id, nom, prenom, email, photo, motDePasse, fonction FROM utilisateurs WHERE email = :email");
+    // ajoute entreprise_id (et actif si tu l'as)
+    $sql = "SELECT id, nom, prenom, email, photo, motDePasse, fonction, entreprise_id
+            FROM utilisateurs
+            WHERE email = :email /* AND actif = 1 */";
+    $stmt = $pdo->prepare($sql);
+    $stmt->bindValue(":email", $email);
+    $stmt->execute();
 
-    $query->bindValue(":email", $email);
-    $query->execute();
+    $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
-    $utilisateurs = $query->fetch(PDO::FETCH_ASSOC);
-
-
-
-    if ($utilisateurs && password_verify($motDePasse, $utilisateurs["motDePasse"])) {
-        unset($utilisateurs["motDePasse"]);
-        return $utilisateurs;
-    } else {
-        return false;
+    if ($user && password_verify($motDePasse, $user["motDePasse"])) {
+        unset($user["motDePasse"]);
+        return $user; // contient maintenant entreprise_id
     }
+    return false;
 }
+

@@ -16,20 +16,29 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         session_regenerate_id(true);
 
         $_SESSION["utilisateurs"] = [
-            "id" => $utilisateurs["id"],
-            "nom" => $utilisateurs["nom"],
-            "prenom" => $utilisateurs["prenom"],
-            "email" => $utilisateurs["email"],
-            "photo" => !empty($utilisateurs["photo"]) ? $utilisateurs["photo"] : '',
+            "id"       => $utilisateurs["id"],
+            "nom"      => $utilisateurs["nom"],
+            "prenom"   => $utilisateurs["prenom"],
+            "email"    => $utilisateurs["email"],
+            "photo"    => !empty($utilisateurs["photo"]) ? $utilisateurs["photo"] : '',
             "fonction" => $utilisateurs["fonction"],
             "chantiers" => []
         ];
+
+        // ✅ AJOUT : on stocke aussi l'entreprise
+        $_SESSION["utilisateurs"]["entreprise_id"] = (int)$utilisateurs["entreprise_id"];
+        $_SESSION["entreprise_id"] = (int)$utilisateurs["entreprise_id"]; // clé lue par l’API
 
         // Ajouter les chantiers si chef de chantier
         if ($utilisateurs["fonction"] === "chef_chantier") {
             $stmt = $pdo->prepare("SELECT chantier_id FROM utilisateur_chantiers WHERE utilisateur_id = ?");
             $stmt->execute([$utilisateurs["id"]]);
             $_SESSION["utilisateurs"]["chantiers"] = $stmt->fetchAll(PDO::FETCH_COLUMN);
+        }
+
+        // ✅ Génération CSRF si pas déjà en session
+        if (empty($_SESSION['csrf_token'])) {
+            $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
         }
 
         header("Location: accueil.php");

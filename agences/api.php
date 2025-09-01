@@ -2,135 +2,155 @@
 // /agences/api.php
 declare(strict_types=1);
 require_once __DIR__ . '/../config/init.php';
+requireAuthApi();
 header('Content-Type: application/json; charset=utf-8');
 
-if (!isset($_SESSION['utilisateurs'])) {
-  http_response_code(401);
-  echo json_encode(['ok'=>false,'msg'=>'Non authentifié']); exit;
+function json_ok(array $data = [], int $code = 200): void {
+  http_response_code($code);
+  echo json_encode(['ok' => true] + $data);
+  exit;
+}
+function json_err(string $msg = 'Requête invalide', int $code = 400): void {
+  http_response_code($code);
+  echo json_encode(['ok' => false, 'msg' => $msg]);
+  exit;
 }
 
-$pdo          = $pdo ?? null; // init.php
-$entrepriseId = (int)($_SESSION['utilisateurs']['entreprise_id'] ?? 0);
-$method       = $_SERVER['REQUEST_METHOD'] ?? 'GET';
-$action       = $_GET['action'] ?? $_POST['action'] ?? '';
+if (!isset($_SESSION['utilisateurs'])) {
+  json_err('Non authentifié', 401);
+}
 
-function bad_request($msg='Requête invalide'){ http_response_code(400); echo json_encode(['ok'=>false,'msg'=>$msg]); exit; }
-function ensure_csrf() {
+$entrepriseId = (int)($_SESSION['entreprise_id'] ?? 0); // ✅ unifié avec agences.php
+if ($entrepriseId <= 0) {
+  json_err('Entreprise manquante', 400);
+}
+
+$method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+$action = $_GET['action'] ?? $_POST['action'] ?? '';
+
+function ensure_csrf(): void {
   if (($_POST['csrf_token'] ?? '') !== ($_SESSION['csrf_token'] ?? '')) {
-    http_response_code(400); echo json_encode(['ok'=>false,'msg'=>'Token CSRF invalide']); exit;
+    json_err('Token CSRF invalide', 400);
   }
 }
 function norm(string $s): string {
-  $s = trim(preg_replace('/\s+/u',' ', $s)); // espaces multiples -> 1
-  return $s;
+  return trim(preg_replace('/\s+/u', ' ', $s));
 }
 
 /* ====== LIST ====== */
 if ($action === 'list' && $method === 'GET') {
   $q = norm((string)($_GET['q'] ?? ''));
   if ($q !== '') {
-    // recherche insensible à la casse
+    $like = "%$q%";
     $stmt = $pdo->prepare("
       SELECT id, nom, adresse, actif
       FROM agences
-      WHERE entreprise_id=? AND actif=1 AND LOWER(nom) LIKE LOWER(?)
+      WHERE entreprise_id = ? AND actif = 1
+        AND (LOWER(nom) LIKE LOWER(?) OR LOWER(IFNULL(adresse,'')) LIKE LOWER(?))
       ORDER BY nom
     ");
-    $stmt->execute([$entrepriseId, "%$q%"]);
+    $stmt->execute([$entrepriseId, $like, $like]);
   } else {
     $stmt = $pdo->prepare("
       SELECT id, nom, adresse, actif
       FROM agences
-      WHERE entreprise_id=? AND actif=1
+      WHERE entreprise_id = ? AND actif = 1
       ORDER BY nom
     ");
     $stmt->execute([$entrepriseId]);
   }
-  echo json_encode(['ok'=>true,'items'=>$stmt->fetchAll(PDO::FETCH_ASSOC)]); exit;
+  json_ok(['items' => $stmt->fetchAll(PDO::FETCH_ASSOC)]);
 }
 
 /* ====== SHOW ====== */
 if ($action === 'show' && $method === 'GET') {
   $id = (int)($_GET['id'] ?? 0);
-  if (!$id) bad_request();
-  $stmt = $pdo->prepare("SELECT id, nom, adresse, actif FROM agences WHERE id=? AND entreprise_id=?");
+  if (!$id) json_err();
+  $stmt = $pdo->prepare("
+    SELECT id, nom, adresse, actif
+    FROM agences
+    WHERE id = ? AND entreprise_id = ?
+  ");
   $stmt->execute([$id, $entrepriseId]);
   $row = $stmt->fetch(PDO::FETCH_ASSOC);
-  if (!$row) { http_response_code(404); echo json_encode(['ok'=>false,'msg'=>'Introuvable']); exit; }
-  echo json_encode(['ok'=>true,'item'=>$row]); exit;
+  if (!$row) json_err('Introuvable', 404);
+  json_ok(['item' => $row]);
 }
 
 /* ====== POST actions avec CSRF ====== */
-if (in_array($action, ['create','update','delete'], true)) ensure_csrf();
+if (in_array($action, ['create', 'update', 'delete'], true)) ensure_csrf();
 
-// ------- CREATE -------
+/* ------- CREATE ------- */
 if ($action === 'create' && $method === 'POST') {
-  // normalisation légère (espaces multiples -> 1)
-  $nom     = trim(preg_replace('/\s+/u',' ', (string)($_POST['nom'] ?? '')));
-  $adresse = trim(preg_replace('/\s+/u',' ', (string)($_POST['adresse'] ?? '')));
-  if ($nom === '') { bad_request('Nom requis'); }
+  $nom     = norm((string)($_POST['nom'] ?? ''));
+  $adresse = norm((string)($_POST['adresse'] ?? ''));
 
-  // Cherche si elle existe déjà (même entreprise, actif, casse/espaces ignorés)
+  if ($nom === '') json_err('Nom requis');
+
+  // Déjà existante ? (même entreprise, actif, casse/espaces ignorés)
   $chk = $pdo->prepare("
     SELECT id FROM agences
-    WHERE entreprise_id=? AND actif=1 AND LOWER(TRIM(nom)) = LOWER(TRIM(?))
+    WHERE entreprise_id = ? AND actif = 1 AND LOWER(TRIM(nom)) = LOWER(TRIM(?))
     LIMIT 1
   ");
   $chk->execute([$entrepriseId, $nom]);
   $existingId = (int)$chk->fetchColumn();
 
   if ($existingId) {
-    // ✅ On considère que c’est un succès : on renvoie l'id existant
-    echo json_encode(['ok'=>true, 'id'=>$existingId, 'existing'=>true, 'nom'=>$nom]);
-    exit;
+    json_ok(['id' => $existingId, 'existing' => true, 'nom' => $nom]);
   }
 
-  // Sinon on crée
-  $ins = $pdo->prepare("INSERT INTO agences (entreprise_id, nom, adresse, actif) VALUES (?, ?, ?, 1)");
+  // Création
+  $ins = $pdo->prepare("
+    INSERT INTO agences (entreprise_id, nom, adresse, actif)
+    VALUES (?, ?, ?, 1)
+  ");
   $ins->execute([$entrepriseId, $nom, $adresse !== '' ? $adresse : null]);
 
-  echo json_encode(['ok'=>true, 'id'=>(int)$pdo->lastInsertId(), 'existing'=>false, 'nom'=>$nom]);
-  exit;
+  json_ok(['id' => (int)$pdo->lastInsertId(), 'existing' => false, 'nom' => $nom], 201);
 }
 
-
-/* ====== UPDATE ====== */
+/* ------- UPDATE ------- */
 if ($action === 'update' && $method === 'POST') {
   $id      = (int)($_POST['id'] ?? 0);
   $nom     = norm((string)($_POST['nom'] ?? ''));
   $adresse = norm((string)($_POST['adresse'] ?? ''));
 
-  if (!$id || $nom==='') bad_request('Paramètres manquants');
+  if (!$id || $nom === '') json_err('Paramètres manquants');
 
-  // appartenance + actif
-  $own = $pdo->prepare("SELECT id FROM agences WHERE id=? AND entreprise_id=? AND actif=1");
+  // Appartenance + actif
+  $own = $pdo->prepare("
+    SELECT id FROM agences
+    WHERE id = ? AND entreprise_id = ? AND actif = 1
+  ");
   $own->execute([$id, $entrepriseId]);
-  if (!$own->fetch()) { http_response_code(404); echo json_encode(['ok'=>false,'msg'=>'Introuvable']); exit; }
+  if (!$own->fetch()) json_err('Introuvable', 404);
 
-  // unicité normalisée sur autres lignes
+  // Unicité du nom normalisé (autres lignes)
   $chk = $pdo->prepare("
     SELECT id FROM agences
-    WHERE entreprise_id=? AND actif=1 AND id<>? AND LOWER(TRIM(nom)) = LOWER(TRIM(?))
+    WHERE entreprise_id = ? AND actif = 1 AND id <> ?
+      AND LOWER(TRIM(nom)) = LOWER(TRIM(?))
     LIMIT 1
   ");
   $chk->execute([$entrepriseId, $id, $nom]);
-  if ($chk->fetch()) { http_response_code(409); echo json_encode(['ok'=>false,'msg'=>'Nom déjà utilisé']); exit; }
+  if ($chk->fetch()) json_err('Nom déjà utilisé', 409);
 
-  $upd = $pdo->prepare("UPDATE agences SET nom=?, adresse=? WHERE id=?");
-  $upd->execute([$nom, $adresse !== '' ? $adresse : null, $id]);
+  $upd = $pdo->prepare("UPDATE agences SET nom = ?, adresse = ? WHERE id = ? AND entreprise_id = ?");
+  $upd->execute([$nom, $adresse !== '' ? $adresse : null, $id, $entrepriseId]);
 
-  echo json_encode(['ok'=>true]); exit;
+  json_ok();
 }
 
-/* ====== DELETE (soft) ====== */
+/* ------- DELETE (soft) ------- */
 if ($action === 'delete' && $method === 'POST') {
   $id = (int)($_POST['id'] ?? 0);
-  if (!$id) bad_request('ID manquant');
+  if (!$id) json_err('ID manquant');
 
-  $del = $pdo->prepare("UPDATE agences SET actif=0 WHERE id=? AND entreprise_id=?");
+  $del = $pdo->prepare("UPDATE agences SET actif = 0 WHERE id = ? AND entreprise_id = ?");
   $del->execute([$id, $entrepriseId]);
 
-  echo json_encode(['ok'=>true]); exit;
+  json_ok();
 }
 
-bad_request();
+json_err();
