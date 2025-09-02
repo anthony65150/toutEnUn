@@ -11,25 +11,29 @@ document.addEventListener('DOMContentLoaded', () => {
   // Endpoint API (relatif à /depots/depots_admin.php)
   const API_URL = 'depots_api.php';
 
-  // Utilitaire fetch JSON avec gestion erreurs
-  const postForm = async (fd) => {
-    const res = await fetch(API_URL, {
-      method: 'POST',
-      body: fd,
-      headers: { 'X-Requested-With': 'XMLHttpRequest' }
-    });
-    if (!res.ok) {
-      const txt = await res.text().catch(() => '');
-      throw new Error(`HTTP ${res.status} – ${txt.substring(0, 200)}`);
+  // Utilitaire fetch JSON avec meilleure gestion d'erreurs
+  const postForm = async (fd, submitBtn) => {
+    if (submitBtn) submitBtn.disabled = true;
+    try {
+      const res = await fetch(API_URL, {
+        method: 'POST',
+        body: fd,
+        headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' }
+      });
+
+      // Essayer de lire le JSON même si !res.ok pour récupérer j.error
+      let payload = null, fallbackText = '';
+      try { payload = await res.json(); }
+      catch { try { fallbackText = await res.text(); } catch { /* ignore */ } }
+
+      if (!res.ok || !payload?.ok) {
+        const msg = payload?.error || (fallbackText ? fallbackText.substring(0, 200) : `HTTP ${res.status}`);
+        throw new Error(msg);
+      }
+      return payload;
+    } finally {
+      if (submitBtn) submitBtn.disabled = false;
     }
-    let j;
-    try { j = await res.json(); }
-    catch {
-      const txt = await res.text().catch(()=> '');
-      throw new Error(`Réponse non-JSON: ${txt.substring(0, 200)}`);
-    }
-    if (!j.ok) throw new Error(j.error || 'Erreur inconnue');
-    return j;
   };
 
   // Helpers redirection (garde la page /depots/depots_admin.php et ajoute ?success=...)
@@ -44,8 +48,9 @@ document.addEventListener('DOMContentLoaded', () => {
     e.preventDefault();
     const fd = new FormData(createForm);
     fd.set('action', 'create');
+    const btn = createForm.querySelector('[type="submit"]');
     try {
-      const j = await postForm(fd);
+      const j = await postForm(fd, btn);
       redirectWith({ success: 'create', ...(j.id ? { highlight: j.id } : {}) });
     } catch (err) {
       console.error(err);
@@ -76,8 +81,9 @@ document.addEventListener('DOMContentLoaded', () => {
     fd.set('nom', document.getElementById('editNom')?.value || '');
     fd.set('responsable_id', document.getElementById('editResp')?.value ?? '');
 
+    const btn = editForm.querySelector('[type="submit"]');
     try {
-      const j = await postForm(fd);
+      const j = await postForm(fd, btn);
       redirectWith({ success: 'update', ...(j.id ? { highlight: j.id } : {}) });
     } catch (err) {
       console.error(err);
@@ -98,11 +104,12 @@ document.addEventListener('DOMContentLoaded', () => {
     e.preventDefault();
     const fd = new FormData(deleteForm);
     fd.set('action', 'delete');
-    // si jamais ton input a name="id", c'est déjà bon; sinon dé-commente la ligne suivante :
+    // Si jamais ton input n'avait pas name="id", décommente :
     // fd.set('id', document.getElementById('deleteDepotId')?.value || '');
 
+    const btn = deleteForm.querySelector('[type="submit"]');
     try {
-      await postForm(fd);
+      await postForm(fd, btn);
       redirectWith({ success: 'delete' });
     } catch (err) {
       console.error(err);

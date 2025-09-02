@@ -1,7 +1,7 @@
 document.addEventListener("DOMContentLoaded", () => {
-  // ===========================
-  // FILTRES / RECHERCHE
-  // ===========================
+  /* =========================
+     FILTRES / RECHERCHE
+     ========================= */
   const subCategories = window.subCategories || {};
   const $catsWrap = document.getElementById("categoriesSlide");
   const $subsWrap = document.getElementById("subCategoriesSlide");
@@ -12,13 +12,8 @@ document.addEventListener("DOMContentLoaded", () => {
   let currentSub = "";
   let searchTerm = "";
 
-  function normalize(str) {
-    return (str || "")
-      .toString()
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, ""); // retire accents (compatible large)
-  }
+  const normalize = (str) =>
+    (str || "").toString().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
   function renderSubCats(cat) {
     $subsWrap.innerHTML = "";
@@ -36,7 +31,6 @@ document.addEventListener("DOMContentLoaded", () => {
   function applyFilters() {
     const rows = $rowsBody.querySelectorAll("tr");
     const s = normalize(searchTerm);
-
     rows.forEach((tr) => {
       if (!tr.hasAttribute("data-cat")) { tr.style.display = ""; return; }
       const cat = tr.getAttribute("data-cat") || "";
@@ -44,11 +38,11 @@ document.addEventListener("DOMContentLoaded", () => {
       const nameEl = tr.querySelector(".article-name");
       const text = normalize(nameEl ? nameEl.textContent : tr.textContent);
 
-      const okCat = !currentCat || cat === currentCat;
-      const okSub = !currentSub || sub === currentSub;
+      const okCat    = !currentCat || cat === currentCat;
+      const okSub    = !currentSub || sub === currentSub;
       const okSearch = !s || text.includes(s);
 
-      tr.style.display = okCat && okSub && okSearch ? "" : "none";
+      tr.style.display = (okCat && okSub && okSearch) ? "" : "none";
     });
   }
 
@@ -87,10 +81,9 @@ document.addEventListener("DOMContentLoaded", () => {
   const firstCatBtn = $catsWrap.querySelector('button[data-cat=""]');
   if (firstCatBtn) firstCatBtn.classList.add("active");
 
-
-  // ===========================
-  // MODALE TRANSFÉRER
-  // ===========================
+  /* =========================
+     MODALE TRANSFÉRER
+     ========================= */
   const ENDPOINT = "/stock/transferStock_depot.php";
 
   const transferModalEl   = document.getElementById("transferModal");
@@ -117,10 +110,10 @@ document.addEventListener("DOMContentLoaded", () => {
     const btn = e.target.closest(".transfer-btn");
     if (!btn) return;
 
-    const stockId = btn.dataset.stockId;
+    const stockId  = btn.dataset.stockId;
     const stockNom = btn.dataset.stockNom || "";
-    articleIdInput.value = stockId;
-    quantityInput.value = "";
+    articleIdInput.value    = stockId;
+    quantityInput.value     = "";
     destinationSelect.value = "";
 
     currentRow = btn.closest("tr");
@@ -139,23 +132,32 @@ document.addEventListener("DOMContentLoaded", () => {
     e.preventDefault();
 
     const dest = destinationSelect.value;
-    const qty = parseInt(quantityInput.value, 10);
+    const qty  = parseInt(quantityInput.value, 10);
 
-    if (!dest) { showToast("Choisis une destination.", false); return; }
-    if (!qty || qty < 1) { showToast("Quantité invalide.", false); return; }
+    if (!dest)         { showToast("Choisis une destination.", false); return; }
+    if (!qty || qty<1) { showToast("Quantité invalide.", false); return; }
 
-    // "depot_2" -> type="depot", id=2
-    const [destType, destId] = dest.split("_");
+    // "depot_2" -> type="depot", id=2  |  "chantier_5"
+    const [destType, destId] = String(dest).split("_", 2);
+    if (!destType || !destId) { showToast("Destination invalide.", false); return; }
+
+    const submitBtn = transferForm.querySelector('button[type="submit"]');
+    submitBtn.disabled = true;
+
     const fd = new FormData(transferForm);
     fd.append("destination_type", destType);
     fd.append("destination_id", destId);
 
     try {
-      const res = await fetch(ENDPOINT, { method: "POST", body: fd });
-      const data = await res.json().catch(() => null);
+      const res  = await fetch(ENDPOINT, { method: "POST", body: fd, headers: { "X-Requested-With": "XMLHttpRequest" } });
+      let data   = null, raw = "";
+      try { data = await res.json(); } catch { try { raw = await res.text(); } catch { /* noop */ } }
 
-      if (!data || !data.success) {
-        throw new Error((data && data.message) || "Erreur transfert.");
+      if (!res.ok || !data?.success) {
+        const code = res.status;
+        let msg = data?.message || (raw ? raw.slice(0, 200) : `Erreur (${code})`);
+        if (code === 401 || code === 403) msg = "Session expirée ou non autorisée.";
+        throw new Error(msg);
       }
 
       // MAJ quantité dans la ligne
@@ -164,14 +166,15 @@ document.addEventListener("DOMContentLoaded", () => {
         if (badge) {
           if (typeof data.new_quantite_depot !== "undefined") {
             const nv = parseInt(data.new_quantite_depot, 10);
-            badge.textContent = isNaN(nv) ? badge.textContent : nv;
-            const val = isNaN(nv) ? parseInt(badge.textContent, 10) : nv;
-            badge.classList.toggle("bg-danger", val < 10);
-            badge.classList.toggle("bg-success", val >= 10);
+            if (!Number.isNaN(nv)) {
+              badge.textContent = nv;
+              badge.classList.toggle("bg-danger", nv < 10);
+              badge.classList.toggle("bg-success", nv >= 10);
+            }
           } else {
             // fallback: décrémente localement
             const oldVal = parseInt(badge.textContent || "0", 10);
-            const newVal = Math.max(0, (isNaN(oldVal) ? 0 : oldVal) - qty);
+            const newVal = Math.max(0, (Number.isNaN(oldVal) ? 0 : oldVal) - qty);
             badge.textContent = newVal;
             badge.classList.toggle("bg-danger", newVal < 10);
             badge.classList.toggle("bg-success", newVal >= 10);
@@ -186,6 +189,8 @@ document.addEventListener("DOMContentLoaded", () => {
       bootstrap.Modal.getInstance(transferModalEl)?.hide();
     } catch (err) {
       showToast(err.message || "Erreur réseau.", false);
+    } finally {
+      submitBtn.disabled = false;
     }
   });
 });

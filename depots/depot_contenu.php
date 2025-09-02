@@ -10,23 +10,34 @@ if (!isset($_SESSION['utilisateurs'])) {
     exit;
 }
 
-$user = $_SESSION['utilisateurs'];
-$role = $user['fonction'] ?? null;
-
-$depotId = 0;
-if (isset($_GET['depot_id'])) {
-    $depotId = (int)$_GET['depot_id'];
-} elseif (isset($_GET['id'])) {
-    $depotId = (int)$_GET['id'];
+$user         = $_SESSION['utilisateurs'];
+$role         = $user['fonction'] ?? null;
+$entrepriseId = (int)($_SESSION['entreprise_id'] ?? 0);
+if ($entrepriseId <= 0) {
+    http_response_code(403);
+    echo '<div class="container mt-4 alert alert-danger">Entreprise non sélectionnée.</div>';
+    require_once __DIR__ . '/../templates/footer.php';
+    exit;
 }
 
-// Listes pour la modale (identique à stock_depot.php)
-$allChantiers = $pdo->query("SELECT id, nom FROM chantiers")->fetchAll(PDO::FETCH_KEY_PAIR);
-$allDepots    = $pdo->query("SELECT id, nom FROM depots")->fetchAll(PDO::FETCH_KEY_PAIR);
+/* ====== Depot ID depuis GET ====== */
+$depotId = 0;
+if (isset($_GET['depot_id']))      $depotId = (int)$_GET['depot_id'];
+elseif (isset($_GET['id']))        $depotId = (int)$_GET['id'];
 
-// Récup infos dépôt
-$stmtDepot = $pdo->prepare("SELECT id, nom, responsable_id FROM depots WHERE id = ?");
-$stmtDepot->execute([$depotId]);
+if ($depotId <= 0) {
+    echo '<div class="container mt-4 alert alert-danger">Dépôt introuvable.</div>';
+    require_once __DIR__ . '/../templates/footer.php';
+    exit;
+}
+
+/* ====== Fiche dépôt (ownership par entreprise) ====== */
+$stmtDepot = $pdo->prepare("
+    SELECT d.id, d.nom, d.responsable_id
+    FROM depots d
+    WHERE d.id = :id AND d.entreprise_id = :eid
+");
+$stmtDepot->execute([':id' => $depotId, ':eid' => $entrepriseId]);
 $depot = $stmtDepot->fetch(PDO::FETCH_ASSOC);
 
 if (!$depot) {
@@ -35,7 +46,10 @@ if (!$depot) {
     exit;
 }
 
-// Sécurité : admin OK ; role "depot" OK seulement si responsable de CE dépôt
+/* ====== Sécurité d'accès ======
+   - admin: OK
+   - rôle "depot": OK uniquement s'il est responsable de CE dépôt
+*/
 $allowed = ($role === 'administrateur') || ($role === 'depot' && (int)$depot['responsable_id'] === (int)$user['id']);
 if (!$allowed) {
     echo '<div class="container mt-4 alert alert-danger">Accès refusé.</div>';
@@ -43,9 +57,18 @@ if (!$allowed) {
     exit;
 }
 
-// ----------- Données (uniquement pour CE dépôt) ------------
+/* ====== Listes pour la modale (scopées entreprise) ====== */
+$stCh = $pdo->prepare("SELECT id, nom FROM chantiers WHERE entreprise_id = :eid ORDER BY nom");
+$stCh->execute([':eid' => $entrepriseId]);
+$allChantiers = $stCh->fetchAll(PDO::FETCH_KEY_PAIR);
 
-// Articles présents dans le dépôt (quantité > 0)
+$stDp = $pdo->prepare("SELECT id, nom FROM depots WHERE entreprise_id = :eid ORDER BY nom");
+$stDp->execute([':eid' => $entrepriseId]);
+$allDepots = $stDp->fetchAll(PDO::FETCH_KEY_PAIR);
+
+/* ====== Données du stock de CE dépôt ======
+   On filtre par depot_id (qui est déjà vérifié comme appartenant à l'entreprise).
+*/
 $sql = "
     SELECT 
         s.id             AS article_id,
@@ -65,7 +88,7 @@ $stmt = $pdo->prepare($sql);
 $stmt->execute([':depot_id' => $depotId]);
 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Catégories présentes dans CE dépôt
+/* Catégories présentes dans CE dépôt */
 $stmtCats = $pdo->prepare("
     SELECT DISTINCT s.categorie
     FROM stock s
@@ -78,7 +101,7 @@ $stmtCats = $pdo->prepare("
 $stmtCats->execute([':depot_id' => $depotId]);
 $categories = $stmtCats->fetchAll(PDO::FETCH_COLUMN);
 
-// Sous-catégories groupées par catégorie (pour CE dépôt)
+/* Sous-catégories groupées par catégorie (pour CE dépôt) */
 $stmtSubs = $pdo->prepare("
     SELECT DISTINCT s.categorie, s.sous_categorie
     FROM stock s
@@ -92,7 +115,6 @@ $subCategoriesGrouped = [];
 foreach ($stmtSubs->fetchAll(PDO::FETCH_ASSOC) as $r) {
     $subCategoriesGrouped[$r['categorie']][] = $r['sous_categorie'];
 }
-// déduplication
 foreach ($subCategoriesGrouped as $k => $arr) {
     $subCategoriesGrouped[$k] = array_values(array_unique($arr));
 }
@@ -103,7 +125,7 @@ foreach ($subCategoriesGrouped as $k => $arr) {
         <h1 class="mb-4 text-center">Stock du dépôt : <?= htmlspecialchars($depot['nom']) ?></h1>
     </div>
 
-    <!-- Filtres catégories/sous-catégories (identiques à la page admin) -->
+    <!-- Filtres catégories/sous-catégories -->
     <div class="d-flex justify-content-center mb-3 flex-wrap gap-2" id="categoriesSlide">
         <button class="btn btn-outline-primary" data-cat="">Tous</button>
         <?php foreach ($categories as $cat): ?>
@@ -141,9 +163,7 @@ foreach ($subCategoriesGrouped as $k => $arr) {
                         $sub = $r['sous_categorie'] ?? '';
                         $qte = (int)$r['quantite'];
                         ?>
-                        <tr
-                            data-cat="<?= htmlspecialchars($cat) ?>"
-                            data-subcat="<?= htmlspecialchars($sub) ?>">
+                        <tr data-cat="<?= htmlspecialchars($cat) ?>" data-subcat="<?= htmlspecialchars($sub) ?>">
                             <td class="text-center" style="width:64px">
                                 <?php if (!empty($photoWeb)): ?>
                                     <img src="<?= htmlspecialchars($photoWeb) ?>" alt="" class="img-thumbnail" style="width:56px;height:56px;object-fit:cover;">
@@ -186,43 +206,43 @@ foreach ($subCategoriesGrouped as $k => $arr) {
 
 <!-- Modal Transfert -->
 <div class="modal fade" id="transferModal" tabindex="-1" aria-labelledby="transferModalLabel" aria-hidden="true">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="transferModalLabel">Transférer du stock</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
-            </div>
-            <div class="modal-body">
-                <form id="transferForm">
-                    <input type="hidden" id="articleId" name="article_id">
-                    <input type="hidden" id="sourceDepotId" name="source_depot_id" value="<?= (int)$depotId ?>">
-                    <div class="mb-3">
-                        <label>Destination</label>
-                        <select class="form-select" id="destinationChantier">
-                            <option value="" disabled selected>Choisir la destination</option>
-                            <optgroup label="Dépôts">
-                                <?php foreach ($allDepots as $id => $nom): ?>
-                                    <?php if ((int)$id !== (int)$depotId): ?>
-                                        <option value="depot_<?= (int)$id ?>"><?= htmlspecialchars($nom) ?></option>
-                                    <?php endif; ?>
-                                <?php endforeach; ?>
-                            </optgroup>
-                            <optgroup label="Chantiers">
-                                <?php foreach ($allChantiers as $id => $nom): ?>
-                                    <option value="chantier_<?= (int)$id ?>"><?= htmlspecialchars($nom) ?></option>
-                                <?php endforeach; ?>
-                            </optgroup>
-                        </select>
-                    </div>
-                    <div class="mb-3">
-                        <label for="quantity" class="form-label">Quantité</label>
-                        <input type="number" class="form-control" id="quantity" name="quantity" min="1" required>
-                    </div>
-                    <button type="submit" class="btn btn-primary">Envoyer</button>
-                </form>
-            </div>
-        </div>
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="transferModalLabel">Transférer du stock</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
+      </div>
+      <div class="modal-body">
+        <form id="transferForm">
+          <input type="hidden" id="articleId" name="article_id">
+          <input type="hidden" id="sourceDepotId" name="source_depot_id" value="<?= (int)$depotId ?>">
+          <div class="mb-3">
+            <label>Destination</label>
+            <select class="form-select" id="destinationChantier">
+              <option value="" disabled selected>Choisir la destination</option>
+              <optgroup label="Dépôts">
+                <?php foreach ($allDepots as $id => $nom): ?>
+                  <?php if ((int)$id !== (int)$depotId): ?>
+                    <option value="depot_<?= (int)$id ?>"><?= htmlspecialchars($nom) ?></option>
+                  <?php endif; ?>
+                <?php endforeach; ?>
+              </optgroup>
+              <optgroup label="Chantiers">
+                <?php foreach ($allChantiers as $id => $nom): ?>
+                  <option value="chantier_<?= (int)$id ?>"><?= htmlspecialchars($nom) ?></option>
+                <?php endforeach; ?>
+              </optgroup>
+            </select>
+          </div>
+          <div class="mb-3">
+            <label for="quantity" class="form-label">Quantité</label>
+            <input type="number" class="form-control" id="quantity" name="quantity" min="1" required>
+          </div>
+          <button type="submit" class="btn btn-primary">Envoyer</button>
+        </form>
+      </div>
     </div>
+  </div>
 </div>
 
 <!-- Toast -->
@@ -236,13 +256,9 @@ foreach ($subCategoriesGrouped as $k => $arr) {
 </div>
 
 <script>
-  // Injection des sous-catégories pour JS
+  // Sous-catégories pour JS
   window.subCategories = <?= json_encode($subCategoriesGrouped) ?>;
 </script>
-<!-- Si le JS reste dans /js : -->
 <script src="./js/depot_contenu.js"></script>
-<!-- Si tu préfères déplacer le JS dans /depots, renomme le fichier en /depots/depot_contenu.js et remplace la ligne ci-dessus par :
-<script src="./depot_contenu.js"></script>
--->
 
 <?php require_once __DIR__ . '/../templates/footer.php'; ?>
