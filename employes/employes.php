@@ -16,12 +16,27 @@ if (empty($_SESSION['csrf_token'])) {
 }
 $csrf = $_SESSION['csrf_token'];
 
-$utilisateurs = $pdo->query("
-  SELECT id, nom, prenom, email, fonction, photo, agence_id
-  FROM utilisateurs
-  ORDER BY nom, prenom
-")->fetchAll(PDO::FETCH_ASSOC);
+// ===== Multi-entreprise =====
+$entrepriseId = $_SESSION['utilisateurs']['entreprise_id'] ?? null;
 
+// Si tu veux forcer le multi-entreprise, on protège la requête par défaut.
+// Si $entrepriseId est null (ancien projet), on retombe sur l'ancien comportement (tout voir).
+if ($entrepriseId !== null) {
+    $stmt = $pdo->prepare("
+        SELECT id, nom, prenom, email, fonction, photo, agence_id
+        FROM utilisateurs
+        WHERE entreprise_id = :eid
+        ORDER BY nom, prenom
+    ");
+    $stmt->execute([':eid' => $entrepriseId]);
+    $utilisateurs = $stmt->fetchAll(PDO::FETCH_ASSOC);
+} else {
+    $utilisateurs = $pdo->query("
+        SELECT id, nom, prenom, email, fonction, photo, agence_id
+        FROM utilisateurs
+        ORDER BY nom, prenom
+    ")->fetchAll(PDO::FETCH_ASSOC);
+}
 
 // Valeurs stockées en base -> Libellés affichés
 $ROLE_OPTIONS = [
@@ -34,7 +49,6 @@ $ROLE_OPTIONS = [
 
 function badgeRole($role)
 {
-    // accepte "employe" ou "employé"
     $r = mb_strtolower($role);
     if ($r === 'employé') $r = 'employe';
     switch ($r) {
@@ -46,7 +60,6 @@ function badgeRole($role)
             return '<span class="badge bg-success">Chef</span>';
         case 'employe':
             return '<span class="badge bg-warning text-dark">Employé</span>';
-        case 'autre':
         default:
             return '<span class="badge bg-secondary">Autre</span>';
     }
@@ -55,19 +68,14 @@ function badgeRole($role)
 <div class="container mt-4">
     <h1 class="mb-4 text-center">Employés</h1>
 
-       <div class="d-flex justify-content-center mb-3 gap-2">
+    <div class="d-flex justify-content-center mb-3 gap-2">
         <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#employeModal">
             + Ajouter un employé
         </button>
-
-        <!-- bouton Planning -->
-        <a href="planning.php" class="btn btn-success">
-            📅 Planning
-        </a>
+        <a href="planning.php" class="btn btn-success">📅 Planning</a>
     </div>
-    
-    <div id="agenceFilters" class="mb-3 d-flex flex-wrap gap-2 justify-content-center"></div>
 
+    <div id="agenceFilters" class="mb-3 d-flex flex-wrap gap-2 justify-content-center"></div>
 
     <input
         type="text"
@@ -95,19 +103,27 @@ function badgeRole($role)
                         data-prenom="<?= htmlspecialchars($u['prenom']) ?>"
                         data-email="<?= htmlspecialchars($u['email'] ?? '') ?>"
                         data-fonction="<?= htmlspecialchars($u['fonction']) ?>"
-                        data-agence-id="<?= (int)($u['agence_id'] ?? 0) ?>"> <!-- <= ICI, dans la balise -->
+                        data-agence-id="<?= (int)($u['agence_id'] ?? 0) ?>"
+                        data-entreprise-id="<?= htmlspecialchars((string)($entrepriseId ?? '')) ?>">
                         <td><?= (int)$u['id'] ?></td>
                         <td><strong><?= htmlspecialchars($u['nom'] . ' ' . $u['prenom']) ?></strong></td>
                         <td><?= htmlspecialchars($u['email'] ?? '') ?></td>
                         <td><?= badgeRole($u['fonction']) ?></td>
                         <td class="text-center">
                             <button class="btn btn-warning btn-sm edit-btn" title="Modifier"><i class="bi bi-pencil"></i></button>
-                            <button class="btn btn-danger btn-sm delete-btn" title="Supprimer"><i class="bi bi-trash"></i></button>
+                            <button class="btn btn-danger btn-sm delete-btn"
+                                title="Supprimer"
+                                type="button"
+                                data-bs-toggle="modal"
+                                data-bs-target="#confirmDeleteModal"
+                                data-id="<?= (int)$u['id'] ?>">
+                                <i class="bi bi-trash"></i>
+                            </button>
+
                         </td>
                     </tr>
                 <?php endforeach; ?>
             </tbody>
-
         </table>
     </div>
 </div>
@@ -121,8 +137,11 @@ function badgeRole($role)
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
             </div>
             <div class="modal-body">
-                <input type="hidden" name="csrf_token" value="<?= $csrf ?>">
+                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf) ?>">
                 <input type="hidden" name="id" id="emp_id">
+                <?php if ($entrepriseId !== null): ?>
+                    <input type="hidden" name="entreprise_id" id="emp_entreprise_id" value="<?= (int)$entrepriseId ?>">
+                <?php endif; ?>
                 <div class="row g-3">
                     <div class="col-6">
                         <label class="form-label">Prénom</label>
@@ -144,24 +163,21 @@ function badgeRole($role)
                             <?php endforeach; ?>
                         </select>
                     </div>
+
                     <div class="mb-3">
                         <label for="emp_agence" class="form-label">Agence</label>
                         <select name="agence_id" id="emp_agence" class="form-select">
                             <option value="">-- Sélectionner une agence --</option>
                         </select>
-
-                        <!-- le petit lien sous le select, comme pour Catégorie -->
-                        <a href="#" id="openAgenceLink" class="small d-inline-block mt-2">
-                            + Ajouter une agence
-                        </a>
+                        <a href="#" id="openAgenceLink" class="small d-inline-block mt-2">+ Ajouter une agence</a>
                     </div>
-
-
 
                     <div class="col-12">
                         <label class="form-label">Mot de passe</label>
                         <input type="password" name="password" id="emp_password" class="form-control" placeholder="Mot de passe">
-                        <div class="form-text">Obligatoire à la création. Laissez vide en modification si vous ne souhaitez pas changer le mot de passe.</div>
+                        <div class="form-text">
+                            Obligatoire à la création. Laissez vide en modification si vous ne souhaitez pas changer le mot de passe.
+                        </div>
                     </div>
                 </div>
             </div>
@@ -172,6 +188,7 @@ function badgeRole($role)
         </form>
     </div>
 </div>
+
 <!-- Mini-modale Agence -->
 <div class="modal fade" id="agenceModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog">
@@ -182,6 +199,9 @@ function badgeRole($role)
             </div>
             <div class="modal-body">
                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf) ?>">
+                <?php if ($entrepriseId !== null): ?>
+                    <input type="hidden" name="entreprise_id" value="<?= (int)$entrepriseId ?>">
+                <?php endif; ?>
                 <div class="mb-3">
                     <label class="form-label">Nom de l’agence</label>
                     <input type="text" class="form-control" name="nom" required>
@@ -199,27 +219,27 @@ function badgeRole($role)
     </div>
 </div>
 
-
 <!-- Modal Suppression -->
 <div class="modal fade" id="confirmDeleteModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog">
-        <form class="modal-content" id="deleteForm">
-            <div class="modal-header">
-                <h5 class="modal-title">Supprimer l’employé</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
-            </div>
-            <div class="modal-body">
-                <input type="hidden" name="csrf_token" value="<?= $csrf ?>">
-                <input type="hidden" name="id" id="delete_id">
-                <p class="mb-0">Confirmer la suppression ? Cette action est irréversible.</p>
-            </div>
-            <div class="modal-footer">
-                <button class="btn btn-secondary" data-bs-dismiss="modal" type="button">Annuler</button>
-                <button class="btn btn-danger" type="submit">Supprimer</button>
-            </div>
-        </form>
-    </div>
+  <div class="modal-dialog">
+    <form class="modal-content" id="deleteForm">
+      <div class="modal-header">
+        <h5 class="modal-title">Supprimer l’employé</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf) ?>">
+        <input type="hidden" name="id" id="delete_id">
+        <p class="mb-0">Confirmer la suppression ? Cette action est irréversible.</p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal" type="button">Annuler</button>
+        <button class="btn btn-danger" type="submit">Supprimer</button>
+      </div>
+    </form>
+  </div>
 </div>
+
 
 <!-- Helper agences réutilisable -->
 <script src="/agences/js/agences.js"></script>
@@ -227,7 +247,7 @@ function badgeRole($role)
 <script>
     document.addEventListener('DOMContentLoaded', () => {
         const agenceSelect = document.getElementById('emp_agence');
-        const openAgenceModalBtn = document.getElementById('openAgenceModal');
+        const openAgenceModalLink = document.getElementById('openAgenceLink'); // <- id corrigé
         const agenceModalEl = document.getElementById('agenceModal');
         const agenceModal = agenceModalEl ? new bootstrap.Modal(agenceModalEl) : null;
         const agenceForm = document.getElementById('agenceForm');
@@ -236,7 +256,6 @@ function badgeRole($role)
         const bigModal = document.getElementById('employeModal');
         if (bigModal && window.Agences) {
             bigModal.addEventListener('shown.bs.modal', () => {
-                // si tu pré-remplis l’édition avec un data-* dans ton JS admin, emp_agence.value sera conservée
                 Agences.loadIntoSelect(agenceSelect, {
                     includePlaceholder: true,
                     preselect: agenceSelect.value || ''
@@ -245,7 +264,8 @@ function badgeRole($role)
         }
 
         // 2) Ouvrir la mini-modale
-        openAgenceModalBtn?.addEventListener('click', () => {
+        openAgenceModalLink?.addEventListener('click', (e) => {
+            e.preventDefault();
             agenceForm?.reset();
             agenceModal?.show();
         });
@@ -278,12 +298,6 @@ function badgeRole($role)
         });
     });
 </script>
-
-
-<script src="/agences/js/agences.js"></script>
-<script src="js/employesGestion_admin.js"></script>
-
+<script src="/employes/js/employesGestion_admin.js"></script>
 
 <?php require_once __DIR__ . '/../templates/footer.php'; ?>
-
-

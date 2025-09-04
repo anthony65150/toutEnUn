@@ -1,13 +1,23 @@
 <?php
 require_once __DIR__ . '/../config/init.php';
 
-if (!isset($_SESSION['utilisateurs']) || (($_SESSION['utilisateurs']['fonction'] ?? '') !== 'administrateur')) {
+if (
+  !isset($_SESSION['utilisateurs']) ||
+  (($_SESSION['utilisateurs']['fonction'] ?? '') !== 'administrateur')
+) {
     header('Location: /connexion.php');
     exit;
 }
 
 $page = 'planning';
-$entrepriseId = (int)($_SESSION['entreprise_id'] ?? 0);
+
+/** ====== Multi-entreprise : source fiable ====== */
+$entrepriseId = (int)($_SESSION['utilisateurs']['entreprise_id'] ?? 0);
+if ($entrepriseId <= 0) {
+    // On force la présence de l'entreprise en session pour ce module
+    header('Location: /connexion.php');
+    exit;
+}
 
 /* ====== Semaine affichée ====== */
 $today = isset($_GET['date']) ? date('Y-m-d', strtotime($_GET['date'])) : date('Y-m-d');
@@ -19,6 +29,7 @@ if ($dt->format('N') != 1) {
 $start = clone $dt;                 // lundi
 $end   = (clone $start)->modify('+6 day');
 $weekNumber = (int)$start->format('W');
+
 /* Liens de navigation semaine */
 $prevMonday = (clone $start)->modify('-7 day')->format('Y-m-d');
 $nextMonday = (clone $start)->modify('+7 day')->format('Y-m-d');
@@ -28,7 +39,6 @@ if ($todayMon->format('N') != 1) {
     $todayMon->modify('last monday');
 }
 $todayMonday = $todayMon->format('Y-m-d');
-
 
 /* Libellés FR */
 $jours = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche'];
@@ -49,6 +59,7 @@ for ($i = 0; $i < 7; $i++) {
 /** @var PDO $pdo */
 
 /* ====== Données ====== */
+
 /* Chantiers (palette) — tolérant si chef_id absent */
 $hasChefId = false;
 try {
@@ -58,40 +69,33 @@ try {
     $hasChefId = false;
 }
 
-$sqlCh = "SELECT id, nom, responsable_id FROM chantiers";
-$paramsCh = [];
-if ($entrepriseId) {
-    $sqlCh .= " WHERE entreprise_id = :e";
-    $paramsCh[':e'] = $entrepriseId;
-}
-$sqlCh .= " ORDER BY nom";
+$sqlCh = "SELECT id, nom, responsable_id FROM chantiers WHERE entreprise_id = :e ORDER BY nom";
 $st = $pdo->prepare($sqlCh);
-$st->execute($paramsCh);
+$st->execute([':e' => $entrepriseId]);
 $chantiers = $st->fetchAll(PDO::FETCH_ASSOC);
 
-// Map : [responsable_id => chantier_id] (un seul chantier préféré si plusieurs : on gardera le plus petit id dans l’API)
+/* Map : [responsable_id => chantier_id] (si plusieurs, on garde le plus petit id) */
 $respDefault = [];
 foreach ($chantiers as $c) {
     if (!empty($c['responsable_id'])) {
-        $respDefault[(int)$c['responsable_id']] = (int)$c['id'];
+        $rid = (int)$c['responsable_id'];
+        if (!isset($respDefault[$rid]) || $c['id'] < $respDefault[$rid]) {
+            $respDefault[$rid] = (int)$c['id'];
+        }
     }
 }
 
-/* Employés */
+/* Employés (uniquement l’entreprise courante) */
 $sqlEmp = "SELECT id, CONCAT(prenom,' ',nom) AS nom, fonction AS role
            FROM utilisateurs
-           WHERE fonction IN ('employe','chef','interim')";
-$paramsEmp = [];
-if ($entrepriseId) {
-    $sqlEmp .= " AND entreprise_id=:e";
-    $paramsEmp[':e'] = $entrepriseId;
-}
-$sqlEmp .= " ORDER BY nom";
+           WHERE entreprise_id = :e
+             AND fonction IN ('employe','chef','interim')
+           ORDER BY nom";
 $st = $pdo->prepare($sqlEmp);
-$st->execute($paramsEmp);
+$st->execute([':e' => $entrepriseId]);
 $employes = $st->fetchAll(PDO::FETCH_ASSOC);
 
-/* Affectations semaine */
+/* Affectations semaine (bornées par entreprise) */
 $sqlAff = "SELECT utilisateur_id, chantier_id, date_jour
            FROM planning_affectations
            WHERE date_jour BETWEEN :s AND :e
@@ -118,23 +122,17 @@ require __DIR__ . '/../templates/navigation/navigation.php';
 <style>
   .chip{display:inline-flex;align-items:center;gap:.5rem;padding:.35rem .6rem;border-radius:999px;color:#fff;font-weight:600;cursor:grab;user-select:none}
   .chip .dot{width:.6rem;height:.6rem;border-radius:50%;background:rgba(255,255,255,.8)}
-
   .table-sticky thead th{position:sticky;top:0;background:#fff;z-index:2}
-
-  /* Cases */
   .cell-drop,.cell-off{min-height:48px;border:1px dashed #e2e8f0;border-radius:.5rem;position:relative;padding:0}
   .cell-drop.dragover{border-color:#0d6efd;background:#eef6ff}
   .cell-drop.has-chip{border-style:solid}
   .cell-off{background:#fafafa}
   .wkx{position:absolute;top:4px;right:6px;line-height:1;font-weight:700;font-size:14px;color:#9aa3af;background:transparent;border:0;cursor:pointer;padding:0}
   .wkx:hover{color:#6b7280}
-
-  /* Pastille plein écran */
   .assign-chip{display:flex;width:100%;min-height:48px;border-radius:.5rem;align-items:center;justify-content:space-between;padding:0 .75rem;color:#fff;font-weight:600}
   .assign-chip .x{cursor:pointer;font-weight:800;opacity:.9;margin-left:.5rem}
   .assign-chip .x:hover{opacity:1}
 </style>
-
 
 <div class="container mt-4">
     <div class="d-flex justify-content-between align-items-center mb-3">
@@ -172,7 +170,6 @@ require __DIR__ . '/../templates/navigation/navigation.php';
             <button id="btnPrefillChefs" class="btn btn-sm btn-outline-primary">Préremplir semaine (chefs)</button>
         </div>
     </div>
-
 
     <!-- Tableau -->
     <div class="table-responsive table-sticky">
@@ -241,20 +238,17 @@ require __DIR__ . '/../templates/navigation/navigation.php';
 
 <script>
     window.PLANNING_DATE_START = <?= json_encode($start->format('Y-m-d')) ?>;
-    window.API_MOVE = "/employes/api/moveAffectation.php";
+    window.API_MOVE   = "/employes/api/moveAffectation.php";
     window.API_DELETE = "/employes/api/deleteAffectation.php";
+    window.API_PREFILL = "/employes/api/prefillWeekChefs.php"; // utilisé par ton planning.js si tu l’appelles
 </script>
 <script src="/employes/js/planning.js"></script>
 
 <script>
-/* ===== Utilitaires drag-paint ===== */
+/* ===== Drag & paint utilitaires (inchangé) ===== */
 let dragPaint = null; // {id,label,color,painted:Set}
-
-function startDragPaint(id,color,label){
-  dragPaint = { id:Number(id), color:(color||''), label:(label||'Chantier'), painted:new Set() };
-}
+function startDragPaint(id,color,label){ dragPaint = { id:Number(id), color:(color||''), label:(label||'Chantier'), painted:new Set() }; }
 function endDragPaint(){ dragPaint = null; }
-
 function makeChipHTML(label,color,id){
   const span = document.createElement('span');
   span.className = 'assign-chip';
@@ -263,9 +257,7 @@ function makeChipHTML(label,color,id){
   span.innerHTML = `${label} <span class="x" title="Retirer">×</span>`;
   return span;
 }
-
 function bindChipEvents(chip){
-  // retirer
   chip.querySelector('.x')?.addEventListener('click', () => {
     const cell = chip.closest('.cell-drop');
     const empId = cell.dataset.emp, date = cell.dataset.date;
@@ -277,8 +269,6 @@ function bindChipEvents(chip){
       chip.remove(); cell.classList.remove('has-chip');
     }).catch(console.error);
   });
-
-  // rendre “source de peinture”
   chip.setAttribute('draggable','true');
   chip.addEventListener('dragstart', e=>{
     const id = Number(chip.dataset.chantierId);
@@ -293,19 +283,14 @@ function bindChipEvents(chip){
   });
   chip.addEventListener('dragend', endDragPaint);
 }
-
 function applyToCell(cell, brush){
   const empId = cell.dataset.emp, date = cell.dataset.date;
   if(!empId || !date) return;
-
-  // visuel
   cell.querySelector('.assign-chip')?.remove();
   const chip = makeChipHTML(brush.label, brush.color, brush.id);
   cell.appendChild(chip);
   cell.classList.add('has-chip');
   bindChipEvents(chip);
-
-  // API
   fetch(window.API_MOVE,{
     method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
     body:new URLSearchParams({emp_id:empId, chantier_id:String(brush.id), date})
@@ -313,12 +298,9 @@ function applyToCell(cell, brush){
   .then(async (r)=>{ const raw=await r.text(); let d; try{d=JSON.parse(raw);}catch{ throw new Error(`HTTP ${r.status} – ${raw.slice(0,200)}`);} if(!r.ok||!d.ok) throw new Error(d.message||`HTTP ${r.status}`); })
   .catch(err=>{ console.error(err); chip.remove(); cell.classList.remove('has-chip'); });
 }
-
 function attachDropToCell(cell){
   cell.addEventListener('dragover', e=>{ e.preventDefault(); cell.classList.add('dragover'); });
   cell.addEventListener('dragleave', ()=> cell.classList.remove('dragover'));
-
-  // drop unitaire
   cell.addEventListener('drop', e=>{
     e.preventDefault(); cell.classList.remove('dragover');
     const id    = Number(e.dataTransfer.getData('chantier_id')||0);
@@ -327,8 +309,6 @@ function attachDropToCell(cell){
     if(!id) return;
     applyToCell(cell, {id,color,label});
   });
-
-  // peinture au passage
   cell.addEventListener('dragenter', e=>{
     if(!dragPaint) return;
     e.preventDefault();
@@ -338,8 +318,6 @@ function attachDropToCell(cell){
     applyToCell(cell, dragPaint);
   });
 }
-
-// week-end inactif : s’active et se peint si on passe avec le pinceau
 function attachPaintToOffCell(off){
   off.addEventListener('dragenter', e=>{
     if(!dragPaint) return;
@@ -350,7 +328,6 @@ function attachPaintToOffCell(off){
     active.dataset.emp  = off.dataset.emp;
     off.replaceWith(active);
     attachDropToCell(active);
-
     const key = active.dataset.emp + "|" + active.dataset.date;
     if(!dragPaint.painted.has(key)){
       dragPaint.painted.add(key);
@@ -358,9 +335,7 @@ function attachPaintToOffCell(off){
     }
   });
 }
-
 document.addEventListener('DOMContentLoaded', () => {
-  /* Palette : amorce la peinture */
   document.querySelectorAll('#palette .chip').forEach(ch=>{
     ch.addEventListener('dragstart', e=>{
       const id = Number(ch.dataset.chantierId);
@@ -374,18 +349,12 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     ch.addEventListener('dragend', endDragPaint);
   });
-
-  // Cases actives
   document.querySelectorAll('.cell-drop').forEach(cell=>{
     attachDropToCell(cell);
     const chip = cell.querySelector('.assign-chip');
     if (chip){ bindChipEvents(chip); cell.classList.add('has-chip'); }
   });
-
-  // Cases OFF (week-end)
   document.querySelectorAll('.cell-off').forEach(attachPaintToOffCell);
-
-  // Boutons X des week-ends pour activer manuellement
   document.querySelectorAll('.cell-off .wkx').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const off = btn.closest('.cell-off');
@@ -399,7 +368,5 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 </script>
-
-
 
 <?php require __DIR__ . '/../templates/footer.php'; ?>

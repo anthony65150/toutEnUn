@@ -11,6 +11,10 @@ if (!isset($_SESSION['utilisateurs']) || ($_SESSION['utilisateurs']['fonction'] 
     exit;
 }
 $entrepriseId = (int)($_SESSION['utilisateurs']['entreprise_id'] ?? 0);
+if ($entrepriseId <= 0) {
+    header('Location: /connexion.php');
+    exit;
+}
 
 /* ========= Includes UI / helpers ========= */
 require_once __DIR__ . '/../templates/header.php';
@@ -42,7 +46,8 @@ function normalize_role_input(string $r): string {
     return $r;
 }
 
-/* ========= Alias sécurité si fonction mal nommée ========= */
+/* ========= Alias sécurité si fonction mal nommée =========
+   Corrigé : si *ajouUtilisateur* existe, on crée un alias *ajoutUtilisateur* qui L'APPELLE (et non l'inverse) */
 if (!function_exists('ajoutUtilisateur') && function_exists('ajouUtilisateur')) {
     function ajoutUtilisateur($pdo, $nom, $prenom, $email, $motDePasse, $fonction, $chantier_id = null, $agence_id = null) {
         return ajoutUtilisateur($pdo, $nom, $prenom, $email, $motDePasse, $fonction, $chantier_id, $agence_id);
@@ -50,7 +55,10 @@ if (!function_exists('ajoutUtilisateur') && function_exists('ajouUtilisateur')) 
 }
 
 /* ========= Données nécessaires ========= */
-$chantiers = $pdo->query("SELECT id, nom FROM chantiers ORDER BY nom")->fetchAll(PDO::FETCH_ASSOC);
+/* Chantiers de l'entreprise */
+$stCh = $pdo->prepare("SELECT id, nom FROM chantiers WHERE entreprise_id = :e ORDER BY nom");
+$stCh->execute([':e' => $entrepriseId]);
+$chantiers = $stCh->fetchAll(PDO::FETCH_ASSOC);
 
 /* ========= Traitement formulaire ========= */
 $errors = [];
@@ -68,22 +76,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $fonctionIn = $_POST['fonction'] ?? '';
     $fonction   = normalize_role_input($fonctionIn === 'employé' ? 'employe' : $fonctionIn);
 
-    // --- NOUVEAU : Agence
+    // Agence (optionnelle) — doit appartenir à l'entreprise
     $agence_id = isset($_POST['agence_id']) && $_POST['agence_id'] !== '' ? (int)$_POST['agence_id'] : null;
     if ($agence_id !== null) {
-        $chkAg = $pdo->prepare("SELECT 1 FROM agences WHERE id=? AND entreprise_id=? AND actif=1");
+        $chkAg = $pdo->prepare("SELECT 1 FROM agences WHERE id = ? AND entreprise_id = ? AND actif = 1");
         $chkAg->execute([$agence_id, $entrepriseId]);
         if (!$chkAg->fetch()) {
             $errors['agence_id'] = "Agence invalide.";
         }
     }
 
-    // Chantier si chef
+    // Chantier si chef — doit appartenir à l'entreprise
     $chantier_id = null;
     if ($fonction === 'chef') {
         $chantier_id = isset($_POST['chantier_id']) && $_POST['chantier_id'] !== '' ? (int)$_POST['chantier_id'] : null;
         if (!$chantier_id) {
             $errors['chantier_id'] = "Merci de choisir un chantier pour un chef.";
+        } else {
+            $chkCh = $pdo->prepare("SELECT 1 FROM chantiers WHERE id = ? AND entreprise_id = ?");
+            $chkCh->execute([$chantier_id, $entrepriseId]);
+            if (!$chkCh->fetch()) {
+                $errors['chantier_id'] = "Chantier invalide.";
+            }
         }
     }
 
@@ -94,16 +108,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($motDePasse === '' || strlen($motDePasse) < 6)               $errors['motDePasse'] = "Mot de passe requis (min 6 caractères).";
     if ($fonction === '')                             $errors['fonction'] = "Merci de sélectionner une fonction.";
 
-    // Unicité email
+    // Unicité email — dans l'ENTREPRISE
     if (empty($errors)) {
-        $stmt = $pdo->prepare("SELECT id FROM utilisateurs WHERE email = ? LIMIT 1");
-        $stmt->execute([$email]);
+        $stmt = $pdo->prepare("SELECT id FROM utilisateurs WHERE email = ? AND entreprise_id = ? LIMIT 1");
+        $stmt->execute([$email, $entrepriseId]);
         if ($stmt->fetch()) {
-            $errors['email'] = "Cet email est déjà utilisé.";
+            $errors['email'] = "Cet email est déjà utilisé dans votre entreprise.";
         }
     }
 
-    // Validation métier via ta fonction si dispo
+    // Validation métier via ton helper si dispo
     if (empty($errors) && function_exists('verifieUtilisateur')) {
         $verif = verifieUtilisateur([
             'nom'         => $nom,
@@ -113,6 +127,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'fonction'    => $fonction,
             'chantier_id' => $chantier_id,
             'agence_id'   => $agence_id,
+            'entreprise_id' => $entrepriseId,
         ]);
         if ($verif !== true && is_array($verif)) {
             $errors = array_merge($errors, $verif);
@@ -134,7 +149,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $stmt->execute([$nom, $prenom, $email, $hash, $fonction, $entrepriseId, $agence_id]);
 
                     $uid = (int)$pdo->lastInsertId();
-                    // lier le chef au chantier (adapte le nom de table si différent)
+                    // lier le chef au chantier
                     $link = $pdo->prepare("INSERT INTO utilisateur_chantiers (utilisateur_id, chantier_id) VALUES (?, ?)");
                     $link->execute([$uid, $chantier_id]);
 
@@ -151,7 +166,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt->execute([$nom, $prenom, $email, $hash, $fonction, $entrepriseId, $agence_id]);
             }
         } else {
-            // Utilise ton helper (prévois de l’étendre pour agence_id)
+            // Utilise ton helper (à étendre pour gérer entreprise_id/agence_id si nécessaire)
             ajoutUtilisateur($pdo, $nom, $prenom, $email, $motDePasse, $fonction, $chantier_id, $agence_id);
         }
 
@@ -221,7 +236,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
           <?php endif; ?>
         </div>
 
-        <!-- NOUVEAU : Agence -->
+        <!-- Agence -->
         <div class="mb-3">
           <label for="agence_id" class="form-label">Agence</label>
           <div class="d-flex gap-2">

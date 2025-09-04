@@ -26,6 +26,13 @@ if (!isset($_SESSION['utilisateurs']) || ($_SESSION['utilisateurs']['fonction'] 
     exit;
 }
 
+$entrepriseId = (int)($_SESSION['utilisateurs']['entreprise_id'] ?? 0);
+if ($entrepriseId <= 0) {
+    http_response_code(403);
+    echo json_encode(['success' => false, 'message' => 'Entreprise introuvable dans la session.']);
+    exit;
+}
+
 $action = $_POST['action'] ?? null;
 $csrf   = $_POST['csrf_token'] ?? '';
 if (!hash_equals($_SESSION['csrf_token'] ?? '', $csrf)) {
@@ -77,7 +84,7 @@ function badgeRole($role) {
     }
 }
 
-function rowHtml($u) {
+function rowHtml($u, int $entrepriseId) {
     $id       = (int)$u['id'];
     $nom      = htmlspecialchars((string)($u['nom'] ?? ''), ENT_QUOTES, 'UTF-8');
     $prenom   = htmlspecialchars((string)($u['prenom'] ?? ''), ENT_QUOTES, 'UTF-8');
@@ -91,7 +98,8 @@ function rowHtml($u) {
         data-prenom="'.$prenom.'"
         data-email="'.$email.'"
         data-fonction="'.$fonction.'"
-        data-agence-id="'.$agenceId.'">
+        data-agence-id="'.$agenceId.'"
+        data-entreprise-id="'.$entrepriseId.'">
       <td>'.$id.'</td>
       <td><strong>'.$nom.' '.$prenom.'</strong></td>
       <td>'.$email.'</td>
@@ -104,8 +112,6 @@ function rowHtml($u) {
 }
 
 try {
-    $entrepriseId = (int)($_SESSION['utilisateurs']['entreprise_id'] ?? 0);
-
     // ---------- CREATE ----------
     if ($action === 'create') {
         $prenom    = trim((string)($_POST['prenom'] ?? ''));
@@ -125,17 +131,18 @@ try {
             throw new Exception('Mot de passe requis.');
         }
 
-        // Vérifier agence si fournie
+        // Vérifier agence si fournie (dans la même entreprise)
         if ($agence_id !== null) {
             $chk = $pdo->prepare("SELECT 1 FROM agences WHERE id=? AND entreprise_id=? AND actif=1");
             $chk->execute([$agence_id, $entrepriseId]);
             if (!$chk->fetch()) $agence_id = null;
         }
 
-        $stmt = $pdo->prepare("SELECT id FROM utilisateurs WHERE email = ?");
-        $stmt->execute([$email]);
+        // Unicité email dans l'entreprise
+        $stmt = $pdo->prepare("SELECT id FROM utilisateurs WHERE email = ? AND entreprise_id = ?");
+        $stmt->execute([$email, $entrepriseId]);
         if ($stmt->fetch()) {
-            throw new Exception('Email déjà utilisé.');
+            throw new Exception('Email déjà utilisé dans votre entreprise.');
         }
 
         $hash = password_hash($password, PASSWORD_DEFAULT);
@@ -148,11 +155,15 @@ try {
 
         $id = (int)$pdo->lastInsertId();
 
-        $u = $pdo->prepare("SELECT id, nom, prenom, email, fonction, agence_id FROM utilisateurs WHERE id = ?");
-        $u->execute([$id]);
+        $u = $pdo->prepare("
+            SELECT id, nom, prenom, email, fonction, agence_id
+            FROM utilisateurs
+            WHERE id = ? AND entreprise_id = ?
+        ");
+        $u->execute([$id, $entrepriseId]);
         $user = $u->fetch(PDO::FETCH_ASSOC);
 
-        echo json_encode(['success' => true, 'id' => $id, 'rowHtml' => rowHtml($user)]);
+        echo json_encode(['success' => true, 'id' => $id, 'rowHtml' => rowHtml($user, $entrepriseId)]);
         exit;
     }
 
@@ -160,6 +171,11 @@ try {
     if ($action === 'update') {
         $id = (int)($_POST['id'] ?? 0);
         if ($id <= 0) throw new Exception('ID invalide.');
+
+        // Vérifier que l’utilisateur ciblé appartient à l’entreprise
+        $own = $pdo->prepare("SELECT id FROM utilisateurs WHERE id = ? AND entreprise_id = ?");
+        $own->execute([$id, $entrepriseId]);
+        if (!$own->fetch()) throw new Exception("Utilisateur introuvable dans votre entreprise.");
 
         $prenom    = trim((string)($_POST['prenom'] ?? ''));
         $nom       = trim((string)($_POST['nom'] ?? ''));
@@ -181,10 +197,11 @@ try {
             if (!$chk->fetch()) $agence_id = null;
         }
 
-        $stmt = $pdo->prepare("SELECT id FROM utilisateurs WHERE email = ? AND id <> ?");
-        $stmt->execute([$email, $id]);
+        // Email unique dans l’entreprise (hors lui-même)
+        $stmt = $pdo->prepare("SELECT id FROM utilisateurs WHERE email = ? AND entreprise_id = ? AND id <> ?");
+        $stmt->execute([$email, $entrepriseId, $id]);
         if ($stmt->fetch()) {
-            throw new Exception('Email déjà utilisé par un autre utilisateur.');
+            throw new Exception('Email déjà utilisé par un autre utilisateur de votre entreprise.');
         }
 
         if ($password !== '') {
@@ -192,21 +209,29 @@ try {
                 throw new Exception('Mot de passe trop court (min 6).');
             }
             $hash = password_hash($password, PASSWORD_DEFAULT);
-            $sql = "UPDATE utilisateurs SET prenom=?, nom=?, email=?, fonction=?, motDePasse=?, agence_id=? WHERE id=?";
-            $params = [$prenom, $nom, $email, $fonction, $hash, $agence_id, $id];
+            $sql = "UPDATE utilisateurs
+                    SET prenom=?, nom=?, email=?, fonction=?, motDePasse=?, agence_id=?
+                    WHERE id=? AND entreprise_id=?";
+            $params = [$prenom, $nom, $email, $fonction, $hash, $agence_id, $id, $entrepriseId];
         } else {
-            $sql = "UPDATE utilisateurs SET prenom=?, nom=?, email=?, fonction=?, agence_id=? WHERE id=?";
-            $params = [$prenom, $nom, $email, $fonction, $agence_id, $id];
+            $sql = "UPDATE utilisateurs
+                    SET prenom=?, nom=?, email=?, fonction=?, agence_id=?
+                    WHERE id=? AND entreprise_id=?";
+            $params = [$prenom, $nom, $email, $fonction, $agence_id, $id, $entrepriseId];
         }
 
         $upd = $pdo->prepare($sql);
         $upd->execute($params);
 
-        $u = $pdo->prepare("SELECT id, nom, prenom, email, fonction, agence_id FROM utilisateurs WHERE id = ?");
-        $u->execute([$id]);
+        $u = $pdo->prepare("
+            SELECT id, nom, prenom, email, fonction, agence_id
+            FROM utilisateurs
+            WHERE id = ? AND entreprise_id = ?
+        ");
+        $u->execute([$id, $entrepriseId]);
         $user = $u->fetch(PDO::FETCH_ASSOC);
 
-        echo json_encode(['success' => true, 'id' => $id, 'rowHtml' => rowHtml($user)]);
+        echo json_encode(['success' => true, 'id' => $id, 'rowHtml' => rowHtml($user, $entrepriseId)]);
         exit;
     }
 
@@ -215,8 +240,13 @@ try {
         $id = (int)($_POST['id'] ?? 0);
         if ($id <= 0) throw new Exception('ID invalide.');
 
-        $del = $pdo->prepare("DELETE FROM utilisateurs WHERE id = ?");
-        $del->execute([$id]);
+        // On ne supprime que dans l’entreprise
+        $del = $pdo->prepare("DELETE FROM utilisateurs WHERE id = ? AND entreprise_id = ?");
+        $del->execute([$id, $entrepriseId]);
+
+        if ($del->rowCount() === 0) {
+            throw new Exception("Utilisateur introuvable dans votre entreprise.");
+        }
 
         echo json_encode(['success' => true, 'id' => $id]);
         exit;
