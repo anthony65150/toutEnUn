@@ -6,9 +6,9 @@ const $$ = (sel, ctx = document) => Array.from(ctx.querySelectorAll(sel));
 const show = (el) => { if (el) el.style.display = "block"; };
 const hide = (el) => { if (el) el.style.display = "none"; };
 
-function capitalizeFirst(s = "") {
-  return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
-}
+const capitalizeFirst = (s = "") => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+// normalise pour tri/dédup insensibles aux accents/majuscules
+const norm = (s="") => s.toString().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 
 // --- Affichage / masquage champs "nouvelle catégorie" ---
 function showNewCategoryInput() {
@@ -30,7 +30,7 @@ function toggleNewCategoryInput() {
   }
 }
 
-// --- Affichage / masquage champs "nouvelle sous‑catégorie" ---
+// --- Affichage / masquage champs "nouvelle sous-catégorie" ---
 function showNewSubCategoryInput() {
   const div = $('#newSousCategorieDiv');
   const input = $('#nouvelleSousCategorie');
@@ -66,9 +66,20 @@ document.addEventListener('DOMContentLoaded', () => {
     return;
   }
 
-  // Changement de catégorie → maj sous‑catégories + reset champ custom
+  // état de requête pour annuler la précédente si nécessaire
+  let currentAbort = null;
+
+  function setSousCatLoading(loading) {
+    if (loading) {
+      sousCategorieSelect.innerHTML = '<option value="" disabled selected>Chargement…</option>';
+      sousCategorieSelect.disabled = true;
+    } else {
+      sousCategorieSelect.disabled = false;
+    }
+  }
+
+  // Changement de catégorie → maj sous-catégories + reset champ custom
   categorieSelect.addEventListener('change', () => {
-    console.log('[Simpliz] Changement de catégorie détecté');
     const categorie = categorieSelect.value;
 
     // Reset sous-catégorie
@@ -76,43 +87,80 @@ document.addEventListener('DOMContentLoaded', () => {
     hide(newSousCatDiv);
     if (newSousCatInput) newSousCatInput.value = '';
 
+    // Annule une requête en cours si on rechangera de catégorie rapidement
+    if (currentAbort) {
+      currentAbort.abort();
+      currentAbort = null;
+    }
+
     if (!categorie) return;
 
-    // IMPORTANT: URL relative au DOCUMENT. Comme la page et ajoutStock.php sont tous deux dans /stock/,
-    // cet appel est correct avec la nouvelle arborescence.
-    const url = `ajoutStock.php?action=getSousCategories&categorie=${encodeURIComponent(categorie)}`;
+    setSousCatLoading(true);
 
-    fetch(url, { headers: { 'Accept': 'application/json' }})
+    // IMPORTANT: URL relative au document (page et script dans /stock/)
+    const url = `ajoutStock.php?action=getSousCategories&categorie=${encodeURIComponent(categorie)}`;
+    currentAbort = new AbortController();
+
+    fetch(url, { headers: { 'Accept': 'application/json' }, signal: currentAbort.signal })
       .then(res => {
-        console.log('[Simpliz] Réponse fetch:', res.status, res.statusText);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
       })
       .then(data => {
-        console.log('[Simpliz] Sous-catégories reçues:', data);
-        if (Array.isArray(data)) {
-          data.forEach(subCat => {
-            const option = document.createElement('option');
-            option.value = subCat;
-            option.textContent = capitalizeFirst(subCat);
-            sousCategorieSelect.appendChild(option);
-          });
-        } else {
-          console.warn('[Simpliz] Format inattendu pour les sous-catégories.');
+        // si on a été annulé entre-temps, on ne touche plus au DOM
+        if (!categorieSelect.value) return;
+
+        // data attendu: string[] ; on déduplique / trie joliment
+        const unique = Array.isArray(data)
+          ? Array.from(
+              new Map(
+                data
+                  .filter(Boolean)
+                  .map(s => s.toString())
+                  .map(s => [norm(s), s])
+              ).values()
+            )
+          : [];
+
+        unique.sort((a, b) => norm(a).localeCompare(norm(b)));
+
+        // Vide → on garde juste l’option par défaut
+        if (unique.length === 0) {
+          sousCategorieSelect.innerHTML =
+            '<option value="" disabled selected>Aucune sous-catégorie</option>';
+          return;
         }
+
+        // Remplit la liste
+        sousCategorieSelect.innerHTML =
+          '<option value="" disabled selected>-- Sélectionner une sous-catégorie --</option>';
+        unique.forEach(subCat => {
+          const option = document.createElement('option');
+          option.value = subCat;
+          option.textContent = capitalizeFirst(subCat);
+          sousCategorieSelect.appendChild(option);
+        });
       })
       .catch(err => {
-        console.error('[Simpliz] Erreur fetch:', err);
+        if (err.name === 'AbortError') return; // normal
+        console.error('[Simpliz] Erreur fetch sous-catégories:', err);
+        sousCategorieSelect.innerHTML =
+          '<option value="" disabled selected>Impossible de charger les sous-catégories</option>';
+      })
+      .finally(() => {
+        setSousCatLoading(false);
+        currentAbort = null;
       });
   });
 
-  // Déclencher la maj au chargement si une catégorie est déjà pré‑sélectionnée
+  // Déclencher la maj au chargement si une catégorie est déjà pré-sélectionnée
   if (categorieSelect.value) {
     categorieSelect.dispatchEvent(new Event('change'));
   }
 });
 
 // --- Expose global functions si utilisées par le HTML ---
-window.showNewCategoryInput     = showNewCategoryInput;
-window.toggleNewCategoryInput   = toggleNewCategoryInput;
-window.showNewSubCategoryInput  = showNewSubCategoryInput;
-window.toggleNewSubCategoryInput= toggleNewSubCategoryInput;
+window.showNewCategoryInput      = showNewCategoryInput;
+window.toggleNewCategoryInput    = toggleNewCategoryInput;
+window.showNewSubCategoryInput   = showNewSubCategoryInput;
+window.toggleNewSubCategoryInput = toggleNewSubCategoryInput;

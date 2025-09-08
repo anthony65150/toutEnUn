@@ -4,6 +4,23 @@ declare(strict_types=1);
 ob_start();
 require_once __DIR__ . '/../config/init.php';
 
+/* ================================
+   MULTI-ENTREPRISE (helpers)
+   ================================ */
+$ENT_ID = $_SESSION['utilisateurs']['entreprise_id'] ?? null;
+$ENT_ID = is_numeric($ENT_ID) ? (int)$ENT_ID : null;
+
+function me_where_first(?int $ENT_ID, string $alias = ''): array {
+    if ($ENT_ID === null) return ['', []];
+    $pfx = $alias ? $alias . '.' : '';
+    return [" WHERE {$pfx}entreprise_id = :eid ", [':eid' => $ENT_ID]];
+}
+function me_where(?int $ENT_ID, string $alias = ''): array {
+    if ($ENT_ID === null) return ['', []];
+    $pfx = $alias ? $alias . '.' : '';
+    return [" AND {$pfx}entreprise_id = :eid ", [':eid' => $ENT_ID]];
+}
+
 /* =========================================================
    AJAX: sous-catégories par catégorie
    ========================================================= */
@@ -11,13 +28,16 @@ if (isset($_GET['action']) && $_GET['action'] === 'getSousCategories' && !empty(
     header('Content-Type: application/json');
     $categorie = trim((string)$_GET['categorie']);
 
-    $stmt = $pdo->prepare("
-        SELECT DISTINCT sous_categorie
-        FROM stock
-        WHERE categorie = ? AND sous_categorie IS NOT NULL AND sous_categorie <> ''
-        ORDER BY sous_categorie
-    ");
-    $stmt->execute([$categorie]);
+    list($frag, $p) = me_where($ENT_ID, 's');
+    $sql = "
+        SELECT DISTINCT s.sous_categorie
+        FROM stock s
+        WHERE s.categorie = :c AND s.sous_categorie IS NOT NULL AND s.sous_categorie <> ''
+        {$frag}
+        ORDER BY s.sous_categorie
+    ";
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute(array_merge([':c' => $categorie], $p));
     echo json_encode($stmt->fetchAll(PDO::FETCH_COLUMN));
     exit;
 }
@@ -34,7 +54,6 @@ if (!isset($_SESSION['utilisateurs']) || ($_SESSION['utilisateurs']['fonction'] 
    Helpers
    ========================================================= */
 function web_to_abs(string $webPath): string {
-    // '/uploads/...' ou 'uploads/...'
     $rel = ltrim($webPath, '/');
     return rtrim($_SERVER['DOCUMENT_ROOT'], '/') . '/' . $rel;
 }
@@ -73,8 +92,12 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
     if ($nom === '')                $errors['nom'] = "Le nom est obligatoire.";
     if ($quantite < 0)              $errors['quantite'] = "La quantité doit être positive.";
     if ($categorie === '')          $errors['categorie'] = "La catégorie est obligatoire.";
+    if ($ENT_ID === null) {
+        // Optionnel: tu peux forcer le multi-entreprise uniquement — ici on autorise le fallback.
+        // $errors['entreprise'] = "Aucune entreprise en session.";
+    }
 
-    // Pré‑validation doc (optionnelle)
+    // Pré-validation doc (optionnelle)
     $document_path_web = null;
     if ($document && $document['error'] !== UPLOAD_ERR_NO_FILE) {
         if ($document['error'] !== UPLOAD_ERR_OK) {
@@ -88,7 +111,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
         }
     }
 
-    // Pré‑validation photo (optionnelle)
+    // Pré-validation photo (optionnelle)
     $photo_path_web = null;
     if ($photo && $photo['error'] !== UPLOAD_ERR_NO_FILE) {
         if ($photo['error'] !== UPLOAD_ERR_OK) {
@@ -106,20 +129,48 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
         try {
             $pdo->beginTransaction();
 
-            // 1) Créer l’article sans fichiers (on obtient l’ID)
-            $stmt = $pdo->prepare("
-                INSERT INTO stock (nom, quantite_totale, quantite_disponible, categorie, sous_categorie, photo, document)
-                VALUES (?, ?, 0, ?, ?, NULL, NULL)
-            ");
-            $stmt->execute([
-                $nom,
-                $quantite,
-                $categorie,
-                $sous_categorie !== '' ? $sous_categorie : null
-            ]);
+            // Trouver le 1er dépôt de l'entreprise
+            $depotId = null;
+            $sqlDepot = "SELECT d.id FROM depots d";
+            list($fragD, $pD) = me_where_first($ENT_ID, 'd');
+            $sqlDepot .= $fragD . " ORDER BY d.id ASC LIMIT 1";
+            $stDepot = $pdo->prepare($sqlDepot);
+            $stDepot->execute($pD);
+            $depotId = (int)($stDepot->fetchColumn() ?: 0);
+
+            if ($depotId <= 0) {
+                throw new RuntimeException("Aucun dépôt n'est configuré pour cette entreprise.");
+            }
+
+            // 1) Créer l’article sans fichiers (on obtient l’ID) + entreprise_id
+            if ($ENT_ID !== null) {
+                $stmt = $pdo->prepare("
+                    INSERT INTO stock (nom, quantite_totale, quantite_disponible, categorie, sous_categorie, photo, document, entreprise_id)
+                    VALUES (?, ?, 0, ?, ?, NULL, NULL, ?)
+                ");
+                $stmt->execute([
+                    $nom,
+                    $quantite,
+                    $categorie,
+                    $sous_categorie !== '' ? $sous_categorie : null,
+                    $ENT_ID
+                ]);
+            } else {
+                // Fallback ancien projet (colonne entreprise_id absente ou non utilisée)
+                $stmt = $pdo->prepare("
+                    INSERT INTO stock (nom, quantite_totale, quantite_disponible, categorie, sous_categorie, photo, document)
+                    VALUES (?, ?, 0, ?, ?, NULL, NULL)
+                ");
+                $stmt->execute([
+                    $nom,
+                    $quantite,
+                    $categorie,
+                    $sous_categorie !== '' ? $sous_categorie : null
+                ]);
+            }
             $stockId = (int)$pdo->lastInsertId();
 
-            // 2) Enregistrer le document (si fourni) → /uploads/documents/articles/{id}/
+            // 2) Enregistrer le document (si fourni)
             if ($document && $document['error'] === UPLOAD_ERR_OK) {
                 $ext  = strtolower(pathinfo($document['name'], PATHINFO_EXTENSION));
                 $dir_web = "uploads/documents/articles/{$stockId}/";
@@ -134,28 +185,11 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
                 }
                 $document_path_web = $dir_web . $filename;
 
-                // Si tu gardes encore la colonne stock.document (legacy)
                 $pdo->prepare("UPDATE stock SET document = ? WHERE id = ?")
                     ->execute([$document_path_web, $stockId]);
-
-                // Si tu veux en parallèle remplir stock_documents, décommente :
-                /*
-                $pdo->prepare("
-                    INSERT INTO stock_documents (stock_id, nom_affichage, chemin_fichier, type_mime, taille, checksum_sha1, uploaded_by)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                ")->execute([
-                    $stockId,
-                    $document['name'],
-                    $document_path_web,
-                    $document['type'] ?? null,
-                    (int)($document['size'] ?? 0),
-                    @sha1_file($dest_abs) ?: null,
-                    (int)($_SESSION['utilisateurs']['id'] ?? 0)
-                ]);
-                */
             }
 
-            // 3) Enregistrer la photo (si fournie) → /uploads/photos/articles/{id}/
+            // 3) Enregistrer la photo (si fournie)
             if ($photo && $photo['error'] === UPLOAD_ERR_OK) {
                 $extp = strtolower(pathinfo($photo['name'], PATHINFO_EXTENSION));
                 $dir_web = "uploads/photos/articles/{$stockId}/";
@@ -174,21 +208,56 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
                     ->execute([$photo_path_web, $stockId]);
             }
 
-            // 4) Mettre la quantité au dépôt #1 + recalcul dispo
-            $depotId = 1;
-            $pdo->prepare("
-                INSERT INTO stock_depots (stock_id, depot_id, quantite)
-                VALUES (?, ?, ?)
-            ")->execute([$stockId, $depotId, $quantite]);
+            // 4) Mettre la quantité dans le dépôt choisi + recalcul dispo
+            //    (avec fallback si stock_depots n'a pas entreprise_id)
+            $insertOk = false;
+            if ($ENT_ID !== null) {
+                try {
+                    $pdo->prepare("
+                        INSERT INTO stock_depots (stock_id, depot_id, quantite, entreprise_id)
+                        VALUES (?, ?, ?, ?)
+                    ")->execute([$stockId, $depotId, $quantite, $ENT_ID]);
+                    $insertOk = true;
+                } catch (Throwable $e) {
+                    // La colonne entreprise_id n'existe pas -> fallback
+                }
+            }
+            if (!$insertOk) {
+                $pdo->prepare("
+                    INSERT INTO stock_depots (stock_id, depot_id, quantite)
+                    VALUES (?, ?, ?)
+                ")->execute([$stockId, $depotId, $quantite]);
+            }
 
-            // dispo = somme des dépôts
-            $pdo->prepare("
+            // dispo = somme des dépôts de l'entreprise
+            $sqlSum = "
                 UPDATE stock s
                 SET quantite_disponible = (
-                    SELECT COALESCE(SUM(quantite), 0) FROM stock_depots WHERE stock_id = s.id
+                    SELECT COALESCE(SUM(sd.quantite), 0)
+                    FROM stock_depots sd
+                    JOIN depots d ON d.id = sd.depot_id
+                    WHERE sd.stock_id = s.id
                 )
                 WHERE s.id = ?
-            ")->execute([$stockId]);
+            ";
+            // Si multi-entreprise actif, limite aux dépôts de l’entreprise
+            if ($ENT_ID !== null) {
+                $sqlSum = "
+                    UPDATE stock s
+                    SET quantite_disponible = (
+                        SELECT COALESCE(SUM(sd.quantite), 0)
+                        FROM stock_depots sd
+                        JOIN depots d ON d.id = sd.depot_id
+                        WHERE sd.stock_id = s.id AND d.entreprise_id = :eid
+                    )
+                    WHERE s.id = :sid
+                ";
+                $stSum = $pdo->prepare($sqlSum);
+                $stSum->execute([':eid' => $ENT_ID, ':sid' => $stockId]);
+            } else {
+                $stSum = $pdo->prepare($sqlSum);
+                $stSum->execute([$stockId]);
+            }
 
             $pdo->commit();
             $success = true;
@@ -203,19 +272,30 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
 /* =========================================================
    Données pour le formulaire
    ========================================================= */
-$categoriesExistantes = $pdo->query("
-    SELECT DISTINCT categorie FROM stock WHERE categorie IS NOT NULL AND categorie <> '' ORDER BY categorie
-")->fetchAll(PDO::FETCH_COLUMN);
+list($fragCat, $pCat) = me_where_first($ENT_ID, 's');
+$sql = "
+    SELECT DISTINCT s.categorie
+    FROM stock s
+    {$fragCat}
+    AND s.categorie IS NOT NULL AND s.categorie <> ''
+    ORDER BY s.categorie
+";
+$stmt = $pdo->prepare($sql);
+$stmt->execute($pCat);
+$categoriesExistantes = $stmt->fetchAll(PDO::FETCH_COLUMN);
 
 $sousCategoriesExistantes = [];
 $categorieSelectionnee = $_POST['nouvelleCategorie'] ?? ($_POST['categorieSelect'] ?? '');
 if ($categorieSelectionnee !== '') {
+    list($fragSub, $pSub) = me_where($ENT_ID, 's');
     $stmtSC = $pdo->prepare("
-        SELECT DISTINCT sous_categorie FROM stock
-        WHERE categorie = ? AND sous_categorie IS NOT NULL AND sous_categorie <> ''
-        ORDER BY sous_categorie
+        SELECT DISTINCT s.sous_categorie
+        FROM stock s
+        WHERE s.categorie = :c AND s.sous_categorie IS NOT NULL AND s.sous_categorie <> ''
+        {$fragSub}
+        ORDER BY s.sous_categorie
     ");
-    $stmtSC->execute([$categorieSelectionnee]);
+    $stmtSC->execute(array_merge([':c' => $categorieSelectionnee], $pSub));
     $sousCategoriesExistantes = $stmtSC->fetchAll(PDO::FETCH_COLUMN);
 }
 

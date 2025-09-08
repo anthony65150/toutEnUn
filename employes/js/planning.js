@@ -174,3 +174,55 @@ document.addEventListener('DOMContentLoaded', ()=>{
     });
   }
 });
+
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-week-shift]');
+  if (!btn) return;
+
+  e.preventDefault();
+
+  const nav  = document.getElementById('weekNav');
+  if (!nav) return;
+
+  const shift = parseInt(btn.dataset.weekShift, 10);
+  let year    = parseInt(nav.dataset.year, 10);
+  let week    = parseInt(nav.dataset.week, 10);
+
+  if (shift === 0) {
+    // Aller à la semaine courante
+    const now = new Date();
+    ({ week, year } = getISOWeekYear(now));
+  } else {
+    ({ week, year } = addWeeks(week, year, shift));
+  }
+
+  // Met à jour l’URL (ex: ?year=2025&week=36) pour que le PHP recharge la bonne semaine
+  const url = new URL(window.location.href);
+  url.searchParams.set('year', year);
+  url.searchParams.set('week', week);
+  window.location.href = url.toString();
+});
+
+// --- Helpers ISO semaine/année ---
+function getISOWeekYear(d) {
+  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const day = (date.getUTCDay() + 6) % 7;       // 0 = lundi
+  date.setUTCDate(date.getUTCDate() - day + 3); // jeudi de la semaine
+  const firstThu = new Date(Date.UTC(date.getUTCFullYear(), 0, 4));
+  const firstThuDay = (firstThu.getUTCDay() + 6) % 7;
+  const week = 1 + Math.round(((date - firstThu) / 86400000 - 3 + firstThuDay) / 7);
+  return { week, year: date.getUTCFullYear() };
+}
+
+function isoWeekMonday(year, week) {
+  const d = new Date(Date.UTC(year, 0, 1 + (week - 1) * 7));
+  const dow = (d.getUTCDay() + 6) % 7;
+  d.setUTCDate(d.getUTCDate() - dow);
+  return d; // lundi
+}
+
+function addWeeks(week, year, shift) {
+  const d = isoWeekMonday(year, week);
+  d.setUTCDate(d.getUTCDate() + shift * 7);
+  return getISOWeekYear(d);
+}

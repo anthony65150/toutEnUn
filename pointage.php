@@ -2,96 +2,126 @@
 require_once "./config/init.php";
 require_once __DIR__ . '/templates/header.php';
 require_once __DIR__ . '/templates/navigation/navigation.php';
+setlocale(LC_TIME, 'fr_FR.UTF-8','fr_FR','French_France.1252');
 
-if (!isset($_SESSION['utilisateurs'])) {
-    header("Location: connexion.php"); exit;
+if (!isset($_SESSION['utilisateurs'])) { header("Location: connexion.php"); exit; }
+
+$user         = $_SESSION['utilisateurs'];
+$role         = $user['fonction'] ?? null;
+$userId       = (int)($user['id'] ?? 0);
+$entrepriseId = (int)($user['entreprise_id'] ?? 0);
+
+// ----- Semaine affichée (lundi -> dimanche)
+$weekStart = isset($_GET['start']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $_GET['start'])
+  ? new DateTime($_GET['start'])
+  : new DateTime('monday this week');
+
+$days = [];
+for ($i=0; $i<7; $i++) {
+  $d = (clone $weekStart)->modify("+$i day");
+  $days[] = [
+    'iso' => $d->format('Y-m-d'),
+    'label' => ucfirst(strftime('%A %e %B', $d->getTimestamp())),
+  ];
 }
+$weekNum = (int)$weekStart->format('W');
+$monthTitle = ucfirst(strftime('%B %Y', $weekStart->getTimestamp()));
 
-$user   = $_SESSION['utilisateurs'];
-$role   = $user['fonction'] ?? null;
-$userId = (int)($user['id'] ?? 0);
-
-/* =========================================================
-   Chantiers visibles selon le rôle
-   ========================================================= */
+// ----- Chantiers visibles
 if ($role === 'administrateur') {
-    $stmt = $pdo->query("SELECT id, nom FROM chantiers ORDER BY nom");
-    $visibleChantiers = $stmt->fetchAll(PDO::FETCH_ASSOC);
+  $stmt = $pdo->prepare("SELECT id, nom FROM chantiers WHERE entreprise_id=? ORDER BY nom");
+  $stmt->execute([$entrepriseId]);
+  $visibleChantiers = $stmt->fetchAll(PDO::FETCH_ASSOC);
 } else {
-    // Chef : uniquement ses chantiers
-    $stmt = $pdo->prepare("
-        SELECT c.id, c.nom
-        FROM utilisateur_chantiers uc
-        JOIN chantiers c ON c.id = uc.chantier_id
-        WHERE uc.utilisateur_id = ?
-        ORDER BY c.nom
-    ");
-    $stmt->execute([$userId]);
-    $visibleChantiers = $stmt->fetchAll(PDO::FETCH_ASSOC);
+  $stmt = $pdo->prepare("
+    SELECT DISTINCT c.id, c.nom
+    FROM utilisateur_chantiers uc
+    JOIN chantiers c ON c.id = uc.chantier_id
+    WHERE uc.utilisateur_id = ? AND c.entreprise_id = ?
+    ORDER BY c.nom
+  ");
+  $stmt->execute([$userId, $entrepriseId]);
+  $visibleChantiers = $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
-/* =========================================================
-   Employés + leurs chantiers
-   - On liste les employés (et éventuellement chefs si tu veux les pointer aussi)
-   - Ajuste la clause WHERE si besoin
-   ========================================================= */
-$employees = $pdo->query("
-    SELECT u.id,
-           u.prenom,
-           u.nom,
-           u.fonction,
-           GROUP_CONCAT(DISTINCT uc.chantier_id ORDER BY uc.chantier_id SEPARATOR ',') AS chantier_ids,
-           GROUP_CONCAT(DISTINCT c.nom ORDER BY c.nom SEPARATOR ' | ')                  AS chantier_noms
-    FROM utilisateurs u
-    LEFT JOIN utilisateur_chantiers uc ON uc.utilisateur_id = u.id
-    LEFT JOIN chantiers c            ON c.id = uc.chantier_id
-    WHERE u.fonction IN ('employe','chef')  -- <- ajoute d'autres rôles si besoin
-    GROUP BY u.id, u.prenom, u.nom, u.fonction
-    ORDER BY u.nom, u.prenom
-")->fetchAll(PDO::FETCH_ASSOC);
+// ----- Employés + leurs chantiers (pour menus dans cellules)
+$stmt = $pdo->prepare("
+  SELECT u.id, u.prenom, u.nom, u.fonction,
+         GROUP_CONCAT(DISTINCT uc.chantier_id ORDER BY uc.chantier_id SEPARATOR ',') AS chantier_ids,
+         GROUP_CONCAT(DISTINCT c.nom ORDER BY c.nom SEPARATOR '||') AS chantier_noms
+  FROM utilisateurs u
+  LEFT JOIN utilisateur_chantiers uc ON uc.utilisateur_id = u.id
+  LEFT JOIN chantiers c ON c.id = uc.chantier_id AND c.entreprise_id = :eid2
+  WHERE u.entreprise_id = :eid1
+    AND u.fonction IN ('employe','chef')
+  GROUP BY u.id, u.prenom, u.nom, u.fonction
+  ORDER BY u.nom, u.prenom
+");
+$stmt->execute([':eid1' => $entrepriseId, ':eid2' => $entrepriseId]);
 
-// Pour l’URL d’action (backend à créer si pas déjà fait)
-$POINTAGE_ENDPOINT = 'pointage_actions.php';
+$employees = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// ----- Pointages travail (heures) de la semaine (optionnel : adapte à ta table)
+$startIso = $weekStart->format('Y-m-d');
+$endIso   = (clone $weekStart)->modify('+7 days')->format('Y-m-d');
+
+$hoursMap = []; // $hoursMap[user_id][Y-m-d] = nombre d'heures (float)
+if ($pdo->query("SHOW TABLES LIKE 'pointages'")->rowCount()) {
+  $stmt = $pdo->prepare("
+    SELECT utilisateur_id, date_jour, SUM(TIMESTAMPDIFF(MINUTE, heure_debut, heure_fin))/60 AS h
+    FROM pointages
+    WHERE entreprise_id = :eid
+      AND date_jour >= :d1 AND date_jour < :d2
+    GROUP BY utilisateur_id, date_jour
+  ");
+  $stmt->execute([':eid'=>$entrepriseId, ':d1'=>$startIso, ':d2'=>$endIso]);
+  while ($r = $stmt->fetch(PDO::FETCH_ASSOC)) {
+    $hoursMap[(int)$r['utilisateur_id']][$r['date_jour']] = (float)$r['h'];
+  }
+}
+
+// ----- Absences de la semaine
+$absMap = []; // $absMap[user_id][date] = 'conges'|'maladie'|'injustifie'
+$stmt = $pdo->prepare("
+  SELECT utilisateur_id, date_jour, motif
+  FROM pointages_absences
+  WHERE entreprise_id = :eid
+    AND date_jour >= :d1 AND date_jour < :d2
+");
+$stmt->execute([':eid'=>$entrepriseId, ':d1'=>$startIso, ':d2'=>$endIso]);
+while ($r = $stmt->fetch(PDO::FETCH_ASSOC)) {
+  $absMap[(int)$r['utilisateur_id']][$r['date_jour']] = $r['motif'];
+}
+
+
+// ----- Conduite A/R de la semaine
+$conduiteMap = []; // $conduiteMap[user_id][date]['A'|'R']=true
+$stmt = $pdo->prepare("
+  SELECT utilisateur_id, date_pointage, type
+  FROM pointages_conduite
+  WHERE entreprise_id = :eid
+    AND date_pointage >= :d1 AND date_pointage < :d2
+");
+$stmt->execute([':eid'=>$entrepriseId, ':d1'=>$startIso, ':d2'=>$endIso]);
+while ($r = $stmt->fetch(PDO::FETCH_ASSOC)) {
+  $conduiteMap[(int)$r['utilisateur_id']][$r['date_pointage']][$r['type']] = true;
+}
 ?>
-<div class="container mt-4" 
-     id="pointageApp"
-     data-endpoint="<?= htmlspecialchars($POINTAGE_ENDPOINT) ?>"
-     data-role="<?= htmlspecialchars($role ?? '') ?>">
 
+<div class="container my-4" id="pointageApp"
+     data-week-start="<?= htmlspecialchars($weekStart->format('Y-m-d')) ?>">
   <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+    <a href="javascript:history.back()" class="btn btn-outline-secondary btn-sm">← Retour</a>
     <h1 class="mb-0">Pointage</h1>
-    <div class="d-flex align-items-center gap-2">
-      <input type="date" id="dateInput" class="form-control form-control-sm" value="<?= date('Y-m-d') ?>" />
-    </div>
+    <div class="text-muted">Semaine <?= $weekNum ?></div>
   </div>
 
-  <!-- Barre d’actions groupées -->
-  <div class="d-flex flex-wrap align-items-center gap-2 mb-3" id="bulkBar">
-    <span class="small text-muted" id="bulkCount">0 sélectionné</span>
-    <button class="btn btn-sm btn-success" data-bulk="present" data-hours="7">Présent 7h</button>
-    <button class="btn btn-sm btn-outline-secondary" data-bulk="present" data-hours="8">Présent 8h</button>
-    <div class="btn-group">
-      <button class="btn btn-sm btn-outline-primary" data-bulk="conduite" data-hours="2">Conduite 2h</button>
-      <button class="btn btn-sm btn-outline-primary dropdown-toggle dropdown-toggle-split" data-bs-toggle="dropdown"></button>
-      <ul class="dropdown-menu">
-        <li><a class="dropdown-item" data-bulk="conduite" data-hours="1">Conduite 1h</a></li>
-        <li><a class="dropdown-item" data-bulk="conduite" data-hours="2">Conduite 2h</a></li>
-        <li><a class="dropdown-item" data-bulk="conduite" data-hours="3">Conduite 3h</a></li>
-      </ul>
-    </div>
-    <div class="btn-group">
-      <button class="btn btn-sm btn-outline-danger" data-bulk="absence" data-reason="maladie">Abs. Maladie</button>
-      <button class="btn btn-sm btn-outline-danger dropdown-toggle dropdown-toggle-split" data-bs-toggle="dropdown"></button>
-      <ul class="dropdown-menu">
-        <li><a class="dropdown-item" data-bulk="absence" data-reason="conges">Abs. Congés</a></li>
-        <li><a class="dropdown-item" data-bulk="absence" data-reason="sans_solde">Abs. Sans solde</a></li>
-        <li><a class="dropdown-item" data-bulk="absence" data-reason="autre">Abs. Autre…</a></li>
-      </ul>
-    </div>
+  <!-- Barre recherche + filtres chantier -->
+  <div class="mb-3">
+    <input type="search" id="searchInput" class="form-control" placeholder="Rechercher un employé…">
   </div>
 
-  <!-- Filtres chantiers -->
-  <div class="d-flex flex-wrap gap-2 mb-3" id="chantierFilters">
+  <div class="d-flex align-items-center flex-wrap gap-2 mb-3" id="chantierFilters">
     <button class="btn btn-sm btn-outline-secondary active" data-chantier="all">Tous</button>
     <?php foreach ($visibleChantiers as $ch): ?>
       <button class="btn btn-sm btn-outline-secondary" data-chantier="<?= (int)$ch['id'] ?>">
@@ -100,108 +130,113 @@ $POINTAGE_ENDPOINT = 'pointage_actions.php';
     <?php endforeach; ?>
   </div>
 
-  <!-- Recherche -->
-  <div class="mb-3">
-    <input type="text" id="searchInput" class="form-control" placeholder="Rechercher un employé…">
+  <!-- Nav semaine -->
+  <div class="d-flex justify-content-center gap-2 mb-3">
+    <?php
+      $prev = (clone $weekStart)->modify('-7 days')->format('Y-m-d');
+      $curr = (new DateTime('monday this week'))->format('Y-m-d');
+      $next = (clone $weekStart)->modify('+7 days')->format('Y-m-d');
+    ?>
+    <a class="btn btn-outline-secondary" href="?start=<?= $prev ?>">← Semaine -1</a>
+    <a class="btn btn-outline-secondary" href="?start=<?= $curr ?>">Cette semaine</a>
+    <a class="btn btn-outline-secondary" href="?start=<?= $next ?>">Semaine +1 →</a>
   </div>
 
-  <!-- Tableau employés -->
+
+  <!-- Tableau type planning -->
   <div class="table-responsive">
-    <table class="table table-hover align-middle" id="pointageTable">
-      <thead class="table-light">
+    <table class="table table-bordered align-middle">
+      <thead class="table-dark">
         <tr>
-          <th style="width:28%">Nom</th>
-          <th>Chantiers</th>
-          <th style="width:48%">Actions rapides</th>
+          <th style="min-width:220px">Employés</th>
+          <?php foreach ($days as $d): ?>
+            <th>
+              <div class="small fw-semibold"><?= htmlspecialchars($d['label']) ?></div>
+              <div class="small text-muted"><?= htmlspecialchars($d['iso']) ?></div>
+            </th>
+          <?php endforeach; ?>
         </tr>
       </thead>
       <tbody>
       <?php foreach ($employees as $e):
-        $ids  = $e['chantier_ids'] ?: '';     // ex "1,3,5"
-        $noms = $e['chantier_noms'] ?: '—';
+        $uid    = (int)$e['id'];
+        $idsStr = $e['chantier_ids'] ?: '';
+        $nomsStr= $e['chantier_noms'] ?: '';
+        $idsArr = $idsStr !== '' ? array_map('intval', explode(',', $idsStr)) : [];
+        $nomsArr= $nomsStr !== '' ? explode('||', $nomsStr) : [];
+        $pairs  = [];
+        foreach ($idsArr as $k => $cid) { $pairs[] = [$cid, $nomsArr[$k] ?? '—']; }
       ?>
-        <tr data-user-id="<?= (int)$e['id'] ?>"
-            data-chantiers="<?= htmlspecialchars($ids) ?>"
-            data-name="<?= htmlspecialchars(strtolower($e['nom'].' '.$e['prenom'])) ?>">
-          <td>
+        <tr data-user-id="<?= $uid ?>"
+            data-name="<?= htmlspecialchars(strtolower($e['nom'].' '.$e['prenom'])) ?>"
+            data-chantiers="<?= htmlspecialchars($idsStr) ?>">
+          <td style="white-space:nowrap">
             <strong><?= htmlspecialchars($e['nom'].' '.$e['prenom']) ?></strong>
-            <div class="small text-muted"><?= htmlspecialchars($e['fonction']) ?></div>
+            <span class="badge text-bg-light ms-2"><?= htmlspecialchars($e['fonction']) ?></span>
           </td>
-          <td><?= htmlspecialchars($noms) ?></td>
-          <td class="d-flex flex-wrap align-items-center gap-2">
-            <!-- 1 clic = présent 7h -->
-            <button class="btn btn-sm btn-success quick-action"
-                    data-action="present" data-hours="7" title="Présent 7h">Présent</button>
 
-            <!-- Ajustements rapides -->
-            <div class="btn-group">
-              <button class="btn btn-sm btn-outline-secondary quick-action" data-action="present" data-hours="6">6h</button>
-              <button class="btn btn-sm btn-outline-secondary quick-action" data-action="present" data-hours="8">8h</button>
-              <button class="btn btn-sm btn-outline-secondary quick-action" data-action="present" data-hours="9">9h</button>
+          <?php foreach ($days as $d):
+            $dateIso = $d['iso'];
+            $hDone   = isset($hoursMap[$uid][$dateIso]) ? (float)$hoursMap[$uid][$dateIso] : null;
+            $aDone   = !empty($conduiteMap[$uid][$dateIso]['A']);
+            $rDone   = !empty($conduiteMap[$uid][$dateIso]['R']);
+          ?>
+          <td data-date="<?= htmlspecialchars($dateIso) ?>">
+            <!-- Sélect chantier compact dans la cellule -->
+            <div class="d-flex align-items-center gap-2 mb-2">
+              <select class="form-select form-select-sm chantier-select" style="max-width: 180px">
+                <option value="">— chantier —</option>
+                <?php foreach ($pairs as [$cid, $cname]): ?>
+                  <option value="<?= (int)$cid ?>"><?= htmlspecialchars($cname) ?></option>
+                <?php endforeach; ?>
+              </select>
+              <button class="btn btn-sm btn-outline-secondary clear-cell" title="Effacer">×</button>
             </div>
 
-            <!-- Conduite par défaut + menu -->
-            <div class="btn-group">
-              <button class="btn btn-sm btn-outline-primary quick-action"
-                      data-action="conduite" data-hours="2" title="Conduite 2h">Conduite</button>
-              <button class="btn btn-sm btn-outline-primary dropdown-toggle dropdown-toggle-split" data-bs-toggle="dropdown"></button>
-              <ul class="dropdown-menu dropdown-menu-end small">
-                <li><a class="dropdown-item quick-action" data-action="conduite" data-hours="1">1h</a></li>
-                <li><a class="dropdown-item quick-action" data-action="conduite" data-hours="2">2h</a></li>
-                <li><a class="dropdown-item quick-action" data-action="conduite" data-hours="3">3h</a></li>
-              </ul>
-            </div>
+            <?php
+  $abs = $absMap[$uid][$dateIso] ?? null;
+  $isAbsent = $abs !== null;
+  $absLabel = $abs === 'conges' ? 'Congés' : ($abs === 'maladie' ? 'Maladie' : ($abs === 'injustifie' ? 'Injustifié' : ''));
+?>
+<!-- Heures présent (par défaut 8h15 = 8.25h) -->
+<div class="btn-group mb-2">
+  <button class="btn btn-sm present-btn <?= $hDone ? 'btn-success' : 'btn-outline-success' ?>"
+          data-hours="8.25" <?= $isAbsent ? 'disabled' : '' ?>>
+    <?= $hDone ? number_format($hDone,2,',','').' h' : 'Présent 8h15' ?>
+  </button>
+  <button class="btn btn-sm btn-outline-success present-btn" data-hours="7" <?= $isAbsent ? 'disabled' : '' ?>>7h</button>
+  <button class="btn btn-sm btn-outline-success present-btn" data-hours="9" <?= $isAbsent ? 'disabled' : '' ?>>9h</button>
+</div>
 
-            <!-- Absence par défaut + menu -->
-            <div class="btn-group">
-              <button class="btn btn-sm btn-outline-danger quick-action"
-                      data-action="absence" data-reason="maladie" title="Absence (Maladie)">Abs.</button>
-              <button class="btn btn-sm btn-outline-danger dropdown-toggle dropdown-toggle-split" data-bs-toggle="dropdown"></button>
-              <ul class="dropdown-menu dropdown-menu-end small">
-                <li><a class="dropdown-item quick-action" data-action="absence" data-reason="maladie">Maladie</a></li>
-                <li><a class="dropdown-item quick-action" data-action="absence" data-reason="conges">Congés</a></li>
-                <li><a class="dropdown-item quick-action" data-action="absence" data-reason="sans_solde">Sans solde</a></li>
-                <li><a class="dropdown-item quick-action" data-action="absence" data-reason="autre">Autre…</a></li>
-              </ul>
-            </div>
+<!-- Conduite A/R -->
+<div class="d-flex gap-2 mb-2">
+  <button class="btn btn-sm conduite-btn <?= $aDone ? 'btn-primary' : 'btn-outline-primary' ?>"
+          data-type="A" <?= ($aDone || $isAbsent) ? 'disabled' : '' ?>>A</button>
+  <button class="btn btn-sm conduite-btn <?= $rDone ? 'btn-success' : 'btn-outline-success' ?>"
+          data-type="R" <?= ($rDone || $isAbsent) ? 'disabled' : '' ?>>R</button>
+</div>
 
-            <!-- Sélection groupée -->
-            <div class="form-check ms-1">
-              <input class="form-check-input select-user" type="checkbox">
-            </div>
+<!-- Absence -->
+<div class="btn-group">
+  <button class="btn btn-sm <?= $isAbsent ? 'btn-danger' : 'btn-outline-danger' ?> absence-btn" disabled>
+    <?= $isAbsent ? 'Abs. '.$absLabel : 'Abs.' ?>
+  </button>
+  <button class="btn btn-sm btn-outline-danger dropdown-toggle dropdown-toggle-split" data-bs-toggle="dropdown"></button>
+  <ul class="dropdown-menu small">
+    <li><a class="dropdown-item absence-choice" data-reason="conges">Congés</a></li>
+    <li><a class="dropdown-item absence-choice" data-reason="maladie">Maladie</a></li>
+    <li><a class="dropdown-item absence-choice" data-reason="injustifie">Injustifié (non payé)</a></li>
+  </ul>
+</div>
+
           </td>
+          <?php endforeach; ?>
+
         </tr>
       <?php endforeach; ?>
       </tbody>
     </table>
   </div>
 </div>
-
-<!-- Modal "Autre…" -->
-<div class="modal fade" id="autreModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog">
-    <form class="modal-content" id="autreForm">
-      <div class="modal-header">
-        <h5 class="modal-title">Préciser le motif</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
-      </div>
-      <div class="modal-body">
-        <textarea class="form-control" id="autreComment" rows="3" placeholder="Motif / commentaire" required></textarea>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-primary" type="submit">Valider</button>
-      </div>
-    </form>
-  </div>
-</div>
-
-<!-- Toast (injecté par JS) -->
-
-<!-- JS de la page -->
-<script>
-  // Optionnel : si tu veux pré-sélectionner un chantier via l’URL (ex: pointage.php?chantier_id=3)
-  window.defaultChantierId = <?= isset($_GET['chantier_id']) ? (int)$_GET['chantier_id'] : 'null' ?>;
-</script>
-<script src="/js/pointage.js?v=1"></script>
 
 <?php require_once __DIR__ . '/templates/footer.php'; ?>

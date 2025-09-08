@@ -3,12 +3,40 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../config/init.php';
 
+// ---------- Accès ----------
 if (!isset($_SESSION['utilisateurs']) || ($_SESSION['utilisateurs']['fonction'] ?? null) !== 'administrateur') {
     $_SESSION['error_message'] = "Accès refusé.";
     header("Location: stock_admin.php");
     exit;
 }
 
+// ---------- Multi-entreprise ----------
+$ENT_ID = $_SESSION['utilisateurs']['entreprise_id'] ?? null;
+$ENT_ID = is_numeric($ENT_ID) ? (int)$ENT_ID : null;
+
+function me_where_first(?int $ENT_ID, string $alias = ''): array {
+    if ($ENT_ID === null) return ['', []];
+    $pfx = $alias ? $alias . '.' : '';
+    return [" WHERE {$pfx}entreprise_id = :eid ", [':eid' => $ENT_ID]];
+}
+function me_where(?int $ENT_ID, string $alias = ''): array {
+    if ($ENT_ID === null) return ['', []];
+    $pfx = $alias ? $alias . '.' : '';
+    return [" AND {$pfx}entreprise_id = :eid ", [':eid' => $ENT_ID]];
+}
+function belongs_or_fallback(PDO $pdo, string $table, int $id, ?int $ENT_ID): bool {
+    if ($ENT_ID === null) return true;
+    try {
+        $st = $pdo->prepare("SELECT 1 FROM {$table} t WHERE t.id = :id AND t.entreprise_id = :eid");
+        $st->execute([':id'=>$id, ':eid'=>$ENT_ID]);
+        return (bool)$st->fetchColumn();
+    } catch (Throwable $e) {
+        // Colonne entreprise_id absente -> fallback permissif
+        return true;
+    }
+}
+
+// ---------- Vérifs requête ----------
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST' || !isset($_POST['transfert_id'])) {
     if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') {
         echo json_encode(['success' => false, 'message' => "Requête invalide."]);
@@ -21,15 +49,31 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST' || !isset($_POST['transfert
 
 $transfertId = (int)$_POST['transfert_id'];
 
-// Charger le transfert (encore en attente)
-$stmt = $pdo->prepare("
-    SELECT t.*, s.nom AS article_nom
-    FROM transferts_en_attente t
-    JOIN stock s ON t.article_id = s.id
-    WHERE t.id = ? AND t.statut = 'en_attente'
-");
-$stmt->execute([$transfertId]);
-$transfert = $stmt->fetch(PDO::FETCH_ASSOC);
+// ---------- Charger le transfert en attente ----------
+try {
+    // On filtre par entreprise si la colonne existe
+    $sql = "
+        SELECT t.*, s.nom AS article_nom
+        FROM transferts_en_attente t
+        JOIN stock s ON t.article_id = s.id
+        WHERE t.id = :tid AND t.statut = 'en_attente'
+    ";
+    $params = [':tid' => $transfertId];
+
+    if ($ENT_ID !== null) {
+        try {
+            // Cas où transferts_en_attente.entreprise_id existe
+            $sql .= " AND t.entreprise_id = :eid";
+            $params[':eid'] = $ENT_ID;
+        } catch (Throwable $e) { /* ignoré */ }
+    }
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $transfert = $stmt->fetch(PDO::FETCH_ASSOC);
+} catch (Throwable $e) {
+    $transfert = false;
+}
 
 if (!$transfert) {
     $_SESSION['error_message'] = "Transfert introuvable ou déjà validé.";
@@ -46,11 +90,39 @@ $destinationId    = isset($transfert['destination_id']) ? (int)$transfert['desti
 $demandeurId      = (int)$transfert['demandeur_id'];
 $validatorUserId  = $_SESSION['utilisateurs']['id'] ?? null;
 
+// ---------- Garde-fous multi-entreprise ----------
+if ($ENT_ID !== null) {
+    // Article
+    if (!belongs_or_fallback($pdo, 'stock', $articleId, $ENT_ID)) {
+        $_SESSION['error_message'] = "Article hors de votre entreprise.";
+        header("Location: stock_admin.php"); exit;
+    }
+    // Source
+    if ($sourceType === 'depot' && $sourceId && !belongs_or_fallback($pdo, 'depots', $sourceId, $ENT_ID)) {
+        $_SESSION['error_message'] = "Source (dépôt) hors de votre entreprise.";
+        header("Location: stock_admin.php"); exit;
+    }
+    if ($sourceType === 'chantier' && $sourceId && !belongs_or_fallback($pdo, 'chantiers', $sourceId, $ENT_ID)) {
+        $_SESSION['error_message'] = "Source (chantier) hors de votre entreprise.";
+        header("Location: stock_admin.php"); exit;
+    }
+    // Destination
+    if ($destinationType === 'depot' && $destinationId && !belongs_or_fallback($pdo, 'depots', $destinationId, $ENT_ID)) {
+        $_SESSION['error_message'] = "Destination (dépôt) hors de votre entreprise.";
+        header("Location: stock_admin.php"); exit;
+    }
+    if ($destinationType === 'chantier' && $destinationId && !belongs_or_fallback($pdo, 'chantiers', $destinationId, $ENT_ID)) {
+        $_SESSION['error_message'] = "Destination (chantier) hors de votre entreprise.";
+        header("Location: stock_admin.php"); exit;
+    }
+}
+
 try {
     $pdo->beginTransaction();
 
-    // ➕ Ajout côté destination (verrouillage "FOR UPDATE" optionnel selon moteur)
+    // === Ajout côté destination ===
     if ($destinationType === 'depot') {
+        // Upsert sur stock_depots
         $stmtCheck = $pdo->prepare("SELECT quantite FROM stock_depots WHERE depot_id = ? AND stock_id = ? FOR UPDATE");
         $stmtCheck->execute([$destinationId, $articleId]);
         $exists = $stmtCheck->fetchColumn();
@@ -62,10 +134,23 @@ try {
             ");
             $stmtUpdate->execute(['qte' => $quantite, 'dest' => $destinationId, 'article' => $articleId]);
         } else {
-            $stmtInsert = $pdo->prepare("
-                INSERT INTO stock_depots (depot_id, stock_id, quantite) VALUES (:dest, :article, :qte)
-            ");
-            $stmtInsert->execute(['dest' => $destinationId, 'article' => $articleId, 'qte' => $quantite]);
+            // Si la colonne entreprise_id existe, on la renseigne
+            $insertDone = false;
+            if ($ENT_ID !== null) {
+                try {
+                    $pdo->prepare("
+                        INSERT INTO stock_depots (depot_id, stock_id, quantite, entreprise_id)
+                        VALUES (:dest, :article, :qte, :eid)
+                    ")->execute(['dest'=>$destinationId,'article'=>$articleId,'qte'=>$quantite,'eid'=>$ENT_ID]);
+                    $insertDone = true;
+                } catch (Throwable $e) { /* fallback */ }
+            }
+            if (!$insertDone) {
+                $stmtInsert = $pdo->prepare("
+                    INSERT INTO stock_depots (depot_id, stock_id, quantite) VALUES (:dest, :article, :qte)
+                ");
+                $stmtInsert->execute(['dest' => $destinationId, 'article' => $articleId, 'qte' => $quantite]);
+            }
         }
     } else { // destination = chantier
         $stmtCheck = $pdo->prepare("SELECT quantite FROM stock_chantiers WHERE chantier_id = ? AND stock_id = ? FOR UPDATE");
@@ -79,15 +164,27 @@ try {
             ");
             $stmtUpdate->execute(['qte' => $quantite, 'dest' => $destinationId, 'article' => $articleId]);
         } else {
-            $stmtInsert = $pdo->prepare("
-                INSERT INTO stock_chantiers (chantier_id, stock_id, quantite) VALUES (:dest, :article, :qte)
-            ");
-            $stmtInsert->execute(['dest' => $destinationId, 'article' => $articleId, 'qte' => $quantite]);
+            $insertDone = false;
+            if ($ENT_ID !== null) {
+                try {
+                    $pdo->prepare("
+                        INSERT INTO stock_chantiers (chantier_id, stock_id, quantite, entreprise_id)
+                        VALUES (:dest, :article, :qte, :eid)
+                    ")->execute(['dest'=>$destinationId,'article'=>$articleId,'qte'=>$quantite,'eid'=>$ENT_ID]);
+                    $insertDone = true;
+                } catch (Throwable $e) { /* fallback */ }
+            }
+            if (!$insertDone) {
+                $stmtInsert = $pdo->prepare("
+                    INSERT INTO stock_chantiers (chantier_id, stock_id, quantite) VALUES (:dest, :article, :qte)
+                ");
+                $stmtInsert->execute(['dest' => $destinationId, 'article' => $articleId, 'qte' => $quantite]);
+            }
         }
     }
 
-    // 🔻 Retirer de la source uniquement si source = chantier
-    // (si source = dépôt, déjà décrémenté au moment de la demande)
+    // === Retrait côté source (uniquement si source = chantier)
+    // (si source = dépôt, déjà décrémenté à la demande)
     if ($sourceType === 'chantier') {
         $stmtUpdate = $pdo->prepare("
             UPDATE stock_chantiers
@@ -97,15 +194,17 @@ try {
         $stmtUpdate->execute(['qte' => $quantite, 'src' => $sourceId, 'article' => $articleId]);
     }
 
-    // 🧾 Historique
+    // === Historique ===
     $commentaire = $transfert['commentaire'] ?? null;
     $stmtMv = $pdo->prepare("
         INSERT INTO stock_mouvements
-            (stock_id, type, source_type, source_id, dest_type, dest_id, quantite, statut, commentaire, utilisateur_id, demandeur_id, created_at)
+            (stock_id, type, source_type, source_id, dest_type, dest_id, quantite, statut, commentaire, utilisateur_id, demandeur_id, created_at
+            ".($ENT_ID!==null ? ", entreprise_id" : "").")
         VALUES
-            (:stock_id, 'transfert', :src_type, :src_id, :dest_type, :dest_id, :qte, 'valide', :commentaire, :validateur_id, :demandeur_id, NOW())
+            (:stock_id, 'transfert', :src_type, :src_id, :dest_type, :dest_id, :qte, 'valide', :commentaire, :validateur_id, :demandeur_id, NOW()
+            ".($ENT_ID!==null ? ", :eid" : "").")
     ");
-    $stmtMv->execute([
+    $paramsMv = [
         ':stock_id'      => $articleId,
         ':src_type'      => $sourceType,
         ':src_id'        => $sourceId,
@@ -115,16 +214,29 @@ try {
         ':commentaire'   => $commentaire,
         ':validateur_id' => $validatorUserId,
         ':demandeur_id'  => $demandeurId,
-    ]);
+    ];
+    if ($ENT_ID !== null) $paramsMv[':eid'] = $ENT_ID;
+    $stmtMv->execute($paramsMv);
 
-    // 🗑️ Supprimer l'enregistrement en attente
+    // === Supprimer la demande en attente ===
     $stmtDelete = $pdo->prepare("DELETE FROM transferts_en_attente WHERE id = ?");
     $stmtDelete->execute([$transfertId]);
 
-    // 🔔 Notification au demandeur
+    // === Notification au demandeur ===
     $message = "✅ Le transfert de {$quantite} x {$transfert['article_nom']} a été validé par l'administrateur.";
-    $stmtNotif = $pdo->prepare("INSERT INTO notifications (utilisateur_id, message) VALUES (?, ?)");
-    $stmtNotif->execute([$demandeurId, $message]);
+    if ($ENT_ID !== null) {
+        try {
+            $pdo->prepare("INSERT INTO notifications (utilisateur_id, message, entreprise_id) VALUES (?, ?, ?)")
+                ->execute([$demandeurId, $message, $ENT_ID]);
+        } catch (Throwable $e) {
+            // fallback si colonne absente
+            $pdo->prepare("INSERT INTO notifications (utilisateur_id, message) VALUES (?, ?)")
+                ->execute([$demandeurId, $message]);
+        }
+    } else {
+        $pdo->prepare("INSERT INTO notifications (utilisateur_id, message) VALUES (?, ?)")
+            ->execute([$demandeurId, $message]);
+    }
 
     $pdo->commit();
 

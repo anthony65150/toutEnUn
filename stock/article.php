@@ -1,5 +1,7 @@
 <?php
 // Fichier: /stock/article.php
+declare(strict_types=1);
+
 require_once __DIR__ . '/../config/init.php';
 
 if (!isset($_SESSION['utilisateurs'])) {
@@ -9,6 +11,36 @@ if (!isset($_SESSION['utilisateurs'])) {
 
 require_once __DIR__ . '/../templates/header.php';
 require_once __DIR__ . '/../templates/navigation/navigation.php';
+
+/* ================================
+   Multi-entreprise helpers
+================================ */
+$ENT_ID = $_SESSION['utilisateurs']['entreprise_id'] ?? null;
+$ENT_ID = is_numeric($ENT_ID) ? (int)$ENT_ID : null;
+
+function me_where_first(?int $ENT_ID, string $alias = ''): array
+{
+    if ($ENT_ID === null) return ['', []];
+    $pfx = $alias ? $alias . '.' : '';
+    return [" WHERE {$pfx}entreprise_id = :eid ", [':eid' => $ENT_ID]];
+}
+function me_where(?int $ENT_ID, string $alias = ''): array
+{
+    if ($ENT_ID === null) return ['', []];
+    $pfx = $alias ? $alias . '.' : '';
+    return [" AND {$pfx}entreprise_id = :eid ", [':eid' => $ENT_ID]];
+}
+function belongs_or_fallback(PDO $pdo, string $table, int $id, ?int $ENT_ID): bool
+{
+    if ($ENT_ID === null) return true;
+    try {
+        $st = $pdo->prepare("SELECT 1 FROM {$table} t WHERE t.id = :id AND t.entreprise_id = :eid");
+        $st->execute([':id' => $id, ':eid' => $ENT_ID]);
+        return (bool)$st->fetchColumn();
+    } catch (Throwable $e) {
+        return true; // colonne absente → permissif
+    }
+}
 
 /* ================================
    Params + rôle + sécurités
@@ -47,11 +79,26 @@ if ($fonction === 'depot' && $depotId > 0) {
 }
 
 /* ================================
-   1) ARTICLE
+   1) ARTICLE (filtré entreprise)
 ================================ */
-$stmt = $pdo->prepare("SELECT * FROM stock WHERE id = ?");
-$stmt->execute([$articleId]);
-$article = $stmt->fetch(PDO::FETCH_ASSOC);
+try {
+    $sql = "SELECT * FROM stock WHERE id = :id";
+    $params = [':id' => $articleId];
+
+    if ($ENT_ID !== null) {
+        try {
+            $sql .= " AND entreprise_id = :eid";
+            $params[':eid'] = $ENT_ID;
+        } catch (Throwable $e) { /* fallback */
+        }
+    }
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $article = $stmt->fetch(PDO::FETCH_ASSOC);
+} catch (Throwable $e) {
+    $article = false;
+}
 
 if (!$article) {
     echo "<div class='container mt-4 alert alert-warning'>Article introuvable.</div>";
@@ -61,28 +108,81 @@ if (!$article) {
 
 /* ================================
    2) QUANTITÉS (globales + contexte)
+      (filtrées par entreprise via les tables depots/chantiers)
 ================================ */
-$stmt = $pdo->prepare("SELECT COALESCE(SUM(quantite),0) FROM stock_depots WHERE stock_id = ?");
-$stmt->execute([$articleId]);
-$quantiteDepot = (int) $stmt->fetchColumn();
+try {
+    $sql = "
+        SELECT COALESCE(SUM(sd.quantite),0)
+        FROM stock_depots sd
+        JOIN depots d ON d.id = sd.depot_id
+        WHERE sd.stock_id = :sid
+    ";
+    $params = [':sid' => $articleId];
+    if ($ENT_ID !== null) {
+        try {
+            $sql .= " AND d.entreprise_id = :eid";
+            $params[':eid'] = $ENT_ID;
+        } catch (Throwable $e) {
+        }
+    }
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $quantiteDepot = (int)$stmt->fetchColumn();
+} catch (Throwable $e) {
+    // fallback historique
+    $stmt = $pdo->prepare("SELECT COALESCE(SUM(quantite),0) FROM stock_depots WHERE stock_id = ?");
+    $stmt->execute([$articleId]);
+    $quantiteDepot = (int)$stmt->fetchColumn();
+}
 
-$stmt = $pdo->prepare("SELECT COALESCE(SUM(quantite),0) FROM stock_chantiers WHERE stock_id = ?");
-$stmt->execute([$articleId]);
-$quantiteChantier = (int) $stmt->fetchColumn();
+try {
+    $sql = "
+        SELECT COALESCE(SUM(sc.quantite),0)
+        FROM stock_chantiers sc
+        JOIN chantiers c ON c.id = sc.chantier_id
+        WHERE sc.stock_id = :sid
+    ";
+    $params = [':sid' => $articleId];
+    if ($ENT_ID !== null) {
+        try {
+            $sql .= " AND c.entreprise_id = :eid";
+            $params[':eid'] = $ENT_ID;
+        } catch (Throwable $e) {
+        }
+    }
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $quantiteChantier = (int)$stmt->fetchColumn();
+} catch (Throwable $e) {
+    $stmt = $pdo->prepare("SELECT COALESCE(SUM(quantite),0) FROM stock_chantiers WHERE stock_id = ?");
+    $stmt->execute([$articleId]);
+    $quantiteChantier = (int)$stmt->fetchColumn();
+}
 
 $totalQuantite = $quantiteDepot + $quantiteChantier;
 
-/* Quantité du contexte (pour bandeau informatif, sans filtrer l'historique) */
+/* Quantité du contexte (bandeau) */
 $currentQtyContext   = null;
 $currentLabelContext = null;
 
 if ($chantierId > 0) {
+    // garde-fou appartenance chantier
+    if ($ENT_ID !== null && !belongs_or_fallback($pdo, 'chantiers', $chantierId, $ENT_ID)) {
+        echo "<div class='container mt-4 alert alert-danger'>Chantier hors de votre entreprise.</div>";
+        require_once __DIR__ . '/../templates/footer.php';
+        exit;
+    }
     $stmt = $pdo->prepare("SELECT COALESCE(quantite,0) FROM stock_chantiers WHERE stock_id = ? AND chantier_id = ?");
     $stmt->execute([$articleId, $chantierId]);
     $currentQtyContext   = (int)$stmt->fetchColumn();
     $currentLabelContext = "Quantité sur ce chantier";
 }
 if ($depotId > 0) {
+    if ($ENT_ID !== null && !belongs_or_fallback($pdo, 'depots', $depotId, $ENT_ID)) {
+        echo "<div class='container mt-4 alert alert-danger'>Dépôt hors de votre entreprise.</div>";
+        require_once __DIR__ . '/../templates/footer.php';
+        exit;
+    }
     $stmt = $pdo->prepare("SELECT COALESCE(quantite,0) FROM stock_depots WHERE stock_id = ? AND depot_id = ?");
     $stmt->execute([$articleId, $depotId]);
     $currentQtyContext   = (int)$stmt->fetchColumn();
@@ -92,15 +192,36 @@ if ($depotId > 0) {
 /* ================================
    3) RÉPARTITION PAR CHANTIER (>0)
 ================================ */
-$stmt = $pdo->prepare("
-    SELECT c.nom AS chantier_nom, sc.quantite
-    FROM stock_chantiers sc
-    JOIN chantiers c ON c.id = sc.chantier_id
-    WHERE sc.stock_id = ? AND sc.quantite > 0
-    ORDER BY c.nom ASC
-");
-$stmt->execute([$articleId]);
-$quantitesParChantier = $stmt->fetchAll(PDO::FETCH_ASSOC);
+try {
+    $sql = "
+        SELECT c.nom AS chantier_nom, sc.quantite
+        FROM stock_chantiers sc
+        JOIN chantiers c ON c.id = sc.chantier_id
+        WHERE sc.stock_id = :sid AND sc.quantite > 0
+    ";
+    $params = [':sid' => $articleId];
+    if ($ENT_ID !== null) {
+        try {
+            $sql .= " AND c.entreprise_id = :eid";
+            $params[':eid'] = $ENT_ID;
+        } catch (Throwable $e) {
+        }
+    }
+    $sql .= " ORDER BY c.nom ASC";
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $quantitesParChantier = $stmt->fetchAll(PDO::FETCH_ASSOC);
+} catch (Throwable $e) {
+    $stmt = $pdo->prepare("
+        SELECT c.nom AS chantier_nom, sc.quantite
+        FROM stock_chantiers sc
+        JOIN chantiers c ON c.id = sc.chantier_id
+        WHERE sc.stock_id = ? AND sc.quantite > 0
+        ORDER BY c.nom ASC
+    ");
+    $stmt->execute([$articleId]);
+    $quantitesParChantier = $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
 
 /* ================================
    4) DOCUMENTS LIÉS (stock_documents)
@@ -145,22 +266,36 @@ $perPage = 10;
 $page = max(1, (int)($_GET['hpage'] ?? 1));
 $offset = ($page - 1) * $perPage;
 
-// total pour savoir s’il y a une page suivante
-$stmtCnt = $pdo->prepare("SELECT COUNT(*) FROM stock_mouvements WHERE stock_id = :sid");
-$stmtCnt->execute([':sid' => $articleId]);
-$totalRows = (int)$stmtCnt->fetchColumn();
+// total mouvements (filtré entreprise si possible)
+try {
+    $sqlCnt = "SELECT COUNT(*) FROM stock_mouvements sm WHERE sm.stock_id = :sid";
+    $paramsCnt = [':sid' => $articleId];
+    if ($ENT_ID !== null) {
+        try {
+            $sqlCnt .= " AND sm.entreprise_id = :eid";
+            $paramsCnt[':eid'] = $ENT_ID;
+        } catch (Throwable $e) {
+        }
+    }
+    $stmtCnt = $pdo->prepare($sqlCnt);
+    $stmtCnt->execute($paramsCnt);
+    $totalRows = (int)$stmtCnt->fetchColumn();
+} catch (Throwable $e) {
+    $stmtCnt = $pdo->prepare("SELECT COUNT(*) FROM stock_mouvements WHERE stock_id = :sid");
+    $stmtCnt->execute([':sid' => $articleId]);
+    $totalRows = (int)$stmtCnt->fetchColumn();
+}
 
 // helper pour reconstruire l’URL avec hpage + #history
 function historyUrl(int $p): string
 {
-    $qs = $_GET;                 // conserve id, chantier_id, depot_id, etc.
+    $qs = $_GET;
     $qs['hpage'] = $p;
     return basename($_SERVER['PHP_SELF']) . '?' . http_build_query($qs) . '#history';
 }
 
-
 /* ================================
-   5) HISTORIQUE (stock_mouvements)
+   5) HISTORIQUE (stock_mouvements) – filtré entreprise si possible
 ================================ */
 $mouvements = [];
 try {
@@ -174,7 +309,7 @@ try {
         d_us.nom     AS validateur_depot_nom,
         c_us.nom     AS validateur_chantier_nom,
 
-        /* DEMANDEUR (peut être admin) */
+        /* DEMANDEUR */
         dem.prenom   AS dem_prenom,
         dem.fonction AS dem_fonction,
 
@@ -184,13 +319,13 @@ try {
         ds.nom       AS source_depot_nom,
         dd.nom       AS dest_depot_nom,
 
-        /* Responsables standard (si on n'affiche pas le demandeur admin) */
+        /* Responsables standard (source) */
         us_src.prenom     AS src_respo_prenom,
         uc_src_u.prenom   AS src_chef_prenom,
         us_dst.prenom     AS dst_respo_prenom,
         uc_dst_u.prenom   AS dst_chef_prenom,
 
-        /* Clés d'affichage 'De' (si demandeur admin -> son prénom, sinon responsable du lieu) */
+        /* Acteurs résumé */
         CASE
           WHEN dem.fonction = 'administrateur' THEN dem.prenom
           WHEN sm.source_type = 'depot'        THEN us_src.prenom
@@ -198,7 +333,6 @@ try {
           ELSE NULL
         END AS src_actor_prenom,
 
-        /* Clés d'affichage 'Vers' (responsable du lieu) */
         CASE
           WHEN sm.dest_type = 'depot'      THEN us_dst.prenom
           WHEN sm.dest_type = 'chantier'   THEN uc_dst_u.prenom
@@ -241,16 +375,69 @@ try {
     ) uc_dst  ON (sm.dest_type='chantier' AND uc_dst.chantier_id = sm.dest_id)
     LEFT JOIN utilisateurs uc_dst_u ON (uc_dst_u.id = uc_dst.chef_id)
 
-   WHERE sm.stock_id = :sid
-        ORDER BY sm.created_at DESC, sm.id DESC
-        LIMIT $perPage OFFSET $offset";
+    WHERE sm.stock_id = :sid
+";
+    $params = [':sid' => $articleId];
+
+    if ($ENT_ID !== null) {
+        try {
+            $sql .= " AND sm.entreprise_id = :eid";
+            $params[':eid'] = $ENT_ID;
+        } catch (Throwable $e) {
+        }
+    }
+
+    $sql .= " ORDER BY sm.created_at DESC, sm.id DESC LIMIT $perPage OFFSET $offset";
+
     $stmt = $pdo->prepare($sql);
-    $stmt->execute(['sid' => $articleId]);
+    $stmt->execute($params);
     $mouvements = $stmt->fetchAll(PDO::FETCH_ASSOC);
 } catch (Throwable $e) {
-    $mouvements = [];
+    // fallback sans filtre entreprise
+    $sql = "
+    SELECT
+        sm.*,
+        us.prenom AS user_prenom, us.fonction AS user_fonction,
+        d_us.nom  AS validateur_depot_nom,
+        c_us.nom  AS validateur_chantier_nom,
+        dem.prenom AS dem_prenom, dem.fonction AS dem_fonction,
+        cs.nom AS source_chantier_nom, cd.nom AS dest_chantier_nom,
+        ds.nom AS source_depot_nom,    dd.nom AS dest_depot_nom,
+        us_src.prenom AS src_respo_prenom, uc_src_u.prenom AS src_chef_prenom,
+        us_dst.prenom AS dst_respo_prenom, uc_dst_u.prenom AS dst_chef_prenom,
+        CASE WHEN dem.fonction='administrateur' THEN dem.prenom
+             WHEN sm.source_type='depot' THEN us_src.prenom
+             WHEN sm.source_type='chantier' THEN uc_src_u.prenom
+             ELSE NULL END AS src_actor_prenom,
+        CASE WHEN sm.dest_type='depot' THEN us_dst.prenom
+             WHEN sm.dest_type='chantier' THEN uc_dst_u.prenom
+             ELSE NULL END AS dst_actor_prenom
+    FROM stock_mouvements sm
+    LEFT JOIN utilisateurs us ON us.id = sm.utilisateur_id
+    LEFT JOIN depots d_us ON (us.fonction='depot' AND d_us.responsable_id = us.id)
+    LEFT JOIN (SELECT uc.utilisateur_id, MIN(uc.chantier_id) AS chantier_id FROM utilisateur_chantiers uc GROUP BY uc.utilisateur_id) uc_us
+           ON (us.fonction='chef' AND uc_us.utilisateur_id = us.id)
+    LEFT JOIN chantiers c_us ON (c_us.id = uc_us.chantier_id)
+    LEFT JOIN utilisateurs dem ON dem.id = sm.demandeur_id
+    LEFT JOIN chantiers cs ON (sm.source_type='chantier' AND cs.id = sm.source_id)
+    LEFT JOIN chantiers cd ON (sm.dest_type='chantier' AND cd.id = sm.dest_id)
+    LEFT JOIN depots ds ON (sm.source_type='depot' AND ds.id = sm.source_id)
+    LEFT JOIN depots dd ON (sm.dest_type='depot' AND dd.id = sm.dest_id)
+    LEFT JOIN utilisateurs us_src ON (sm.source_type='depot' AND us_src.id = ds.responsable_id)
+    LEFT JOIN (SELECT uc.chantier_id, MIN(uc.utilisateur_id) AS chef_id FROM utilisateur_chantiers uc GROUP BY uc.chantier_id) uc_src
+           ON (sm.source_type='chantier' AND uc_src.chantier_id = sm.source_id)
+    LEFT JOIN utilisateurs uc_src_u ON (uc_src_u.id = uc_src.chef_id)
+    LEFT JOIN utilisateurs us_dst ON (sm.dest_type='depot' AND us_dst.id = dd.responsable_id)
+    LEFT JOIN (SELECT uc.chantier_id, MIN(uc.utilisateur_id) AS chef_id FROM utilisateur_chantiers uc GROUP BY uc.chantier_id) uc_dst
+           ON (sm.dest_type='chantier' AND uc_dst.chantier_id = sm.dest_id)
+    LEFT JOIN utilisateurs uc_dst_u ON (uc_dst_u.id = uc_dst.chef_id)
+    WHERE sm.stock_id = :sid
+    ORDER BY sm.created_at DESC, sm.id DESC
+    LIMIT $perPage OFFSET $offset";
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([':sid' => $articleId]);
+    $mouvements = $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
-
 
 /* Helpers historique */
 function label_lieu(?string $type, ?int $id, ?string $chantierNom): string
@@ -266,21 +453,37 @@ function badge_statut(string $statut): string
     return "<span class=\"badge bg-$cls text-uppercase\">$statut</span>";
 }
 
-/* Libellés contexte (badges en-tête) */
-$chantierNomCtx = null;
-$depotNomCtx = null;
+// --- Contexte chantier ---
 if ($chantierId > 0) {
-    $stmt = $pdo->prepare("SELECT nom FROM chantiers WHERE id = ? LIMIT 1");
-    $stmt->execute([$chantierId]);
+    $sql = "SELECT nom FROM chantiers WHERE id = ?";
+    $params = [$chantierId];
+    if ($ENT_ID !== null) {
+        $sql .= " AND entreprise_id = ?";
+        $params[] = $ENT_ID;
+    }
+    $sql .= " LIMIT 1";
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
     $chantierNomCtx = $stmt->fetchColumn();
 }
+
+// --- Contexte dépôt ---
 if ($depotId > 0) {
-    $stmt = $pdo->prepare("SELECT nom FROM depots WHERE id = ? LIMIT 1");
-    $stmt->execute([$depotId]);
+    $sql = "SELECT nom FROM depots WHERE id = ?";
+    $params = [$depotId];
+    if ($ENT_ID !== null) {
+        $sql .= " AND entreprise_id = ?";
+        $params[] = $ENT_ID;
+    }
+    $sql .= " LIMIT 1";
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
     $depotNomCtx = $stmt->fetchColumn();
 }
 
-/* Historique : toujours affiché (comme admin/chef) */
+/* Historique : toujours affiché */
 $showHistorique = true;
 
 /**
@@ -563,12 +766,12 @@ function label_validateur(array $row): string
     </div>
 </div>
 <script>
-document.addEventListener('DOMContentLoaded', () => {
-  if (location.hash === '#history') {
-    const t = document.querySelector('[data-bs-target="#history"]');
-    if (t) new bootstrap.Tab(t).show();
-  }
-});
+    document.addEventListener('DOMContentLoaded', () => {
+        if (location.hash === '#history') {
+            const t = document.querySelector('[data-bs-target="#history"]');
+            if (t) new bootstrap.Tab(t).show();
+        }
+    });
 </script>
 
 <?php require_once __DIR__ . '/../templates/footer.php'; ?>

@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 require_once __DIR__ . '/../config/init.php';
@@ -41,18 +42,28 @@ if (!hash_equals($_SESSION['csrf_token'] ?? '', $csrf)) {
     exit;
 }
 
-function lower_str($s) {
+function lower_str($s)
+{
     if (function_exists('mb_strtolower')) return mb_strtolower((string)$s, 'UTF-8');
     return strtolower((string)$s);
 }
-function normalize_role($role) {
+function normalize_role($role)
+{
     $r = lower_str(trim((string)$role));
     $r = strtr($r, [
-        'é' => 'e', 'è' => 'e', 'ê' => 'e', 'ë' => 'e',
-        'à' => 'a', 'â' => 'a',
-        'î' => 'i', 'ï' => 'i',
-        'ô' => 'o', 'ö' => 'o',
-        'ù' => 'u', 'û' => 'u', 'ü' => 'u',
+        'é' => 'e',
+        'è' => 'e',
+        'ê' => 'e',
+        'ë' => 'e',
+        'à' => 'a',
+        'â' => 'a',
+        'î' => 'i',
+        'ï' => 'i',
+        'ô' => 'o',
+        'ö' => 'o',
+        'ù' => 'u',
+        'û' => 'u',
+        'ü' => 'u',
         'ç' => 'c'
     ]);
     return $r;
@@ -66,25 +77,37 @@ $ROLE_OPTIONS = [
     'autre'          => 'Autre',
 ];
 
-function sanitize_role($role, $allowed) {
+function sanitize_role($role, $allowed)
+{
     $r = normalize_role($role);
     return array_key_exists($r, $allowed) ? $r : 'autre';
 }
 
-function badgeRole($role) {
+function badgeRole($role)
+{
     $r = sanitize_role($role, [
-        'administrateur' => 1, 'depot' => 1, 'chef' => 1, 'employe' => 1, 'autre' => 1
+        'administrateur' => 1,
+        'depot' => 1,
+        'chef' => 1,
+        'employe' => 1,
+        'autre' => 1
     ]);
     switch ($r) {
-        case 'administrateur': return '<span class="badge bg-danger">Administrateur</span>';
-        case 'depot':          return '<span class="badge bg-info text-dark">Dépôt</span>';
-        case 'chef':           return '<span class="badge bg-success">Chef</span>';
-        case 'employe':        return '<span class="badge bg-warning text-dark">Employé</span>';
-        default:               return '<span class="badge bg-secondary">Autre</span>';
+        case 'administrateur':
+            return '<span class="badge bg-danger">Administrateur</span>';
+        case 'depot':
+            return '<span class="badge bg-info text-dark">Dépôt</span>';
+        case 'chef':
+            return '<span class="badge bg-success">Chef</span>';
+        case 'employe':
+            return '<span class="badge bg-warning text-dark">Employé</span>';
+        default:
+            return '<span class="badge bg-secondary">Autre</span>';
     }
 }
 
-function rowHtml($u, int $entrepriseId) {
+function rowHtml($u, int $entrepriseId)
+{
     $id       = (int)$u['id'];
     $nom      = htmlspecialchars((string)($u['nom'] ?? ''), ENT_QUOTES, 'UTF-8');
     $prenom   = htmlspecialchars((string)($u['prenom'] ?? ''), ENT_QUOTES, 'UTF-8');
@@ -93,17 +116,17 @@ function rowHtml($u, int $entrepriseId) {
     $agenceId = (int)($u['agence_id'] ?? 0);
 
     return '
-    <tr data-id="'.$id.'"
-        data-nom="'.$nom.'"
-        data-prenom="'.$prenom.'"
-        data-email="'.$email.'"
-        data-fonction="'.$fonction.'"
-        data-agence-id="'.$agenceId.'"
-        data-entreprise-id="'.$entrepriseId.'">
-      <td>'.$id.'</td>
-      <td><strong>'.$nom.' '.$prenom.'</strong></td>
-      <td>'.$email.'</td>
-      <td>'.badgeRole($fonction).'</td>
+    <tr data-id="' . $id . '"
+        data-nom="' . $nom . '"
+        data-prenom="' . $prenom . '"
+        data-email="' . $email . '"
+        data-fonction="' . $fonction . '"
+        data-agence-id="' . $agenceId . '"
+        data-entreprise-id="' . $entrepriseId . '">
+      <td>' . $id . '</td>
+      <td><strong>' . $nom . ' ' . $prenom . '</strong></td>
+      <td>' . $email . '</td>
+      <td>' . badgeRole($fonction) . '</td>
       <td class="text-center">
         <button class="btn btn-warning btn-sm edit-btn" title="Modifier"><i class="bi bi-pencil"></i></button>
         <button class="btn btn-danger btn-sm delete-btn" title="Supprimer"><i class="bi bi-trash"></i></button>
@@ -222,6 +245,23 @@ try {
 
         $upd = $pdo->prepare($sql);
         $upd->execute($params);
+        // Si le rôle n'est plus 'chef' → retirer tous ses liens de chef
+        if ($fonction !== 'chef') {
+            // 1) Chef principal d'un chantier
+            $pdo->prepare("
+        UPDATE chantiers
+           SET responsable_id = NULL
+         WHERE responsable_id = :uid
+           AND entreprise_id  = :eid
+    ")->execute([':uid' => $id, ':eid' => $entrepriseId]);
+
+            // 2) Autres liens de chef (table de liaison)
+            $pdo->prepare("
+        DELETE FROM utilisateur_chantiers
+         WHERE utilisateur_id = :uid
+    ")->execute([':uid' => $id]);
+        }
+
 
         $u = $pdo->prepare("
             SELECT id, nom, prenom, email, fonction, agence_id

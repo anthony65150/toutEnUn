@@ -7,7 +7,7 @@ if (!isset($_SESSION['utilisateurs']) || ($_SESSION['utilisateurs']['fonction'] 
   exit;
 }
 
-$entrepriseId = (int)($_SESSION['entreprise_id'] ?? 0);
+$entrepriseId = (int)($_SESSION['utilisateurs']['entreprise_id'] ?? 0);
 if (!$entrepriseId) {
   // Pas d'entreprise sélectionnée : on bloque proprement
   http_response_code(403);
@@ -61,19 +61,25 @@ SELECT
   GROUP_CONCAT(DISTINCT u_chef.id) AS chef_ids_all
 
 FROM chantiers c
+
+-- ✅ NE GARDE LE RESPONSABLE QUE S'IL EST VRAIMENT 'chef'
 LEFT JOIN utilisateurs ur
        ON ur.id = c.responsable_id
+      AND ur.fonction = 'chef'
+      AND ur.entreprise_id = :eid_resp
 
 LEFT JOIN planning_affectations pa
        ON pa.chantier_id = c.id
       AND pa.date_jour   = :d
       AND pa.entreprise_id = :eid1
+
 LEFT JOIN utilisateurs u_all
        ON u_all.id = pa.utilisateur_id
 
 LEFT JOIN utilisateur_chantiers uc
        ON uc.chantier_id = c.id
       AND uc.entreprise_id = :eid2
+
 LEFT JOIN utilisateurs u_chef
        ON u_chef.id = uc.utilisateur_id
       AND u_chef.fonction = 'chef'
@@ -85,12 +91,14 @@ ORDER BY c.nom
 ";
 $st = $pdo->prepare($sql);
 $st->execute([
-  ':d'    => $today,
-  ':eid1' => $entrepriseId,
-  ':eid2' => $entrepriseId,
-  ':eid3' => $entrepriseId,
-  ':eid4' => $entrepriseId,
+  ':d'        => $today,
+  ':eid_resp' => $entrepriseId, // 👈 nouveau param
+  ':eid1'     => $entrepriseId,
+  ':eid2'     => $entrepriseId,
+  ':eid3'     => $entrepriseId,
+  ':eid4'     => $entrepriseId,
 ]);
+
 
 $rows = $st->fetchAll(PDO::FETCH_ASSOC);
 
@@ -140,6 +148,7 @@ require_once __DIR__ . '/../templates/navigation/navigation.php';
               <span class="text-muted">—</span>
             <?php endif; ?>
           </td>
+
 
           <td class="text-start">
             <?= $c['equipe'] ? htmlspecialchars($c['equipe']) : '<span class="text-muted">—</span>' ?>

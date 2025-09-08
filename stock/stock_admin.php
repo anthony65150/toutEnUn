@@ -10,18 +10,41 @@ if (!isset($_SESSION['utilisateurs']) || ($_SESSION['utilisateurs']['fonction'] 
 require_once __DIR__ . '/../templates/header.php';
 require_once __DIR__ . '/../templates/navigation/navigation.php';
 
-// === Données de base ===
+// ====== Multi-entreprise ======
+$ENT_ID = isset($_SESSION['utilisateurs']['entreprise_id']) ? (int)$_SESSION['utilisateurs']['entreprise_id'] : null;
 
-// Dépôts et chantiers
-$allChantiers = $pdo->query("SELECT id, nom FROM chantiers")->fetchAll(PDO::FETCH_KEY_PAIR);
-$allDepots    = $pdo->query("SELECT id, nom FROM depots")->fetchAll(PDO::FETCH_KEY_PAIR);
+// ====== Données de base ======
 
-// Quantités par dépôt
-$stmt = $pdo->query("
+// --- Dépôts et chantiers (filtrés entreprise)
+$sql = "SELECT id, nom FROM chantiers";
+$params = [];
+if ($ENT_ID !== null) { $sql .= " WHERE entreprise_id = :eid"; $params[':eid'] = $ENT_ID; }
+$sql .= " ORDER BY nom";
+$stmt = $pdo->prepare($sql);
+$stmt->execute($params);
+$allChantiers = $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
+
+$sql = "SELECT id, nom FROM depots";
+$params = [];
+if ($ENT_ID !== null) { $sql .= " WHERE entreprise_id = :eid"; $params[':eid'] = $ENT_ID; }
+$sql .= " ORDER BY nom";
+$stmt = $pdo->prepare($sql);
+$stmt->execute($params);
+$allDepots = $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
+
+// --- Quantités par dépôt (filtrées entreprise via depots)
+$sql = "
     SELECT sd.stock_id, d.id AS depot_id, d.nom AS depot_nom, sd.quantite
     FROM stock_depots sd
     JOIN depots d ON sd.depot_id = d.id
-");
+    WHERE 1=1
+";
+$params = [];
+if ($ENT_ID !== null) { $sql .= " AND d.entreprise_id = :eid"; $params[':eid'] = $ENT_ID; }
+
+$stmt = $pdo->prepare($sql);
+$stmt->execute($params);
+
 $depotAssoc = [];
 foreach ($stmt as $row) {
     $depotAssoc[(int)$row['stock_id']][] = [
@@ -31,13 +54,20 @@ foreach ($stmt as $row) {
     ];
 }
 
-// Responsable de chaque dépôt (prenom/nom)
-$depotResponsables = [];
-$stmt = $pdo->query("
+// --- Responsable de chaque dépôt (filtré entreprise)
+$sql = "
   SELECT d.id AS depot_id, u.prenom, u.nom
   FROM depots d
   LEFT JOIN utilisateurs u ON u.id = d.responsable_id
-");
+  WHERE 1=1
+";
+$params = [];
+if ($ENT_ID !== null) { $sql .= " AND d.entreprise_id = :eid"; $params[':eid'] = $ENT_ID; }
+
+$stmt = $pdo->prepare($sql);
+$stmt->execute($params);
+
+$depotResponsables = [];
 foreach ($stmt as $r) {
     $depotResponsables[(int)$r['depot_id']] = [
         'prenom' => $r['prenom'] ?? '',
@@ -45,14 +75,22 @@ foreach ($stmt as $r) {
     ];
 }
 
-// Chef (au moins un) pour chaque chantier (on prend le premier trouvé)
-$chantierChefs = [];
-$stmt = $pdo->query("
+// --- Chef (au moins un) pour chaque chantier (filtré entreprise via chantiers)
+$sql = "
   SELECT uc.chantier_id, u.prenom, u.nom
   FROM utilisateur_chantiers uc
   JOIN utilisateurs u ON u.id = uc.utilisateur_id
-  ORDER BY u.nom, u.prenom
-");
+  JOIN chantiers c ON c.id = uc.chantier_id
+  WHERE 1=1
+";
+$params = [];
+if ($ENT_ID !== null) { $sql .= " AND c.entreprise_id = :eid"; $params[':eid'] = $ENT_ID; }
+$sql .= " ORDER BY u.nom, u.prenom";
+
+$stmt = $pdo->prepare($sql);
+$stmt->execute($params);
+
+$chantierChefs = [];
 foreach ($stmt as $r) {
     $cid = (int)$r['chantier_id'];
     if (!isset($chantierChefs[$cid])) {
@@ -63,8 +101,9 @@ foreach ($stmt as $r) {
     }
 }
 
-// Quantités par chantier (en tenant compte des transferts en attente sortants)
-$stmt = $pdo->query("
+// --- Quantités par chantier (filtré entreprise via chantiers)
+// (la soustraction des transferts en attente reste telle quelle)
+$sql = "
     SELECT 
         sc.stock_id, 
         c.id AS chantier_id, 
@@ -79,7 +118,14 @@ $stmt = $pdo->query("
         ), 0)) AS quantite
     FROM stock_chantiers sc
     JOIN chantiers c ON sc.chantier_id = c.id
-");
+    WHERE 1=1
+";
+$params = [];
+if ($ENT_ID !== null) { $sql .= " AND c.entreprise_id = :eid"; $params[':eid'] = $ENT_ID; }
+
+$stmt = $pdo->prepare($sql);
+$stmt->execute($params);
+
 $chantierAssoc = [];
 foreach ($stmt as $row) {
     $chantierAssoc[(int)$row['stock_id']][] = [
@@ -89,25 +135,44 @@ foreach ($stmt as $row) {
     ];
 }
 
-// Articles + catégories/sous-catégories
-$stocks = $pdo->query("
+// --- Articles + catégories/sous-catégories (filtrés entreprise)
+$sql = "
     SELECT id, nom, quantite_totale, categorie, sous_categorie, document, photo
     FROM stock
-    ORDER BY nom
-")->fetchAll(PDO::FETCH_ASSOC);
+    WHERE 1=1
+";
+$params = [];
+if ($ENT_ID !== null) { $sql .= " AND entreprise_id = :eid"; $params[':eid'] = $ENT_ID; }
+$sql .= " ORDER BY nom";
 
-$categories = $pdo->query("
+$stmt = $pdo->prepare($sql);
+$stmt->execute($params);
+$stocks = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+$sql = "
     SELECT DISTINCT categorie
     FROM stock
     WHERE categorie IS NOT NULL
-    ORDER BY categorie
-")->fetchAll(PDO::FETCH_COLUMN);
+";
+$params = [];
+if ($ENT_ID !== null) { $sql .= " AND entreprise_id = :eid"; $params[':eid'] = $ENT_ID; }
+$sql .= " ORDER BY categorie";
 
-$subCatRaw = $pdo->query("
+$stmt = $pdo->prepare($sql);
+$stmt->execute($params);
+$categories = $stmt->fetchAll(PDO::FETCH_COLUMN);
+
+$sql = "
     SELECT categorie, sous_categorie
     FROM stock
     WHERE sous_categorie IS NOT NULL
-")->fetchAll(PDO::FETCH_ASSOC);
+";
+$params = [];
+if ($ENT_ID !== null) { $sql .= " AND entreprise_id = :eid"; $params[':eid'] = $ENT_ID; }
+
+$stmt = $pdo->prepare($sql);
+$stmt->execute($params);
+$subCatRaw = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 $subCategoriesGrouped = [];
 foreach ($subCatRaw as $row) {
@@ -134,7 +199,9 @@ foreach ($subCatRaw as $row) {
 
     <h2 class="mb-4 text-center">Gestion de stock (Admin)</h2>
     <?php
-    $stmt = $pdo->query("
+    // --- Transferts en attente de validation
+    // On se limite aux articles de l’entreprise via s.entreprise_id
+    $sql = "
       SELECT
         t.id AS transfert_id, s.nom AS article_nom, t.quantite,
         u.prenom, u.nom, u.fonction AS demandeur_role,
@@ -143,7 +210,12 @@ foreach ($subCatRaw as $row) {
       JOIN stock s ON t.article_id = s.id
       JOIN utilisateurs u ON t.demandeur_id = u.id
       WHERE t.statut = 'en_attente'
-    ");
+    ";
+    $params = [];
+    if ($ENT_ID !== null) { $sql .= " AND s.entreprise_id = :eid"; $params[':eid'] = $ENT_ID; }
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
     $transfertsEnAttente = $stmt->fetchAll(PDO::FETCH_ASSOC);
     ?>
 
@@ -299,7 +371,6 @@ foreach ($subCatRaw as $row) {
                     $depotsList     = $depotAssoc[$stockId]    ?? [];
                     $chantiersList  = $chantierAssoc[$stockId] ?? [];
 
-                    // Photo : on sort de /stock/ vers /uploads/ si $stock['photo'] = 'uploads/...'
                     $photoWeb = !empty($stock['photo']) ? '../' . ltrim($stock['photo'], '/') : '';
 
                     $depotsHtml = $depotsList
@@ -424,7 +495,7 @@ foreach ($subCatRaw as $row) {
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title">Transfert d'article</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
       </div>
       <div class="modal-body">
         <input type="hidden" id="modalStockId">
@@ -483,10 +554,7 @@ foreach ($subCatRaw as $row) {
       </div>
 
       <div class="modal-body">
-        <!-- name = stockId -->
         <input type="hidden" id="modifyStockId" name="stockId">
-
-        <!-- flags globaux -->
         <input type="hidden" id="deletePhoto" name="deletePhoto" value="0">
 
         <div class="mb-3">
@@ -514,17 +582,11 @@ foreach ($subCatRaw as $row) {
 
         <div class="mb-3">
           <label for="modifierDocument" class="form-label">Ajouter des documents</label>
-          <input
-            type="file"
-            class="form-control"
-            id="modifierDocument"
-            name="documents[]"
-            multiple
-            accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.webp">
+          <input type="file" class="form-control" id="modifierDocument" name="documents[]" multiple
+                 accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.webp">
           <div id="newDocsPreview" class="mt-2 d-flex flex-column gap-1"></div>
         </div>
 
-        <!-- Suppressions en lot -->
         <input type="hidden" id="deleteDocIds" name="deleteDocIds" value="[]">
       </div>
 
@@ -542,7 +604,7 @@ foreach ($subCatRaw as $row) {
     <div class="modal-content">
       <div class="modal-header bg-danger text-white">
         <h5 class="modal-title">Confirmer la suppression</h5>
-        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Fermer"></button>
       </div>
       <div class="modal-body">
         <p>Es-tu sûr de vouloir supprimer <strong id="deleteItemName"></strong> ? Cette action est irréversible.</p>
@@ -570,6 +632,7 @@ foreach ($subCatRaw as $row) {
     </div>
   </div>
 </div>
+
 
 <script>
   const subCategories = <?= json_encode($subCategoriesGrouped) ?>;

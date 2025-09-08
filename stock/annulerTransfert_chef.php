@@ -1,113 +1,154 @@
 <?php
-// Fichier : /stock/annulerTransfert_chef.php
+// Fichier : /stock/annulerTransfert_chef.php (corrigé)
+declare(strict_types=1);
+
 require_once __DIR__ . '/../config/init.php';
 
-if (!isset($_SESSION['utilisateurs']) || $_SESSION['utilisateurs']['fonction'] !== 'chef') {
+if (empty($_SESSION['utilisateurs'])) {
+    $_SESSION['error_message'] = "Session expirée.";
+    header("Location: stock_chef.php");
+    exit;
+}
+
+$user   = $_SESSION['utilisateurs'];
+$chefId = (int)($user['id'] ?? 0);
+$role   = (string)($user['fonction'] ?? '');
+$ENT_ID = (int)($user['entreprise_id'] ?? 0);
+
+if ($role !== 'chef' && $role !== 'administrateur') {
     $_SESSION['error_message'] = "Accès refusé.";
     header("Location: stock_chef.php");
     exit;
 }
 
-$chefId = (int)$_SESSION['utilisateurs']['id'];
-
-// Récupère les chantiers du chef
+/* Chantiers du chef (pour borner l’action) */
 $stmt = $pdo->prepare("SELECT chantier_id FROM utilisateur_chantiers WHERE utilisateur_id = ?");
 $stmt->execute([$chefId]);
-$chantierIds = $stmt->fetchAll(PDO::FETCH_COLUMN);
+$chantierIds = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
 
-if (empty($chantierIds)) {
+if ($role === 'chef' && empty($chantierIds)) {
     $_SESSION['error_message'] = "Aucun chantier associé.";
     header("Location: stock_chef.php");
     exit;
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['transfert_id'])) {
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && isset($_POST['transfert_id'])) {
     $transfertId = (int)$_POST['transfert_id'];
 
-    // placeholders pour le IN (...)
-    $placeholders = implode(',', array_fill(0, count($chantierIds), '?'));
-
     try {
-        // Démarrer la transaction AVANT le SELECT ... FOR UPDATE
+        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         $pdo->beginTransaction();
 
-        // Verrouiller le transfert si destination = un chantier du chef et statut en attente
+        // Récupérer + verrouiller la demande (bornée entreprise via stock)
         $sql = "
-            SELECT t.*, s.nom AS article_nom
+            SELECT t.*, s.nom AS article_nom, s.entreprise_id AS ent_article,
+                   d.entreprise_id AS ent_depot_src,
+                   c_src.entreprise_id AS ent_ch_src,
+                   c_dst.entreprise_id AS ent_ch_dst
             FROM transferts_en_attente t
-            JOIN stock s ON t.article_id = s.id
-            WHERE t.id = ?
+            JOIN stock s              ON s.id = t.article_id AND s.entreprise_id = :ent
+            LEFT JOIN depots d        ON (t.source_type='depot'    AND d.id = t.source_id)
+            LEFT JOIN chantiers c_src ON (t.source_type='chantier' AND c_src.id = t.source_id)
+            LEFT JOIN chantiers c_dst ON (t.destination_type='chantier' AND c_dst.id = t.destination_id)
+            WHERE t.id = :tid
               AND t.statut = 'en_attente'
               AND t.destination_type = 'chantier'
-              AND t.destination_id IN ($placeholders)
             FOR UPDATE
         ";
         $stmt = $pdo->prepare($sql);
-        $stmt->execute(array_merge([$transfertId], $chantierIds));
-        $transfert = $stmt->fetch(PDO::FETCH_ASSOC);
+        $stmt->execute([':tid' => $transfertId, ':ent' => $ENT_ID]);
+        $t = $stmt->fetch(PDO::FETCH_ASSOC);
 
-        if (!$transfert) {
-            $pdo->rollBack();
-            $_SESSION['error_message'] = "Transfert introuvable, non autorisé, ou déjà traité.";
-            header("Location: stock_chef.php");
-            exit;
+        if (!$t) {
+            throw new RuntimeException("Transfert introuvable, non autorisé ou déjà traité.");
         }
 
-        // Données utiles
-        $articleId       = (int)$transfert['article_id'];
-        $quantite        = (int)$transfert['quantite'];
-        $articleNom      = $transfert['article_nom'];
-        $demandeurId     = (int)$transfert['demandeur_id'];
-        $sourceType      = $transfert['source_type'];          // 'depot' | 'chantier'
-        $sourceId        = isset($transfert['source_id']) ? (int)$transfert['source_id'] : null;
-        $destChantierId  = (int)$transfert['destination_id'];  // chantier du chef
+        $articleId      = (int)$t['article_id'];
+        $quantite       = (int)$t['quantite'];
+        $demandeurId    = (int)$t['demandeur_id'];
+        $sourceType     = (string)$t['source_type'];     // 'depot' | 'chantier'
+        $sourceId       = isset($t['source_id']) ? (int)$t['source_id'] : 0;
+        $destChantierId = (int)$t['destination_id'];
+        $articleNom     = (string)$t['article_nom'];
 
-        // Si source = dépôt, on restitue au dépôt (car décrémenté à l’envoi)
+        // Cohérence multi-entreprise
+        if ($ENT_ID <= 0 || (int)$t['ent_article'] !== $ENT_ID) {
+            throw new RuntimeException("Article non autorisé pour cette entreprise.");
+        }
+        if ($sourceType === 'depot') {
+            if ((int)$t['ent_depot_src'] !== $ENT_ID) {
+                throw new RuntimeException("Dépôt source non autorisé.");
+            }
+        } else {
+            if ((int)$t['ent_ch_src'] !== $ENT_ID) {
+                throw new RuntimeException("Chantier source non autorisé.");
+            }
+        }
+        if ((int)$t['ent_ch_dst'] !== $ENT_ID) {
+            throw new RuntimeException("Chantier destination non autorisé.");
+        }
+
+        // Le chef ne peut refuser que sur ses chantiers (admin passe)
+        if ($role === 'chef' && !in_array($destChantierId, $chantierIds, true)) {
+            throw new RuntimeException("Vous ne pouvez refuser que sur vos chantiers.");
+        }
+
+        // Restitution si la source était un dépôt (souvent décrémenté à l’envoi)
         if ($sourceType === 'depot' && $sourceId) {
-            $stmt = $pdo->prepare("
-                UPDATE stock_depots
-                SET quantite = quantite + :qte
-                WHERE stock_id = :article AND depot_id = :depot
+            $upd = $pdo->prepare("
+                UPDATE stock_depots sd
+                JOIN depots d ON d.id = sd.depot_id AND d.entreprise_id = :ent
+                   SET sd.quantite = sd.quantite + :qte
+                 WHERE sd.stock_id = :sid AND sd.depot_id = :did
             ");
-            $stmt->execute([
-                ':qte'     => $quantite,
-                ':article' => $articleId,
-                ':depot'   => $sourceId
+            $upd->execute([
+                ':qte' => $quantite, ':sid' => $articleId, ':did' => $sourceId, ':ent' => $ENT_ID
             ]);
         }
-        // Si source = chantier, rien à remettre : pas de décrémentation faite à l’envoi dans ta logique actuelle.
 
-        // Historique (refus par le chef)
-        // Table attendue: stock_mouvements(stock_id, type, source_type, source_id, dest_type, dest_id, quantite, statut, utilisateur_id, created_at)
+        // Historique : refus par le chantier
         $stmtMv = $pdo->prepare("
             INSERT INTO stock_mouvements
-                (stock_id, type, source_type, source_id, dest_type, dest_id, quantite, statut, utilisateur_id, created_at)
+              (stock_id, type, source_type, source_id, dest_type, dest_id,
+               quantite, statut, utilisateur_id, entreprise_id, created_at)
             VALUES
-                (:stock_id, 'transfert', :src_type, :src_id, 'chantier', :dest_id, :qte, 'refuse', :user_id, NOW())
+              (:stock_id, 'transfert', :src_type, :src_id, 'chantier', :dest_id,
+               :qte, 'refuse', :user_id, :ent_id, NOW())
         ");
         $stmtMv->execute([
             ':stock_id' => $articleId,
             ':src_type' => $sourceType,
-            ':src_id'   => ($sourceType === 'chantier') ? $sourceId : null, // null si dépôt (garde tel quel si tu ne veux pas tracer l'ID dépôt)
+            ':src_id'   => ($sourceType === 'chantier' ? $sourceId : $sourceId), // ok si 0 pour dépôt
             ':dest_id'  => $destChantierId,
             ':qte'      => $quantite,
             ':user_id'  => $chefId,
+            ':ent_id'   => $ENT_ID,
         ]);
 
-        // Supprimer la demande en attente
-        $stmt = $pdo->prepare("DELETE FROM transferts_en_attente WHERE id = ?");
-        $stmt->execute([$transfertId]);
+        // Suppression de la demande
+        $stmtDel = $pdo->prepare("DELETE FROM transferts_en_attente WHERE id = ?");
+        $stmtDel->execute([$transfertId]);
 
-        // Notifier le demandeur
+        // Notification au demandeur — AVEC entreprise_id (FK)
         $message = "❌ Le chantier a refusé le transfert de {$quantite} x {$articleNom}.";
-        $stmt = $pdo->prepare("INSERT INTO notifications (utilisateur_id, message) VALUES (?, ?)");
-        $stmt->execute([$demandeurId, $message]);
+        $stmtNotif = $pdo->prepare("
+            INSERT INTO notifications (utilisateur_id, message, entreprise_id, created_at)
+            VALUES (:uid, :msg, :ent, NOW())
+        ");
+        $stmtNotif->execute([
+            ':uid' => $demandeurId,
+            ':msg' => $message,
+            ':ent' => $ENT_ID,
+        ]);
 
-        // Commit & UI
         $pdo->commit();
 
         $_SESSION['success_message'] = "Transfert refusé avec succès.";
-    } catch (Exception $e) {
+        // Reviens sur le bon chantier si possible
+        header("Location: stock_chef.php?chantier_id={$destChantierId}");
+        exit;
+
+    } catch (Throwable $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();
         $_SESSION['error_message'] = "Erreur : " . $e->getMessage();
     }

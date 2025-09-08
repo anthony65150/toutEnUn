@@ -93,7 +93,7 @@ document.addEventListener("DOMContentLoaded", () => {
     e.preventDefault();
 
     const stockId = document.getElementById('articleId').value;
-    const sourceDepotId = document.getElementById('sourceDepotId')?.value; // null pour chef
+    const sourceDepotId = document.getElementById('sourceDepotId')?.value;
     const destinationRaw = document.getElementById('destinationChantier').value;
     const quantity = document.getElementById('quantity').value;
 
@@ -102,7 +102,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (window.isChef) {
       sourceType = 'chantier';
-      sourceId = window.chefChantierActuel; // si utilisé côté chef
+      sourceId = window.chefChantierActuel;
     }
 
     const [destinationType, destinationId] = destinationRaw.split('_');
@@ -116,7 +116,8 @@ document.addEventListener("DOMContentLoaded", () => {
       qty: parseInt(quantity)
     };
 
-    fetch('/stock/transferStock_depot.php', {
+    // URL relative : fonctionne que la page soit /stock/... ou ailleurs
+    fetch('transferStock_depot.php', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)

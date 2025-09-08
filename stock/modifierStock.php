@@ -1,41 +1,63 @@
 <?php
+
 declare(strict_types=1);
 
 require_once __DIR__ . '/../config/init.php';
 header('Content-Type: application/json');
 
-// ---- Sécurité (admin uniquement) ----
+/* ================================
+   MULTI-ENTREPRISE
+   ================================ */
+$ENT_ID = $_SESSION['utilisateurs']['entreprise_id'] ?? null;
+$ENT_ID = is_numeric($ENT_ID) ? (int)$ENT_ID : null;
+
+function me_where_first(?int $ENT_ID, string $alias = ''): array
+{
+    if ($ENT_ID === null) return ['', []];
+    $pfx = $alias ? $alias . '.' : '';
+    return [" WHERE {$pfx}entreprise_id = :eid ", [':eid' => $ENT_ID]];
+}
+function me_where(?int $ENT_ID, string $alias = ''): array
+{
+    if ($ENT_ID === null) return ['', []];
+    $pfx = $alias ? $alias . '.' : '';
+    return [" AND {$pfx}entreprise_id = :eid ", [':eid' => $ENT_ID]];
+}
+
+/* ================================
+   Sécurité (admin)
+   ================================ */
 if (!isset($_SESSION['utilisateurs']) || ($_SESSION['utilisateurs']['fonction'] ?? null) !== 'administrateur') {
     echo json_encode(['success' => false, 'message' => 'Non autorisé']);
     exit;
 }
-
-// ---- Méthode ----
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
     echo json_encode(['success' => false, 'message' => 'Méthode non autorisée']);
     exit;
 }
 
-/* =========================================================
-   Helpers
-   ========================================================= */
-// Chemin absolu disque depuis un chemin stocké en BDD (/uploads/... ou uploads/...)
-function abs_from_stored(?string $stored): ?string {
+/* ================================
+   Helpers fichiers
+   ================================ */
+function abs_from_stored(?string $stored): ?string
+{
     if (!$stored) return null;
-    $rel = ltrim($stored, '/'); // retire le slash initial s'il existe
+    $rel = ltrim($stored, '/');
     return rtrim($_SERVER['DOCUMENT_ROOT'], '/') . '/' . $rel;
 }
-function abs_from_rel(?string $rel): ?string {
+function abs_from_rel(?string $rel): ?string
+{
     if (!$rel) return null;
     return rtrim($_SERVER['DOCUMENT_ROOT'], '/') . '/' . ltrim($rel, '/');
 }
-function boolish($v): bool {
+function boolish($v): bool
+{
     return in_array($v, [1, '1', true, 'true', 'on', 'yes'], true);
 }
 
-/* =========================================================
+/* ================================
    Inputs
-   ========================================================= */
+   ================================ */
 $stockId  = isset($_POST['stockId']) ? (int)$_POST['stockId'] : 0;
 $nom      = trim($_POST['nom'] ?? '');
 $quantite = isset($_POST['quantite']) ? (int)$_POST['quantite'] : null;
@@ -45,10 +67,26 @@ if ($stockId <= 0 || $nom === '' || $quantite === null || $quantite < 0) {
     exit;
 }
 
+/* ================================
+   Vérifier que l’article appartient à l’entreprise (si actif)
+   ================================ */
+try {
+    if ($ENT_ID !== null) {
+        $st = $pdo->prepare("SELECT 1 FROM stock s WHERE s.id = :id AND s.entreprise_id = :eid");
+        $st->execute([':id' => $stockId, ':eid' => $ENT_ID]);
+        if (!$st->fetchColumn()) {
+            echo json_encode(['success' => false, 'message' => "Article hors de votre entreprise."]);
+            exit;
+        }
+    }
+} catch (Throwable $e) {
+    // fallback silencieux si colonne absente
+}
+
 /* =========================================================
    Documents (multi)
    ========================================================= */
-$allowedDocExt = ['pdf','doc','docx','xls','xlsx','png','jpg','jpeg','webp'];
+$allowedDocExt = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'png', 'jpg', 'jpeg', 'webp'];
 $docsAdded   = [];
 $docsDeleted = [];
 $docsAll     = [];
@@ -119,9 +157,9 @@ if ($legacySingle && $legacySingle['error'] === UPLOAD_ERR_OK) {
 /* =========================================================
    Photo
    ========================================================= */
-$photo                 = $_FILES['photo'] ?? null;
-$deletePhoto           = boolish($_POST['deletePhoto'] ?? '0');
-$nom_photo_db          = null;
+$photo                  = $_FILES['photo'] ?? null;
+$deletePhoto            = boolish($_POST['deletePhoto'] ?? '0');
+$nom_photo_db           = null;
 $photoDeletedPhysically = false;
 
 try {
@@ -142,7 +180,7 @@ try {
     // upload nouvelle photo
     if ($photo && $photo['error'] === UPLOAD_ERR_OK) {
         $extensionPhoto = strtolower(pathinfo($photo['name'], PATHINFO_EXTENSION));
-        $extensionsAutorisees = ['jpg','jpeg','png','gif','webp'];
+        $extensionsAutorisees = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
         if (!in_array($extensionPhoto, $extensionsAutorisees)) {
             echo json_encode(['success' => false, 'message' => 'Format d’image non autorisé.']);
             exit;
@@ -205,22 +243,52 @@ try {
     $stmt = $pdo->prepare($updateSql);
     $stmt->execute($params);
 
-    // MAJ stock_depots pour depot_id=1 (si présent), sinon création (logique existante)
-    $stmtDepotCheck = $pdo->prepare("SELECT quantite FROM stock_depots WHERE stock_id = ? AND depot_id = 1");
-    $stmtDepotCheck->execute([$stockId]);
+    /* --------------------------------------------
+       Dépôt par défaut de l’entreprise
+       -------------------------------------------- */
+    // On récupère le plus petit id de dépôt de l’entreprise courante.
+    $sqlDepot = "SELECT d.id FROM depots d";
+    [$fragD, $pD] = me_where_first($ENT_ID, 'd');
+    $sqlDepot .= $fragD . " ORDER BY d.id ASC LIMIT 1";
+    $stDepot = $pdo->prepare($sqlDepot);
+    $stDepot->execute($pD);
+    $defaultDepotId = (int)($stDepot->fetchColumn() ?: 0);
+
+    if ($defaultDepotId <= 0) {
+        // Fallback: si aucune entreprise (ancien projet) ou pas de dépôts, on garde l’ancienne logique depot_id=1
+        $defaultDepotId = 1;
+    }
+
+    // MAJ stock_depots pour le dépôt par défaut (création si manquant)
+    $stmtDepotCheck = $pdo->prepare("SELECT quantite FROM stock_depots WHERE stock_id = ? AND depot_id = ?");
+    $stmtDepotCheck->execute([$stockId, $defaultDepotId]);
     $quantiteDepot = $stmtDepotCheck->fetchColumn();
 
     if ($quantiteDepot !== false) {
         $nouvelleQuantiteDepot = max(0, (int)$quantiteDepot + $diff);
-        $stmtDepotUpdate = $pdo->prepare("UPDATE stock_depots SET quantite = ? WHERE stock_id = ? AND depot_id = 1");
-        $stmtDepotUpdate->execute([$nouvelleQuantiteDepot, $stockId]);
+        $stmtDepotUpdate = $pdo->prepare("UPDATE stock_depots SET quantite = ? WHERE stock_id = ? AND depot_id = ?");
+        $stmtDepotUpdate->execute([$nouvelleQuantiteDepot, $stockId, $defaultDepotId]);
     } else {
         $nouvelleQuantiteDepot = max(0, $quantite);
-        $stmtDepotInsert = $pdo->prepare("INSERT INTO stock_depots (stock_id, depot_id, quantite) VALUES (?, 1, ?)");
-        $stmtDepotInsert->execute([$stockId, $nouvelleQuantiteDepot]);
+        $insertOk = false;
+        if ($ENT_ID !== null) {
+            // si la colonne entreprise_id existe sur stock_depots
+            try {
+                $stmtDepotInsert = $pdo->prepare("INSERT INTO stock_depots (stock_id, depot_id, quantite, entreprise_id) VALUES (?, ?, ?, ?)");
+                $stmtDepotInsert->execute([$stockId, $defaultDepotId, $nouvelleQuantiteDepot, $ENT_ID]);
+                $insertOk = true;
+            } catch (Throwable $e) { /* fallback */
+            }
+        }
+        if (!$insertOk) {
+            $stmtDepotInsert = $pdo->prepare("INSERT INTO stock_depots (stock_id, depot_id, quantite) VALUES (?, ?, ?)");
+            $stmtDepotInsert->execute([$stockId, $defaultDepotId, $nouvelleQuantiteDepot]);
+        }
     }
 
-    // DOCS: suppressions ciblées (DB)
+    /* --------------------------------------------
+       DOCS: suppressions ciblées (DB)
+       -------------------------------------------- */
     if (!empty($deleteDocIds)) {
         $in  = implode(',', array_fill(0, count($deleteDocIds), '?'));
         $sql = "SELECT id, chemin_fichier FROM stock_documents WHERE stock_id = ? AND id IN ($in)";
@@ -241,7 +309,9 @@ try {
         $filesToUnlink = [];
     }
 
-    // DOCS: insert nouveaux (DB)
+    /* --------------------------------------------
+       DOCS: insert nouveaux (DB)
+       -------------------------------------------- */
     if (!empty($pendingInserts)) {
         $uploadedBy = isset($_SESSION['utilisateurs']['id']) ? (int)$_SESSION['utilisateurs']['id'] : null;
         $ins = $pdo->prepare("
@@ -298,24 +368,45 @@ try {
 
     /* =========================================================
        Re-render de la ligne <tr> pour remplacement AJAX
+       (filtré multi-entreprise)
        ========================================================= */
-
-    // Recharger infos stock + quantités dépôts/chantiers pour le rendu
     $stmt = $pdo->prepare("SELECT id, nom, quantite_totale, categorie, sous_categorie, photo FROM stock WHERE id = ?");
     $stmt->execute([$stockId]);
     $stk = $stmt->fetch(PDO::FETCH_ASSOC);
 
-    $stmt = $pdo->prepare("
+    // Dépôts de l’entreprise uniquement
+    $sqlDep = "
       SELECT d.id, d.nom, sd.quantite
       FROM stock_depots sd
       JOIN depots d ON d.id = sd.depot_id
       WHERE sd.stock_id = ?
-      ORDER BY d.nom
+    ";
+    // --- DÉPÔTS (liste) ---
+    if ($ENT_ID !== null) {
+        $stmt = $pdo->prepare("
+        SELECT d.id, d.nom, sd.quantite
+        FROM stock_depots sd
+        JOIN depots d ON d.id = sd.depot_id
+        WHERE sd.stock_id = ? AND d.entreprise_id = ?
+        ORDER BY d.nom
     ");
-    $stmt->execute([$stockId]);
+        $stmt->execute([$stockId, $ENT_ID]);
+    } else {
+        $stmt = $pdo->prepare("
+        SELECT d.id, d.nom, sd.quantite
+        FROM stock_depots sd
+        JOIN depots d ON d.id = sd.depot_id
+        WHERE sd.stock_id = ?
+        ORDER BY d.nom
+    ");
+        $stmt->execute([$stockId]);
+    }
     $depotsList = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    $stmt = $pdo->prepare("
+
+    // Chantiers de l’entreprise uniquement + transferts en attente filtrés
+    [$fragTE, $pTE] = me_where($ENT_ID, 'te');
+    $sqlCh = "
       SELECT c.id, c.nom,
              (sc.quantite - COALESCE((
                 SELECT SUM(te.quantite)
@@ -323,129 +414,162 @@ try {
                 WHERE te.article_id = sc.stock_id
                   AND te.source_type = 'chantier'
                   AND te.source_id   = sc.chantier_id
-                  AND te.statut = 'en_attente'
+                  AND te.statut = 'en_attente' " . ($fragTE ? $fragTE : '') . "
              ),0)) AS quantite
       FROM stock_chantiers sc
       JOIN chantiers c ON c.id = sc.chantier_id
       WHERE sc.stock_id = ?
+    ";
+    // --- CHANTIERS (liste avec quantités – filtre entreprise sur c) ---
+    if ($ENT_ID !== null) {
+        $stmt = $pdo->prepare("
+        SELECT c.id, c.nom,
+               (sc.quantite - COALESCE((
+                    SELECT SUM(te.quantite)
+                    FROM transferts_en_attente te
+                    WHERE te.article_id = sc.stock_id
+                      AND te.source_type = 'chantier'
+                      AND te.source_id   = sc.chantier_id
+                      AND te.statut      = 'en_attente'
+               ), 0)) AS quantite
+        FROM stock_chantiers sc
+        JOIN chantiers c ON c.id = sc.chantier_id
+        WHERE sc.stock_id = ? AND c.entreprise_id = ?
     ");
-    $stmt->execute([$stockId]);
-    $chantiersList = array_map(function($r){
+        $stmt->execute([$stockId, $ENT_ID]);
+    } else {
+        $stmt = $pdo->prepare("
+        SELECT c.id, c.nom,
+               (sc.quantite - COALESCE((
+                    SELECT SUM(te.quantite)
+                    FROM transferts_en_attente te
+                    WHERE te.article_id = sc.stock_id
+                      AND te.source_type = 'chantier'
+                      AND te.source_id   = sc.chantier_id
+                      AND te.statut      = 'en_attente'
+               ), 0)) AS quantite
+        FROM stock_chantiers sc
+        JOIN chantiers c ON c.id = sc.chantier_id
+        WHERE sc.stock_id = ?
+    ");
+        $stmt->execute([$stockId]);
+    }
+    $chantiersList = array_map(function ($r) {
         $r['quantite'] = max(0, (int)$r['quantite']);
         return $r;
     }, $stmt->fetchAll(PDO::FETCH_ASSOC));
 
-   ob_start();
+
+    ob_start();
 ?>
-<tr data-row-id="<?= (int)$stk['id'] ?>"
-    data-cat="<?= htmlspecialchars($stk['categorie'] ?? '') ?>"
-    data-subcat="<?= htmlspecialchars($stk['sous_categorie'] ?? '') ?>">
+    <tr data-row-id="<?= (int)$stk['id'] ?>"
+        data-cat="<?= htmlspecialchars($stk['categorie'] ?? '') ?>"
+        data-subcat="<?= htmlspecialchars($stk['sous_categorie'] ?? '') ?>">
 
-  <!-- PHOTO -->
-  <td class="text-center" style="width:82px">
-    <?php $photoWeb = !empty($stk['photo']) ? '/'.ltrim($stk['photo'],'/') : ''; ?>
-    <?php if ($photoWeb): ?>
-      <img src="<?= htmlspecialchars($photoWeb) ?>?t=<?= time() ?>"
-           alt="<?= htmlspecialchars($stk['nom']) ?>"
-           class="rounded border"
-           style="width:64px;height:64px;object-fit:cover">
-    <?php else: ?>
-      <div class="border rounded d-inline-flex align-items-center justify-content-center"
-           style="width:64px;height:64px;opacity:.6">—</div>
-    <?php endif; ?>
-  </td>
+        <!-- PHOTO -->
+        <td class="text-center" style="width:82px">
+            <?php $photoWeb = !empty($stk['photo']) ? '/' . ltrim($stk['photo'], '/') : ''; ?>
+            <?php if ($photoWeb): ?>
+                <img src="<?= htmlspecialchars($photoWeb) ?>?t=<?= time() ?>"
+                    alt="<?= htmlspecialchars($stk['nom']) ?>"
+                    class="rounded border"
+                    style="width:64px;height:64px;object-fit:cover">
+            <?php else: ?>
+                <div class="border rounded d-inline-flex align-items-center justify-content-center"
+                    style="width:64px;height:64px;opacity:.6">—</div>
+            <?php endif; ?>
+        </td>
 
-  <!-- ARTICLE -->
-  <td class="td-article text-center">
-    <a href="article.php?id=<?= (int)$stk['id'] ?>" class="fw-semibold text-decoration-none">
-      <?= htmlspecialchars($stk['nom']) ?>
-    </a>
-    <span class="ms-1 text-muted">(<?= (int)$stk['quantite_totale'] ?>)</span>
-    <div class="small text-muted">
-      <?php
-        $chips = [];
-        if (!empty($stk['categorie']))      $chips[] = $stk['categorie'];
-        if (!empty($stk['sous_categorie'])) $chips[] = $stk['sous_categorie'];
-        echo $chips ? htmlspecialchars(implode(' • ', $chips)) : '—';
-      ?>
-    </div>
-  </td>
+        <!-- ARTICLE -->
+        <td class="td-article text-center">
+            <a href="article.php?id=<?= (int)$stk['id'] ?>" class="fw-semibold text-decoration-none">
+                <?= htmlspecialchars($stk['nom']) ?>
+            </a>
+            <span class="ms-1 text-muted">(<?= (int)$stk['quantite_totale'] ?>)</span>
+            <div class="small text-muted">
+                <?php
+                $chips = [];
+                if (!empty($stk['categorie']))      $chips[] = $stk['categorie'];
+                if (!empty($stk['sous_categorie'])) $chips[] = $stk['sous_categorie'];
+                echo $chips ? htmlspecialchars(implode(' • ', $chips)) : '—';
+                ?>
+            </div>
+        </td>
 
-  <!-- DEPOTS -->
-  <td class="text-center">
-    <?php if ($depotsList): foreach ($depotsList as $d): ?>
-      <div>
-        <?= htmlspecialchars($d['nom']) ?>
-        <span id="qty-source-depot-<?= (int)$d['id'] ?>-<?= (int)$stk['id'] ?>"
-              class="badge <?= ((int)$d['quantite'] < 10) ? 'bg-danger' : 'bg-success' ?>">
-          <?= (int)$d['quantite'] ?>
-        </span>
-      </div>
-    <?php endforeach; else: ?>
-      <span class="text-muted">Aucun</span>
-    <?php endif; ?>
-  </td>
+        <!-- DEPOTS -->
+        <td class="text-center">
+            <?php if ($depotsList): foreach ($depotsList as $d): ?>
+                    <div>
+                        <?= htmlspecialchars($d['nom']) ?>
+                        <span id="qty-source-depot-<?= (int)$d['id'] ?>-<?= (int)$stk['id'] ?>"
+                            class="badge <?= ((int)$d['quantite'] < 10) ? 'bg-danger' : 'bg-success' ?>">
+                            <?= (int)$d['quantite'] ?>
+                        </span>
+                    </div>
+                <?php endforeach;
+            else: ?>
+                <span class="text-muted">Aucun</span>
+            <?php endif; ?>
+        </td>
 
-  <!-- CHANTIERS -->
-  <td class="text-center">
-    <?php
-      $chWith = array_values(array_filter($chantiersList, fn($c)=>$c['quantite']>0));
-      if ($chWith):
-        usort($chWith, fn($a,$b)=>$b['quantite']<=>$a['quantite']);
-        foreach ($chWith as $c):
-    ?>
-      <div>
-        <?= htmlspecialchars($c['nom']) ?>
-        (<span id="qty-source-chantier-<?= (int)$c['id'] ?>-<?= (int)$stk['id'] ?>"><?= (int)$c['quantite'] ?></span>)
-      </div>
-    <?php
-        endforeach;
-      else:
-    ?>
-      <span class="text-muted">Aucun</span>
-    <?php endif; ?>
-  </td>
+        <!-- CHANTIERS -->
+        <td class="text-center">
+            <?php
+            $chWith = array_values(array_filter($chantiersList, fn($c) => $c['quantite'] > 0));
+            if ($chWith):
+                usort($chWith, fn($a, $b) => $b['quantite'] <=> $a['quantite']);
+                foreach ($chWith as $c):
+            ?>
+                    <div>
+                        <?= htmlspecialchars($c['nom']) ?>
+                        (<span id="qty-source-chantier-<?= (int)$c['id'] ?>-<?= (int)$stk['id'] ?>"><?= (int)$c['quantite'] ?></span>)
+                    </div>
+                <?php
+                endforeach;
+            else:
+                ?>
+                <span class="text-muted">Aucun</span>
+            <?php endif; ?>
+        </td>
 
-  <!-- ACTIONS -->
-  <td class="text-center">
-    <button class="btn btn-sm btn-primary transfer-btn" data-stock-id="<?= (int)$stk['id'] ?>">
-      <i class="bi bi-arrow-left-right"></i>
-    </button>
-    <button class="btn btn-sm btn-warning edit-btn"
-            data-stock-id="<?= (int)$stk['id'] ?>"
-            data-stock-nom="<?= htmlspecialchars($stk['nom']) ?>"
-            data-stock-quantite="<?= (int)$stk['quantite_totale'] ?>"
-            data-stock-photo="<?= htmlspecialchars($photoWeb) ?>">
-      <i class="bi bi-pencil"></i>
-    </button>
-    <button class="btn btn-sm btn-danger delete-btn"
-            data-stock-id="<?= (int)$stk['id'] ?>"
-            data-stock-nom="<?= htmlspecialchars($stk['nom']) ?>">
-      <i class="bi bi-trash"></i>
-    </button>
-  </td>
-</tr>
+        <!-- ACTIONS -->
+        <td class="text-center">
+            <button class="btn btn-sm btn-primary transfer-btn" data-stock-id="<?= (int)$stk['id'] ?>">
+                <i class="bi bi-arrow-left-right"></i>
+            </button>
+            <button class="btn btn-sm btn-warning edit-btn"
+                data-stock-id="<?= (int)$stk['id'] ?>"
+                data-stock-nom="<?= htmlspecialchars($stk['nom']) ?>"
+                data-stock-quantite="<?= (int)$stk['quantite_totale'] ?>"
+                data-stock-photo="<?= htmlspecialchars($photoWeb) ?>">
+                <i class="bi bi-pencil"></i>
+            </button>
+            <button class="btn btn-sm btn-danger delete-btn"
+                data-stock-id="<?= (int)$stk['id'] ?>"
+                data-stock-nom="<?= htmlspecialchars($stk['nom']) ?>">
+                <i class="bi bi-trash"></i>
+            </button>
+        </td>
+    </tr>
 <?php
-$rowHtml = ob_get_clean();
+    $rowHtml = ob_get_clean();
 
-// Réponse JSON finale
-echo json_encode([
-    'success'            => true,
-    'rowHtml'            => $rowHtml,
-    'rowId'              => (int)$stk['id'],
+    echo json_encode([
+        'success'            => true,
+        'rowHtml'            => $rowHtml,
+        'rowId'              => (int)$stk['id'],
 
-    'newNom'             => $nom,
-    'newQuantiteTotale'  => $quantite,
-    'quantiteDispo'      => (int)($row['quantite_disponible'] ?? 0),
-    'newPhotoUrl'        => !empty($row['photo']) ? '/' . ltrim($row['photo'], '/') : null,
+        'newNom'             => $nom,
+        'newQuantiteTotale'  => $quantite,
+        'quantiteDispo'      => (int)($row['quantite_disponible'] ?? 0),
+        'newPhotoUrl'        => !empty($row['photo']) ? '/' . ltrim($row['photo'], '/') : null,
 
-    'docsAdded'          => $docsAdded,
-    'docsDeleted'        => $docsDeleted,
-    'docsAll'            => $docsAll,
+        'docsAdded'          => $docsAdded,
+        'docsDeleted'        => $docsDeleted,
+        'docsAll'            => $docsAll,
 
-    'photoDeleted'       => (bool)$photoDeletedPhysically,
-]);
-
+        'photoDeleted'       => (bool)$photoDeletedPhysically,
+    ]);
 } catch (Throwable $e) {
     if ($pdo->inTransaction()) $pdo->rollBack();
     echo json_encode(['success' => false, 'message' => $e->getMessage()]);
