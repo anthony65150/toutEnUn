@@ -1,10 +1,12 @@
 <?php
 declare(strict_types=1);
-require_once __DIR__ . '/config/init.php';
+require_once __DIR__ . '/../config/init.php';
 header('Content-Type: application/json; charset=utf-8');
 
 if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST' || !isset($_SESSION['utilisateurs'])) {
-  http_response_code(403); echo json_encode(['success'=>false]); exit;
+  http_response_code(403);
+  echo json_encode(['success' => false]);
+  exit;
 }
 
 $user = $_SESSION['utilisateurs'];
@@ -15,9 +17,16 @@ $date = $_POST['date'] ?? '';
 $hours= (float)($_POST['hours'] ?? 0);
 $chantierId = (int)($_POST['chantier_id'] ?? 0);
 
-if ($role !== 'administrateur' || $uid <= 0) $uid = (int)($user['id'] ?? 0);
-if (!$entrepriseId || !$uid || $hours <= 0 || !preg_match('/^\d{4}-\d{2}-\d{2}$/',$date)) {
-  echo json_encode(['success'=>false,'message'=>'Paramètres invalides']); exit;
+if ($role !== 'administrateur' || $uid <= 0) {
+  $uid = (int)($user['id'] ?? 0);
+}
+
+if (
+  !$entrepriseId || !$uid || $hours <= 0
+  || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)
+) {
+  echo json_encode(['success' => false, 'message' => 'Paramètres invalides']);
+  exit;
 }
 
 $pdo->exec("CREATE TABLE IF NOT EXISTS pointages_jour (
@@ -38,6 +47,12 @@ $stmt = $pdo->prepare("
   VALUES (:e,:u,:d,:c,:h)
   ON DUPLICATE KEY UPDATE chantier_id=VALUES(chantier_id), heures=VALUES(heures)
 ");
-$stmt->execute([':e'=>$entrepriseId, ':u'=>$uid, ':d'=>$date, ':c'=>$chantierId ?: null, ':h'=>$hours]);
+$stmt->execute([
+  ':e' => $entrepriseId,
+  ':u' => $uid,
+  ':d' => $date,
+  ':c' => $chantierId ?: null,
+  ':h' => $hours
+]);
 
-echo json_encode(['success'=>true, 'hours'=>$hours]);
+echo json_encode(['success' => true, 'hours' => $hours]);

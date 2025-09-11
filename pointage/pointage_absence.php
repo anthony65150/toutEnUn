@@ -1,21 +1,24 @@
 <?php
 declare(strict_types=1);
-require_once __DIR__ . '/config/init.php';
+require_once __DIR__ . '/../config/init.php';
 header('Content-Type: application/json; charset=utf-8');
 
 if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST' || !isset($_SESSION['utilisateurs'])) {
   http_response_code(403); echo json_encode(['success'=>false]); exit;
 }
 
-$user = $_SESSION['utilisateurs'];
+$user         = $_SESSION['utilisateurs'];
 $entrepriseId = (int)($user['entreprise_id'] ?? 0);
-$role = $user['fonction'] ?? '';
-$uid  = (int)($_POST['utilisateur_id'] ?? 0);
-$date = $_POST['date'] ?? '';
-$reason = $_POST['reason'] ?? '';
+$role         = $user['fonction'] ?? '';
+$uid          = (int)($_POST['utilisateur_id'] ?? 0);
+$date         = $_POST['date'] ?? '';
+$reason       = $_POST['reason'] ?? '';
+$hours        = (float)($_POST['hours'] ?? 0); // <= NOUVEAU
 
 if ($role !== 'administrateur' || $uid <= 0) $uid = (int)($user['id'] ?? 0);
-if (!$entrepriseId || !$uid || !in_array($reason, ['conges','maladie','injustifie'], true) || !preg_match('/^\d{4}-\d{2}-\d{2}$/',$date)) {
+
+if (!$entrepriseId || !$uid || !in_array($reason, ['conges','maladie','injustifie'], true)
+    || !preg_match('/^\d{4}-\d{2}-\d{2}$/',$date) || $hours <= 0 || $hours > 8.25) {
   echo json_encode(['success'=>false,'message'=>'Paramètres invalides']); exit;
 }
 
@@ -25,21 +28,21 @@ $pdo->exec("CREATE TABLE IF NOT EXISTS pointages_absences (
   utilisateur_id INT NOT NULL,
   date_jour DATE NOT NULL,
   motif ENUM('conges','maladie','injustifie') NOT NULL,
+  heures DECIMAL(5,2) DEFAULT NULL,      -- <= NOUVEAU
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uq (entreprise_id, utilisateur_id, date_jour)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 
-$pdo->prepare("DELETE FROM pointages_jour WHERE entreprise_id=? AND utilisateur_id=? AND date_jour=?")
+$pdo->prepare("DELETE FROM pointages_jour     WHERE entreprise_id=? AND utilisateur_id=? AND date_jour=?")
     ->execute([$entrepriseId, $uid, $date]);
-
 $pdo->prepare("DELETE FROM pointages_conduite WHERE entreprise_id=? AND utilisateur_id=? AND date_pointage=?")
     ->execute([$entrepriseId, $uid, $date]);
 
 $stmt = $pdo->prepare("
-  INSERT INTO pointages_absences (entreprise_id, utilisateur_id, date_jour, motif)
-  VALUES (:e,:u,:d,:m)
-  ON DUPLICATE KEY UPDATE motif=VALUES(motif), created_at=VALUES(created_at)
+  INSERT INTO pointages_absences (entreprise_id, utilisateur_id, date_jour, motif, heures)
+  VALUES (:e,:u,:d,:m,:h)
+  ON DUPLICATE KEY UPDATE motif=VALUES(motif), heures=VALUES(heures), created_at=VALUES(created_at)
 ");
-$stmt->execute([':e'=>$entrepriseId, ':u'=>$uid, ':d'=>$date, ':m'=>$reason]);
+$stmt->execute([':e'=>$entrepriseId, ':u'=>$uid, ':d'=>$date, ':m'=>$reason, ':h'=>$hours]);
 
-echo json_encode(['success'=>true, 'reason'=>$reason]);
+echo json_encode(['success'=>true, 'reason'=>$reason, 'hours'=>$hours]);
