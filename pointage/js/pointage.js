@@ -16,10 +16,35 @@ document.addEventListener('DOMContentLoaded', () => {
   const labelForReason = (r) => (r === 'conges' ? 'Congés' : (r === 'maladie' ? 'Maladie' : 'Injustifié'));
 
   // ---- Jours de la semaine (via data-iso sur les <th>)
-  const headerThs = Array.from(document.querySelectorAll('thead tr th')).slice(1); // on saute "Employés"
+  const headerThs = Array.from(document.querySelectorAll('thead tr th[data-iso]')); // seulement ceux qui ont data-iso
   const dayIsos   = headerThs.map(th => th.dataset.iso);
-  const todayIso  = new Date().toISOString().slice(0,10);
-  let activeDay   = dayIsos.includes(todayIso) ? todayIso : dayIsos[0];
+
+  // Helper fetch encodé x-www-form-urlencoded
+  async function postForm(url, payload) {
+    const body = new URLSearchParams();
+    Object.entries(payload || {}).forEach(([k, v]) => {
+      if (v !== undefined && v !== null) body.append(k, String(v));
+    });
+    const res = await fetch(url, { method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body });
+    let data = null;
+    try { data = await res.json(); } catch { data = null; }
+    if (!res.ok || !data || data.success === false) {
+      const m = (data && (data.message || data.msg)) || `Erreur (${res.status})`;
+      throw new Error(m);
+    }
+    return data;
+  }
+
+  // ISO « local » (évite le décalage UTC)
+  function todayLocalISO() {
+    const d = new Date();
+    d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+    return d.toISOString().slice(0, 10);
+  }
+  const todayIso  = todayLocalISO();
+
+  // ❌ plus de fallback sur lundi
+  let activeDay   = dayIsos.includes(todayIso) ? todayIso : null;
 
   // ---- Filtre chantier + recherche
   let activeChantier =
@@ -34,13 +59,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ---- Helpers d'affichage
   function getActiveColIndex() {
+    if (!activeDay) return -1;
     const idx = dayIsos.indexOf(activeDay);
-    return idx === -1 ? -1 : idx + 1; // +1 car col 0 = "Employés"
+    return idx === -1 ? -1 : (idx + 1); // +1 car col 0 = "Employés"
   }
+
   function highlightActiveDay() {
     const colIndex = getActiveColIndex();
     document.querySelectorAll('.day-active').forEach(el => el.classList.remove('day-active'));
-    if (colIndex < 0) return;
+    if (colIndex < 0) return; // rien à surligner
+
     const th = thead?.querySelectorAll('tr th')[colIndex];
     if (th) th.classList.add('day-active');
     document.querySelectorAll('tbody tr').forEach(tr => {
@@ -49,19 +77,23 @@ document.addEventListener('DOMContentLoaded', () => {
       if (td) td.classList.add('day-active');
     });
   }
+
   function rowMatches(tr) {
-    if (activeChantier !== 'all') {
+    // Filtre chantier : seulement si on a un jour actif
+    if (activeChantier !== 'all' && activeDay) {
       const cell    = tr.querySelector(`td[data-date="${activeDay}"]`);
       if (!cell) return false;
       const planned = (cell.dataset.plannedChantiersDay || '').split(',').filter(Boolean);
       if (!planned.includes(String(activeChantier))) return false;
     }
+    // Recherche texte
     if (query) {
       const name = (tr.dataset.name || '');
       if (!name.includes(query)) return false;
     }
     return true;
   }
+
   function applyFilter() {
     highlightActiveDay();
     document.querySelectorAll('#pointageApp tbody tr[data-user-id]').forEach(tr => {
@@ -74,13 +106,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // ======================================================================
   async function loadAndShowCamionControls(chantierId, dateIso){
     try {
-      const res  = await fetch('/pointage/pointage_camion.php', {
-        method: 'POST', headers: {'Content-Type':'application/x-www-form-urlencoded'},
-        body: new URLSearchParams({ action:'get', chantier_id:chantierId, date_jour:dateIso })
-      });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.message || 'Erreur');
-
+      const data = await postForm('/pointage/pointage_camion.php', { action:'get', chantier_id:chantierId, date_jour:dateIso });
       truckCap.set(capKey(chantierId, dateIso), data.nb); // MAJ cache
 
       camionControls.innerHTML = `
@@ -99,12 +125,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function updateCamion(action, chantierId, dateIso){
     try {
-      const res  = await fetch('/pointage/pointage_camion.php', {
-        method: 'POST', headers: {'Content-Type':'application/x-www-form-urlencoded'},
-        body: new URLSearchParams({ action, chantier_id:chantierId, date_jour:dateIso })
-      });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.message || 'Erreur');
+      const data = await postForm('/pointage/pointage_camion.php', { action, chantier_id:chantierId, date_jour:dateIso });
       camionControls.querySelector('.camion-count').textContent = String(data.nb);
       truckCap.set(capKey(chantierId, dateIso), data.nb); // MAJ cache IMMÉDIATE
     } catch(err){ alert(err.message); }
@@ -119,7 +140,7 @@ document.addEventListener('DOMContentLoaded', () => {
     btn.classList.add('active');
     activeChantier = btn.dataset.chantier; // 'all' ou id
 
-    if (activeChantier !== 'all'){
+    if (activeChantier !== 'all' && activeDay){
       loadAndShowCamionControls(activeChantier, activeDay);
     } else {
       camionControls.innerHTML = '';
@@ -129,7 +150,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Changement de jour actif (utilise data-iso sur le <th>)
   thead?.addEventListener('click', (e) => {
-    const th  = e.target.closest('th');
+    const th  = e.target.closest('th[data-iso]');
     const iso = th?.dataset?.iso;
     if (!iso) return;
     activeDay = iso;
@@ -148,7 +169,8 @@ document.addEventListener('DOMContentLoaded', () => {
   // ======================================================================
   //                         ACTIONS : PRÉSENCE / ABSENCE
   // ======================================================================
-  // Présent 8h15 (toggle)
+
+  // Présent 8h15 (toggle via pointage_present.php)
   table?.addEventListener('click', async (e) => {
     const btn = e.target.closest('.present-btn');
     if (!btn) return;
@@ -163,27 +185,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
     try {
       if (isActive) {
-        // -> DECOCHER Présent
-        const res = await fetch('/pointage/pointage_clear.php', {
-          method: 'POST',
-          headers: {'Content-Type':'application/x-www-form-urlencoded'},
-          body: new URLSearchParams({ utilisateur_id:userId, date:dateIso, action:'presence' })
-        });
-        const data = await res.json();
-        if (!data.success) throw new Error(data.message || 'Erreur');
+        // -> DECOCHER Présent : hours = 0
+        await postForm('/pointage/pointage_present.php', { utilisateur_id:userId, date:dateIso, hours:'0' });
         btn.classList.remove('btn-success'); btn.classList.add('btn-outline-success');
         btn.textContent = 'Présent 8h15';
         return;
       }
 
       // -> ACTIVER Présent
-      // 1) d'abord retirer une éventuelle **absence**
-      const resClr = await fetch('/pointage/pointage_clear.php', {
-        method: 'POST',
-        headers: {'Content-Type':'application/x-www-form-urlencoded'},
-        body: new URLSearchParams({ action:'absence', utilisateur_id:userId, date:dateIso })
-      });
-      try { await resClr.json(); } catch {}
+      // 1) d'abord retirer une éventuelle **absence** côté serveur (le endpoint présent le fait aussi, mais on “optimise” l’UI)
+      try { await postForm('/pointage/pointage_absence.php', { utilisateur_id:userId, date:dateIso, remove:'1' }); } catch {}
 
       // reset UI absence
       const absBtn = td.querySelector('.absence-btn');
@@ -192,13 +203,7 @@ document.addEventListener('DOMContentLoaded', () => {
       td.querySelectorAll('.conduite-btn').forEach(b => b.disabled = false);
 
       // 2) enregistrer la présence
-      const res = await fetch('/pointage/pointage_present.php', {
-        method: 'POST',
-        headers: {'Content-Type':'application/x-www-form-urlencoded'},
-        body: new URLSearchParams({ utilisateur_id:userId, date:dateIso, hours })
-      });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.message || 'Erreur');
+      await postForm('/pointage/pointage_present.php', { utilisateur_id:userId, date:dateIso, hours });
 
       // 3) UI présent -> vert
       btn.classList.remove('btn-outline-success'); btn.classList.add('btn-success');
@@ -226,7 +231,7 @@ document.addEventListener('DOMContentLoaded', () => {
     absenceModal?.show();
   });
 
-  // Enregistrer la modale
+  // Enregistrer la modale (pose / maj absence via pointage_absence.php)
   absSaveBtn?.addEventListener('click', async () => {
     if (!absenceModalEl?._targetCell) return;
     const td      = absenceModalEl._targetCell;
@@ -241,18 +246,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     try {
-      const res = await fetch('/pointage/pointage_absence.php', {
-        method: 'POST',
-        headers: {'Content-Type':'application/x-www-form-urlencoded'},
-        body: new URLSearchParams({
-          utilisateur_id: userId,
-          date: dateIso,
-          reason,
-          hours: String(hours)
-        })
+      await postForm('/pointage/pointage_absence.php', {
+        utilisateur_id: userId, date: dateIso, reason, hours: String(hours)
       });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.message || 'Erreur');
 
       // 1) bouton Abs. rouge + texte
       const absBtn = td.querySelector('.absence-btn');
@@ -284,20 +280,17 @@ document.addEventListener('DOMContentLoaded', () => {
         present.textContent = 'Présent 8h15';
       }
 
-      // 4) conduite : absence => A ET R désactivés (quelque soit motif/temps)
-const btnA = td.querySelector('.conduite-btn[data-type="A"]');
-const btnR = td.querySelector('.conduite-btn[data-type="R"]');
-if (btnA) btnA.disabled = true;
-if (btnR) btnR.disabled = true;
+      // 4) conduite : absence => A ET R désactivés (quel que soit motif/temps)
+      td.querySelectorAll('.conduite-btn').forEach(b => b.disabled = true);
 
-absenceModal?.hide();
+      absenceModal?.hide();
 
     } catch (err) {
       alert(err.message || 'Erreur');
     }
   });
 
-  // Décocher une absence existante (bouton rouge)
+  // Décocher une absence existante (bouton rouge -> toggle off via remove=1)
   table?.addEventListener('click', async (e) => {
     const btn = e.target.closest('.absence-btn');
     if (!btn || !btn.classList.contains('btn-danger')) return;
@@ -308,18 +301,13 @@ absenceModal?.hide();
     const dateIso = td.dataset.date;
 
     try {
-      const res  = await fetch('/pointage/pointage_clear.php', {
-        method: 'POST', headers: {'Content-Type':'application/x-www-form-urlencoded'},
-        body: new URLSearchParams({ action:'absence', utilisateur_id:userId, date:dateIso })
-      });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.message || 'Erreur');
+      await postForm('/pointage/pointage_absence.php', { utilisateur_id:userId, date:dateIso, remove:'1' });
 
       btn.classList.remove('btn-danger'); btn.classList.add('btn-outline-danger');
-btn.textContent = 'Abs.';
-td.querySelector('.absence-pill')?.remove();
-// => Réactiver conduite A et R
-td.querySelectorAll('.conduite-btn').forEach(b => b.disabled = false);
+      btn.textContent = 'Abs.';
+      td.querySelector('.absence-pill')?.remove();
+      // => Réactiver conduite A et R
+      td.querySelectorAll('.conduite-btn').forEach(b => b.disabled = false);
 
     } catch (err) { alert(err.message || 'Erreur'); }
   });
@@ -348,12 +336,9 @@ td.querySelectorAll('.conduite-btn').forEach(b => b.disabled = false);
     try {
       if (!isActive) {
         // Activer
-        const res  = await fetch('/pointage/pointage_conduite.php', {
-          method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-          body: new URLSearchParams({ chantier_id: chantierId, type, utilisateur_id: userId, date_pointage: dateIso })
+        const data = await postForm('/pointage/pointage_conduite.php', {
+          chantier_id: chantierId, type, utilisateur_id: userId, date_pointage: dateIso
         });
-        const data = await res.json();
-        if (!data.success) throw new Error(data.message || 'Erreur');
 
         if (type === 'A') {
           btn.classList.remove('btn-outline-primary'); btn.classList.add('btn-primary');
@@ -382,12 +367,9 @@ td.querySelectorAll('.conduite-btn').forEach(b => b.disabled = false);
         }
       } else {
         // Désactiver
-        const res  = await fetch('/pointage/pointage_clear.php', {
-          method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-          body: new URLSearchParams({ action:'conduite', which:type, utilisateur_id:userId, date:dateIso })
+        await postForm('/pointage/pointage_conduite.php', {
+          chantier_id: chantierId, type, utilisateur_id: userId, date_pointage: dateIso, remove:'1'
         });
-        const data = await res.json();
-        if (!data.success) throw new Error(data.message || 'Erreur');
 
         if (type === 'A') {
           btn.classList.remove('btn-primary'); btn.classList.add('btn-outline-primary');
@@ -395,13 +377,13 @@ td.querySelectorAll('.conduite-btn').forEach(b => b.disabled = false);
           btn.classList.remove('btn-success'); btn.classList.add('btn-outline-success');
         }
       }
-    } catch (_err) { alert('Erreur conduite'); }
+    } catch (err) { alert(err.message || 'Erreur conduite'); }
   });
 
   // ======================================================================
   //                               INIT
   // ======================================================================
-  if (activeChantier !== 'all') {
+  if (activeChantier !== 'all' && activeDay) {
     loadAndShowCamionControls(activeChantier, activeDay);
   }
   applyFilter();

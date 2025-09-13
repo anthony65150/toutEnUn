@@ -82,6 +82,7 @@ try {
   $st->bindValue(':u', $uid,          PDO::PARAM_INT);
   $st->bindValue(':d', $jour,         PDO::PARAM_STR);
   if ($cid === null) {
+    
     $st->bindValue(':c', null, PDO::PARAM_NULL);
   } else {
     $st->bindValue(':c', $cid, PDO::PARAM_INT);

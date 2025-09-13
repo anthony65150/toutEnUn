@@ -36,71 +36,104 @@ $chefsOptions = $stChefs->fetchAll(PDO::FETCH_ASSOC);
    Équipe         = affectations du jour (hors chefs)
 */
 $today = (new DateTime('today'))->format('Y-m-d');
+if (isset($_GET['date']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $_GET['date'])) {
+  $today = $_GET['date'];
+}
 
 $sql = "
 SELECT
-  c.id, c.nom, c.description, c.date_debut, c.date_fin,
+  c.id,
+  c.nom,
+  c.description,
+  c.date_debut,
+  c.date_fin,
 
   ur.id AS resp_id,
   CONCAT(COALESCE(ur.prenom,''), ' ', COALESCE(ur.nom,'')) AS resp_nom,
 
   GROUP_CONCAT(DISTINCT
-    CASE WHEN u_all.fonction <> 'chef'
-         THEN CONCAT(u_all.prenom,' ',u_all.nom)
+    CASE WHEN u_all.fonction IN ('employe','interim')
+         THEN CONCAT(u_all.prenom, ' ', u_all.nom)
          ELSE NULL END
-    ORDER BY u_all.prenom, u_all.nom SEPARATOR ', '
-  ) AS equipe,
+    ORDER BY u_all.nom, u_all.prenom SEPARATOR ', '
+  ) AS equipe_du_jour,
 
   GROUP_CONCAT(DISTINCT
     CASE WHEN u_chef.id IS NOT NULL AND u_chef.id <> c.responsable_id
-         THEN CONCAT(u_chef.prenom,' ',u_chef.nom)
+         THEN CONCAT(u_chef.prenom, ' ', u_chef.nom)
          ELSE NULL END
-    ORDER BY u_chef.prenom, u_chef.nom SEPARATOR ', '
+    ORDER BY u_chef.nom, u_chef.prenom SEPARATOR ', '
   ) AS autres_chefs,
 
-  GROUP_CONCAT(DISTINCT u_chef.id) AS chef_ids_all
+  GROUP_CONCAT(DISTINCT u_chef.id) AS chef_ids_all,
+
+  /* ===== Compteurs ===== */
+  /* employés + intérim affectés aujourd'hui (distinct) */
+  COUNT(DISTINCT CASE
+      WHEN u_all.id IS NOT NULL AND u_all.fonction IN ('employe','interim')
+      THEN u_all.id END
+  ) AS nb_ouvriers_today,
+
+  /* tous les chefs : responsable (si présent) + autres chefs distincts */
+  (CASE WHEN ur.id IS NULL THEN 0 ELSE 1 END)
+  + COUNT(DISTINCT CASE
+      WHEN u_chef.id IS NOT NULL AND u_chef.id <> c.responsable_id
+      THEN u_chef.id END
+    ) AS nb_chefs_total,
+
+  /* total demandé pour l'affichage à côté du nom */
+  (
+    COUNT(DISTINCT CASE
+      WHEN u_all.id IS NOT NULL AND u_all.fonction IN ('employe','interim')
+      THEN u_all.id END
+    )
+    +
+    (CASE WHEN ur.id IS NULL THEN 0 ELSE 1 END)
+    + COUNT(DISTINCT CASE
+        WHEN u_chef.id IS NOT NULL AND u_chef.id <> c.responsable_id
+        THEN u_chef.id END
+      )
+  ) AS total_personnes
 
 FROM chantiers c
-
--- ✅ NE GARDE LE RESPONSABLE QUE S'IL EST VRAIMENT 'chef'
 LEFT JOIN utilisateurs ur
        ON ur.id = c.responsable_id
       AND ur.fonction = 'chef'
-      AND ur.entreprise_id = :eid_resp
-
+      AND ur.entreprise_id = :eid1
 LEFT JOIN planning_affectations pa
-       ON pa.chantier_id = c.id
-      AND pa.date_jour   = :d
-      AND pa.entreprise_id = :eid1
-
+       ON pa.chantier_id   = c.id
+      AND pa.date_jour     = :d
+      AND pa.entreprise_id = :eid2
 LEFT JOIN utilisateurs u_all
-       ON u_all.id = pa.utilisateur_id
-
+       ON u_all.id            = pa.utilisateur_id
+      AND u_all.entreprise_id = :eid3
 LEFT JOIN utilisateur_chantiers uc
-       ON uc.chantier_id = c.id
-      AND uc.entreprise_id = :eid2
-
+       ON uc.chantier_id   = c.id
+      AND uc.entreprise_id = :eid4
 LEFT JOIN utilisateurs u_chef
-       ON u_chef.id = uc.utilisateur_id
-      AND u_chef.fonction = 'chef'
-      AND u_chef.entreprise_id = :eid3
-
-WHERE c.entreprise_id = :eid4
+       ON u_chef.id            = uc.utilisateur_id
+      AND u_chef.fonction      = 'chef'
+      AND u_chef.entreprise_id = :eid5
+WHERE c.entreprise_id = :eid6
 GROUP BY c.id
 ORDER BY c.nom
 ";
+
+
 $st = $pdo->prepare($sql);
 $st->execute([
-  ':d'        => $today,
-  ':eid_resp' => $entrepriseId, // 👈 nouveau param
-  ':eid1'     => $entrepriseId,
-  ':eid2'     => $entrepriseId,
-  ':eid3'     => $entrepriseId,
-  ':eid4'     => $entrepriseId,
+  ':d'    => $today,
+  ':eid1' => $entrepriseId,
+  ':eid2' => $entrepriseId,
+  ':eid3' => $entrepriseId,
+  ':eid4' => $entrepriseId,
+  ':eid5' => $entrepriseId,
+  ':eid6' => $entrepriseId,
 ]);
-
-
 $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+
+
+
 
 require_once __DIR__ . '/../templates/header.php';
 require_once __DIR__ . '/../templates/navigation/navigation.php';
@@ -135,8 +168,10 @@ require_once __DIR__ . '/../templates/navigation/navigation.php';
             <a class="link-primary fw-semibold text-decoration-none"
               href="chantier_contenu.php?id=<?= (int)$c['id'] ?>">
               <?= htmlspecialchars($c['nom']) ?>
+              (<?= (int)($c['total_personnes'] ?? 0) ?>)
             </a>
           </td>
+
 
           <td class="text-center">
             <?php if (!empty($c['resp_nom'])): ?>
@@ -151,7 +186,8 @@ require_once __DIR__ . '/../templates/navigation/navigation.php';
 
 
           <td class="text-start">
-            <?= $c['equipe'] ? htmlspecialchars($c['equipe']) : '<span class="text-muted">—</span>' ?>
+            <?= !empty($c['equipe_du_jour']) ? htmlspecialchars($c['equipe_du_jour']) : '—' ?>
+
           </td>
 
           <td><?= htmlspecialchars($c['date_debut'] ?? '') ?></td>
