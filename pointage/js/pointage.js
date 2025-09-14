@@ -1,94 +1,131 @@
 // /pointage/js/pointage.js
 document.addEventListener('DOMContentLoaded', () => {
+  "use strict";
+
+  /* ==============================
+   *   RÉFÉRENCES DOM (scopées)
+   * ============================== */
   const app            = document.getElementById('pointageApp');
-  const table          = app?.querySelector('table');
-  const searchInput    = document.getElementById('searchInput');
+  if (!app) return;
+
+  const table          = app.querySelector('table');
+  const thead          = table?.querySelector('thead');
+  const searchInput    = document.getElementById('searchInput');   // peut être hors #pointageApp
   const filtersBar     = document.getElementById('chantierFilters');
   const camionControls = document.getElementById('camionControls');
-  const thead          = table?.querySelector('thead');
 
-  // ---- Modal Absence
+  // Modal Absence
   const absenceModalEl = document.getElementById('absenceModal');
   const absenceModal   = absenceModalEl ? new bootstrap.Modal(absenceModalEl) : null;
   const absForm        = document.getElementById('absenceForm');
   const absSaveBtn     = document.getElementById('absenceSave');
 
+  /* ==============================
+   *   HELPERS GÉNÉRAUX
+   * ============================== */
+  const DEBUG = true; // passe à false en prod
+
   const labelForReason = (r) => (r === 'conges' ? 'Congés' : (r === 'maladie' ? 'Maladie' : 'Injustifié'));
 
-  // ---- Jours de la semaine (via data-iso sur les <th>)
-  const headerThs = Array.from(document.querySelectorAll('thead tr th[data-iso]')); // seulement ceux qui ont data-iso
-  const dayIsos   = headerThs.map(th => th.dataset.iso);
+  const showError = (msg, ctx) => {
+    alert(msg || 'Erreur serveur');
+    if (DEBUG && ctx) console.error('[POINTAGE]', msg, ctx);
+  };
 
-  // Helper fetch encodé x-www-form-urlencoded
-  async function postForm(url, payload) {
-    const body = new URLSearchParams();
-    Object.entries(payload || {}).forEach(([k, v]) => {
-      if (v !== undefined && v !== null) body.append(k, String(v));
-    });
-    const res = await fetch(url, { method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body });
-    let data = null;
-    try { data = await res.json(); } catch { data = null; }
-    if (!res.ok || !data || data.success === false) {
-      const m = (data && (data.message || data.msg)) || `Erreur (${res.status})`;
-      throw new Error(m);
-    }
-    return data;
-  }
-
-  // ISO « local » (évite le décalage UTC)
+  // YYYY-MM-DD local (sans décalage UTC)
   function todayLocalISO() {
     const d = new Date();
     d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
     return d.toISOString().slice(0, 10);
   }
-  const todayIso  = todayLocalISO();
+  const todayIso = todayLocalISO();
 
-  // ❌ plus de fallback sur lundi
-  let activeDay   = dayIsos.includes(todayIso) ? todayIso : null;
+  const asIntOrNull = (v) => {
+    const n = parseInt(v, 10);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  };
 
-  // ---- Filtre chantier + recherche
-  let activeChantier =
-    (filtersBar?.querySelector('button.active[data-chantier]') || { dataset: { chantier: 'all' } })
-      .dataset.chantier || 'all';
-  let query = '';
+  // POST x-www-form-urlencoded → JSON {success:true,...}
+  // ❗ ne fait pas d’alert ici (laisse l’appelant décider)
+  async function postForm(url, payload) {
+    const body = new URLSearchParams();
+    Object.entries(payload || {}).forEach(([k, v]) => body.append(k, v == null ? '' : String(v)));
 
-  // ---- Cache des capacités camions
-  const truckCap = new Map(); // key `${chantierId}|${dateIso}` -> nb
-  const capKey = (c, d) => `${c}|${d}`;
-  const getCap = (c, d) => (truckCap.get(capKey(c,d)) ?? 1);
+    const res  = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body });
+    const text = await res.text();
 
-  // ---- Helpers d'affichage
+    let data = null;
+    try { data = JSON.parse(text); } catch { data = null; }
+    if (data === 'ok') data = { success: true }; // tolère "ok" simple
+
+    if (!res.ok || !data || data.success === false) {
+      const msg = (data && (data.message || data.msg)) || `HTTP ${res?.status || 0}`;
+      const err = new Error(msg);
+      err.debug = { url, payload, status: res?.status, responseText: text, data };
+      if (DEBUG) console.error('POST error', err.debug);
+      throw err;
+    }
+    return data;
+  }
+
+  /* ==============================
+   *   ENTÊTE / JOURS VISIBLES
+   * ============================== */
+  const headerThs = Array.from(thead?.querySelectorAll('tr th[data-iso]') || []);
+  const dayIsos   = headerThs.map(th => th.dataset.iso);
+  let activeDay   = dayIsos.includes(todayIso) ? todayIso : null; // pas de fallback si hors semaine
+
   function getActiveColIndex() {
     if (!activeDay) return -1;
-    const idx = dayIsos.indexOf(activeDay);
-    return idx === -1 ? -1 : (idx + 1); // +1 car col 0 = "Employés"
+    const i = dayIsos.indexOf(activeDay);
+    return i === -1 ? -1 : (i + 1); // +1 car col 0 = noms employés
   }
 
   function highlightActiveDay() {
-    const colIndex = getActiveColIndex();
     document.querySelectorAll('.day-active').forEach(el => el.classList.remove('day-active'));
-    if (colIndex < 0) return; // rien à surligner
-
-    const th = thead?.querySelectorAll('tr th')[colIndex];
+    const col = getActiveColIndex();
+    if (col < 0) return;
+    const th = thead?.querySelectorAll('tr th')[col];
     if (th) th.classList.add('day-active');
-    document.querySelectorAll('tbody tr').forEach(tr => {
-      const tds = tr.querySelectorAll('td');
-      const td  = tds[colIndex];
+    document.querySelectorAll('#pointageApp tbody tr').forEach(tr => {
+      const td = tr.querySelectorAll('td')[col];
       if (td) td.classList.add('day-active');
     });
   }
 
-  function rowMatches(tr) {
-    // Filtre chantier : seulement si on a un jour actif
+  thead?.addEventListener('click', (e) => {
+    const th = e.target.closest('th[data-iso]');
+    if (!th) return;
+    activeDay = th.dataset.iso || null;
     if (activeChantier !== 'all' && activeDay) {
-      const cell    = tr.querySelector(`td[data-date="${activeDay}"]`);
+      loadAndShowCamionControls(activeChantier, activeDay);
+    } else if (camionControls) {
+      camionControls.innerHTML = '';
+    }
+    applyFilter();
+  });
+
+  /* ==============================
+   *   FILTRE CHANTIERS + RECHERCHE
+   * ============================== */
+  let activeChantier = (() => {
+    const btn = filtersBar?.querySelector('button.active[data-chantier],button.active[data-chantier-id]');
+    if (btn?.dataset.chantier)   return btn.dataset.chantier;
+    if (btn?.dataset.chantierId) return btn.dataset.chantierId;
+    return 'all';
+  })();
+
+  let query = '';
+
+  function rowMatches(tr) {
+    if (activeChantier !== 'all' && activeDay) {
+      const cell = tr.querySelector(`td[data-date="${activeDay}"]`);
       if (!cell) return false;
       const planned = (cell.dataset.plannedChantiersDay || '').split(',').filter(Boolean);
       if (!planned.includes(String(activeChantier))) return false;
     }
-    // Recherche texte
     if (query) {
-      const name = (tr.dataset.name || '');
+      const name = (tr.dataset.name || '').toLowerCase();
       if (!name.includes(query)) return false;
     }
     return true;
@@ -101,100 +138,141 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // ======================================================================
-  //               RÉGLETTE CAMIONS (SOUS LES BOUTONS CHANTIERS)
-  // ======================================================================
-  async function loadAndShowCamionControls(chantierId, dateIso){
-    try {
-      const data = await postForm('/pointage/pointage_camion.php', { action:'get', chantier_id:chantierId, date_jour:dateIso });
-      truckCap.set(capKey(chantierId, dateIso), data.nb); // MAJ cache
-
-      camionControls.innerHTML = `
-        <div class="d-flex align-items-center gap-2">
-          <span class="fw-semibold">Camions :</span>
-          <button type="button" class="btn btn-sm btn-outline-secondary camion-dec">−</button>
-          <span class="camion-count fw-bold">${data.nb}</span>
-          <button type="button" class="btn btn-sm btn-outline-secondary camion-inc">+</button>
-        </div>
-      `;
-
-      camionControls.querySelector('.camion-dec')?.addEventListener('click', () => updateCamion('dec', chantierId, dateIso));
-      camionControls.querySelector('.camion-inc')?.addEventListener('click', () => updateCamion('inc', chantierId, dateIso));
-    } catch(err){ alert(err.message); }
-  }
-
-  async function updateCamion(action, chantierId, dateIso){
-    try {
-      const data = await postForm('/pointage/pointage_camion.php', { action, chantier_id:chantierId, date_jour:dateIso });
-      camionControls.querySelector('.camion-count').textContent = String(data.nb);
-      truckCap.set(capKey(chantierId, dateIso), data.nb); // MAJ cache IMMÉDIATE
-    } catch(err){ alert(err.message); }
-  }
-
-  // Afficher/cacher la réglette quand on change de chantier
-  filtersBar?.addEventListener('click', (e) => {
-    const btn = e.target.closest('button[data-chantier]');
-    if (!btn) return;
-
-    filtersBar.querySelectorAll('button').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    activeChantier = btn.dataset.chantier; // 'all' ou id
-
-    if (activeChantier !== 'all' && activeDay){
-      loadAndShowCamionControls(activeChantier, activeDay);
-    } else {
-      camionControls.innerHTML = '';
-    }
-    applyFilter();
-  });
-
-  // Changement de jour actif (utilise data-iso sur le <th>)
-  thead?.addEventListener('click', (e) => {
-    const th  = e.target.closest('th[data-iso]');
-    const iso = th?.dataset?.iso;
-    if (!iso) return;
-    activeDay = iso;
-    if (activeChantier !== 'all'){
-      loadAndShowCamionControls(activeChantier, activeDay);
-    }
-    applyFilter();
-  });
-
-  // Recherche texte
   searchInput?.addEventListener('input', () => {
     query = (searchInput.value || '').toLowerCase();
     applyFilter();
   });
 
-  // ======================================================================
-  //                         ACTIONS : PRÉSENCE / ABSENCE
-  // ======================================================================
+  filtersBar?.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-chantier],button[data-chantier-id]');
+    if (!btn) return;
 
-  // Présent 8h15 (toggle via pointage_present.php)
+    filtersBar.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+
+    activeChantier = btn.dataset.chantier ?? btn.dataset.chantierId ?? 'all';
+
+    // maj URL sans rechargement
+    try {
+      const url = new URL(window.location.href);
+      if (!activeChantier || activeChantier === 'all' || activeChantier === '0') {
+        url.searchParams.delete('chantier_id');
+      } else {
+        url.searchParams.set('chantier_id', String(parseInt(activeChantier, 10)));
+      }
+      history.replaceState(null, '', url);
+    } catch {}
+
+    if (activeChantier !== 'all' && activeDay) {
+      loadAndShowCamionControls(activeChantier, activeDay);
+    } else if (camionControls) {
+      camionControls.innerHTML = '';
+    }
+
+    applyFilter();
+  });
+
+  /* ==============================
+   *   RÉGLETTE CAMIONS (capacité)
+   * ============================== */
+  const truckCap = new Map(); // key `${chantierId}|${dateIso}` -> nb
+  const capKey = (c, d) => `${c}|${d}`;
+  const getCap = (c, d) => (truckCap.get(capKey(c, d)) ?? 1);
+
+  // Lecture silencieuse (aucune alerte si le PHP renvoie autre chose qu’un JSON)
+  async function postFormSilent(url, payload) {
+    try {
+      const body = new URLSearchParams();
+      Object.entries(payload || {}).forEach(([k, v]) => body.append(k, v == null ? '' : String(v)));
+      const res  = await fetch(url, { method: 'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body });
+      const text = await res.text();
+
+      // tolère un nombre simple (ex: "2")
+      const num = Number(text);
+      if (!Number.isNaN(num)) return { success:true, nb:num };
+
+      let data = null;
+      try { data = JSON.parse(text); } catch { data = null; }
+      if (data === 'ok') data = { success:true, nb:1 };
+
+      if (!res.ok || !data || data.success === false) {
+        if (DEBUG) console.warn('camion(get) non-JSON/KO', { url, payload, status:res?.status, text });
+        return null;
+      }
+      return data;
+    } catch (e) {
+      if (DEBUG) console.warn('camion(get) network?', { url, payload, err:e });
+      return null;
+    }
+  }
+
+  async function loadAndShowCamionControls(chantierId, dateIso) {
+    if (!camionControls) return;
+    const cid = asIntOrNull(chantierId);
+    if (!cid || !dateIso) { camionControls.innerHTML = ''; return; }
+
+    // tente date_jour puis date — silencieux
+    let data = await postFormSilent('/pointage/pointage_camion.php', { action:'get', chantier_id:cid, date_jour:dateIso });
+    if (!data) data = await postFormSilent('/pointage/pointage_camion.php', { action:'get', chantier_id:cid, date:dateIso });
+    if (!data) { camionControls.innerHTML = ''; return; }
+
+    const nb = Number(data.nb) || 1;
+    truckCap.set(capKey(cid, dateIso), nb);
+
+    camionControls.innerHTML = `
+      <div class="d-flex align-items-center gap-2">
+        <span class="fw-semibold">Camions :</span>
+        <button type="button" class="btn btn-sm btn-outline-secondary camion-dec" aria-label="Diminuer">−</button>
+        <span class="camion-count fw-bold" aria-live="polite">${nb}</span>
+        <button type="button" class="btn btn-sm btn-outline-secondary camion-inc" aria-label="Augmenter">+</button>
+      </div>
+    `;
+
+    camionControls.querySelector('.camion-dec')?.addEventListener('click', () => updateCamion('dec', cid, dateIso));
+    camionControls.querySelector('.camion-inc')?.addEventListener('click', () => updateCamion('inc', cid, dateIso));
+  }
+
+  async function updateCamion(action, chantierId, dateIso) {
+    if (!camionControls) return;
+    const cid = asIntOrNull(chantierId);
+    if (!cid || !dateIso) return;
+    try {
+      const data = await postForm('/pointage/pointage_camion.php', { action, chantier_id: cid, date_jour: dateIso });
+      const span = camionControls.querySelector('.camion-count');
+      const nb   = Number(data.nb) || 1;
+      if (span) span.textContent = String(nb);
+      truckCap.set(capKey(cid, dateIso), nb);
+    } catch (err) {
+      showError(err.message, err.debug);
+    }
+  }
+
+  /* ==============================
+   *   PRÉSENCE (toggle 8h15)
+   * ============================== */
   table?.addEventListener('click', async (e) => {
     const btn = e.target.closest('.present-btn');
     if (!btn) return;
 
     const td      = btn.closest('td');
     const tr      = btn.closest('tr');
-    const userId  = tr.dataset.userId;
-    const dateIso = td.dataset.date;
-    const hours   = btn.dataset.hours || '8.25';
+    const userId  = tr?.dataset.userId;
+    const dateIso = td?.dataset.date;
+    if (!userId || !dateIso) return;
 
+    const hours    = btn.dataset.hours || '8.25';
     const isActive = btn.classList.contains('btn-success');
 
     try {
       if (isActive) {
-        // -> DECOCHER Présent : hours = 0
-        await postForm('/pointage/pointage_present.php', { utilisateur_id:userId, date:dateIso, hours:'0' });
+        await postForm('/pointage/pointage_present.php', { utilisateur_id: userId, date: dateIso, hours: '0' });
         btn.classList.remove('btn-success'); btn.classList.add('btn-outline-success');
         btn.textContent = 'Présent 8h15';
         return;
       }
 
-      // -> ACTIVER Présent
-      // 1) d'abord retirer une éventuelle **absence** côté serveur (le endpoint présent le fait aussi, mais on “optimise” l’UI)
-      try { await postForm('/pointage/pointage_absence.php', { utilisateur_id:userId, date:dateIso, remove:'1' }); } catch {}
+      // activer Présent → retirer absence éventuelle
+      try { await postForm('/pointage/pointage_absence.php', { utilisateur_id: userId, date: dateIso, remove: '1' }); } catch {}
 
       // reset UI absence
       const absBtn = td.querySelector('.absence-btn');
@@ -202,55 +280,60 @@ document.addEventListener('DOMContentLoaded', () => {
       td.querySelector('.absence-pill')?.remove();
       td.querySelectorAll('.conduite-btn').forEach(b => b.disabled = false);
 
-      // 2) enregistrer la présence
-      await postForm('/pointage/pointage_present.php', { utilisateur_id:userId, date:dateIso, hours });
+      await postForm('/pointage/pointage_present.php', { utilisateur_id: userId, date: dateIso, hours });
 
-      // 3) UI présent -> vert
       btn.classList.remove('btn-outline-success'); btn.classList.add('btn-success');
       btn.textContent = 'Présent 8h15';
-
     } catch (err) {
-      alert(err.message || 'Erreur');
+      showError(err.message, err.debug);
     }
   });
 
-  // Ouvrir la modale au clic sur "Abs."
+  /* ==============================
+   *   ABSENCE (modal)
+   * ============================== */
   table?.addEventListener('click', (e) => {
     const trigger = e.target.closest('.absence-btn');
     if (!trigger) return;
-
     const td = trigger.closest('td');
     const tr = trigger.closest('tr');
-    absenceModalEl._targetCell = td;
+    if (!td || !tr) return;
 
-    document.getElementById('absUserId').value = tr.dataset.userId;
-    document.getElementById('absDate').value   = td.dataset.date;
-    absForm.reason.value = 'conges';
-    document.getElementById('absHours').value = '8.25';
+    if (absenceModalEl) (absenceModalEl)._targetCell = td;
+
+    const uid = tr.dataset.userId || '';
+    const d   = td.dataset.date || '';
+    const fUser = document.getElementById('absUserId');
+    const fDate = document.getElementById('absDate');
+    const fHours= document.getElementById('absHours');
+
+    if (fUser)  fUser.value = uid;
+    if (fDate)  fDate.value = d;
+    if (absForm?.reason) absForm.reason.value = 'conges';
+    if (fHours) fHours.value = '8.25';
 
     absenceModal?.show();
   });
 
-  // Enregistrer la modale (pose / maj absence via pointage_absence.php)
   absSaveBtn?.addEventListener('click', async () => {
     if (!absenceModalEl?._targetCell) return;
     const td      = absenceModalEl._targetCell;
-    const userId  = document.getElementById('absUserId').value;
-    const dateIso = document.getElementById('absDate').value;
-    const reason  = absForm.reason.value;
-    const hours   = parseFloat(document.getElementById('absHours').value || '0');
+    const fUser   = document.getElementById('absUserId');
+    const fDate   = document.getElementById('absDate');
+    const fHours  = document.getElementById('absHours');
+    const userId  = fUser?.value || '';
+    const dateIso = fDate?.value  || '';
+    const reason  = absForm?.reason?.value || 'injustifie';
+    const hours   = parseFloat((fHours?.value || '0'));
 
-    if (!hours || hours < 0.25 || hours > 8.25) {
-      alert('Saisis un nombre d’heures valide (0.25 à 8.25).');
-      return;
-    }
+    if (!userId || !dateIso) return;
+    if (!hours || hours < 0.25 || hours > 8.25) { showError('Saisis un nombre d’heures valide (0.25 à 8.25).'); return; }
 
     try {
       await postForm('/pointage/pointage_absence.php', {
         utilisateur_id: userId, date: dateIso, reason, hours: String(hours)
       });
 
-      // 1) bouton Abs. rouge + texte
       const absBtn = td.querySelector('.absence-btn');
       if (absBtn) {
         absBtn.classList.remove('btn-outline-danger');
@@ -258,7 +341,6 @@ document.addEventListener('DOMContentLoaded', () => {
         absBtn.textContent = 'Abs. ' + labelForReason(reason);
       }
 
-      // 2) badge d’état + heures
       let pill = td.querySelector('.absence-pill');
       if (!pill) {
         pill = document.createElement('button');
@@ -272,71 +354,64 @@ document.addEventListener('DOMContentLoaded', () => {
       );
       pill.textContent = `${labelForReason(reason)} ${hours.toString().replace('.', ',')} h`;
 
-      // 3) on ne garde PAS "Présent" actif en même temps
       const present = td.querySelector('.present-btn');
-      if (present) {
-        present.classList.remove('btn-success');
-        present.classList.add('btn-outline-success');
-        present.textContent = 'Présent 8h15';
-      }
+      if (present) { present.classList.remove('btn-success'); present.classList.add('btn-outline-success'); present.textContent = 'Présent 8h15'; }
 
-      // 4) conduite : absence => A ET R désactivés (quel que soit motif/temps)
       td.querySelectorAll('.conduite-btn').forEach(b => b.disabled = true);
 
       absenceModal?.hide();
-
     } catch (err) {
-      alert(err.message || 'Erreur');
+      showError(err.message, err.debug);
     }
   });
 
-  // Décocher une absence existante (bouton rouge -> toggle off via remove=1)
+  // retirer une absence existante
   table?.addEventListener('click', async (e) => {
     const btn = e.target.closest('.absence-btn');
     if (!btn || !btn.classList.contains('btn-danger')) return;
 
     const td      = btn.closest('td');
     const tr      = btn.closest('tr');
-    const userId  = tr.dataset.userId;
-    const dateIso = td.dataset.date;
+    const userId  = tr?.dataset.userId;
+    const dateIso = td?.dataset.date;
+    if (!userId || !dateIso) return;
 
     try {
-      await postForm('/pointage/pointage_absence.php', { utilisateur_id:userId, date:dateIso, remove:'1' });
+      await postForm('/pointage/pointage_absence.php', { utilisateur_id: userId, date: dateIso, remove: '1' });
 
       btn.classList.remove('btn-danger'); btn.classList.add('btn-outline-danger');
       btn.textContent = 'Abs.';
       td.querySelector('.absence-pill')?.remove();
-      // => Réactiver conduite A et R
       td.querySelectorAll('.conduite-btn').forEach(b => b.disabled = false);
-
-    } catch (err) { alert(err.message || 'Erreur'); }
+    } catch (err) {
+      showError(err.message, err.debug);
+    }
   });
 
-  // ======================================================================
-  //                         CONDUITE A/R  (avec capacité)
-  // ======================================================================
+  /* ==============================
+   *   CONDUITE A/R (capacité)
+   * ============================== */
   table?.addEventListener('click', async (e) => {
     const btn = e.target.closest('.conduite-btn');
-    if (!btn) return;
-    if (btn.disabled) return;
+    if (!btn || btn.disabled) return;
 
     const td      = btn.closest('td');
     const tr      = btn.closest('tr');
-    const userId  = tr.dataset.userId;
-    const dateIso = td.dataset.date;
-    const type    = btn.dataset.type; // 'A' | 'R'
+    const userId  = tr?.dataset.userId;
+    const dateIso = td?.dataset.date;
+    const type    = btn?.dataset.type; // 'A' | 'R'
+    if (!userId || !dateIso || !type) return;
 
-    const planned    = (td.dataset.plannedChantiersDay || '').split(',').filter(Boolean);
-    const chantierId = planned[0] || null;
-    if (!chantierId) { alert("Aucun chantier planifié ce jour."); return; }
+    const planned     = (td.dataset.plannedChantiersDay || '').split(',').filter(Boolean);
+    const chantierId  = asIntOrNull(planned[0]);
+    if (!chantierId) { showError("Aucun chantier planifié ce jour."); return; }
 
     const cap      = getCap(chantierId, dateIso);
     const isActive = btn.classList.contains(type === 'A' ? 'btn-primary' : 'btn-success');
 
     try {
       if (!isActive) {
-        // Activer
-        const data = await postForm('/pointage/pointage_conduite.php', {
+        await postForm('/pointage/pointage_conduite.php', {
           chantier_id: chantierId, type, utilisateur_id: userId, date_pointage: dateIso
         });
 
@@ -366,9 +441,8 @@ document.addEventListener('DOMContentLoaded', () => {
           }
         }
       } else {
-        // Désactiver
         await postForm('/pointage/pointage_conduite.php', {
-          chantier_id: chantierId, type, utilisateur_id: userId, date_pointage: dateIso, remove:'1'
+          chantier_id: chantierId, type, utilisateur_id: userId, date_pointage: dateIso, remove: '1'
         });
 
         if (type === 'A') {
@@ -377,14 +451,47 @@ document.addEventListener('DOMContentLoaded', () => {
           btn.classList.remove('btn-success'); btn.classList.add('btn-outline-success');
         }
       }
-    } catch (err) { alert(err.message || 'Erreur conduite'); }
+    } catch (err) {
+      showError(err.message, err.debug);
+    }
   });
 
-  // ======================================================================
-  //                               INIT
-  // ======================================================================
+  /* ==============================
+   *   PRÉREMPLISSAGE CHEF (1 chantier)
+   * ============================== */
+  function setChantierOnCell(cell, chantierId) {
+    if (!chantierId) return;
+    if (cell.dataset.selectedChantierId) return; // ne pas écraser un choix déjà posé
+    cell.dataset.selectedChantierId = String(chantierId);
+
+    const nom = (window.CHANTIERS && window.CHANTIERS[chantierId]) || ('Chantier #' + chantierId);
+    const holder = cell.querySelector('.chantier-badge');
+    if (holder) holder.innerHTML = '<span class="badge rounded-pill bg-secondary">' + nom + '</span>';
+  }
+
+  function prefillChefChantierFromPlanning() {
+    document.querySelectorAll('#pointageApp tbody tr[data-user-id]').forEach(tr => {
+      if ((tr.dataset.role || '').toLowerCase() !== 'chef') return; // seulement les chefs
+      tr.querySelectorAll('td[data-date]').forEach(cell => {
+        const planned = (cell.dataset.plannedChantiersDay || '')
+          .split(',').map(s => s.trim()).filter(Boolean);
+        if (planned.length === 1) {
+          const cid = asIntOrNull(planned[0]);
+          if (cid) setChantierOnCell(cell, cid);
+        }
+      });
+    });
+  }
+
+  /* ==============================
+   *   INIT
+   * ============================== */
   if (activeChantier !== 'all' && activeDay) {
     loadAndShowCamionControls(activeChantier, activeDay);
+  } else if (camionControls) {
+    camionControls.innerHTML = '';
   }
+
+  prefillChefChantierFromPlanning();
   applyFilter();
 });

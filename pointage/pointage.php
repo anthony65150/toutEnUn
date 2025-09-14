@@ -27,6 +27,11 @@ $startIso    = $weekStart->format('Y-m-d');
 $endIso      = (clone $weekStart)->modify('+7 days')->format('Y-m-d'); // exclusif
 
 /* ==============================
+   Filtre chantier actif (depuis l'URL)
+============================== */
+$currentChantierId = isset($_GET['chantier_id']) ? max(0, (int)$_GET['chantier_id']) : 0;
+
+/* ==============================
    Chantiers visibles pour filtres
 ============================== */
 if ($role === 'administrateur') {
@@ -86,10 +91,7 @@ if ($pdo->query("SHOW TABLES LIKE 'planning_affectations'")->rowCount()) {
 }
 
 /* ==============================
-   Construction dynamique des jours à afficher
-   - Par défaut : Lundi -> Vendredi (5 jours)
-   - Ajout Samedi / Dimanche s'il existe AU MOINS UNE
-     affectation planning ce jour-là (pour n'importe quel employé)
+   Construction dynamique des jours (Lun→Ven + Sam/Dim si planning)
 ============================== */
 function hasPlanningForDate(array $map, string $iso): bool {
   foreach ($map as $byDate) {
@@ -107,29 +109,20 @@ for ($i = 0; $i < 5; $i++) { // Lun -> Ven
     'dow'   => (int)$d->format('N'),
   ];
 }
-// Ajouter samedi/dimanche UNIQUEMENT si planning présent
 $sat = (clone $weekStart)->modify('+5 day');
 $sun = (clone $weekStart)->modify('+6 day');
 $satIso = $sat->format('Y-m-d');
 $sunIso = $sun->format('Y-m-d');
 
 if (hasPlanningForDate($plannedDayMap, $satIso)) {
-  $days[] = [
-    'iso'   => $satIso,
-    'label' => ucfirst(strftime('%A %e %B', $sat->getTimestamp())),
-    'dow'   => 6
-  ];
+  $days[] = ['iso' => $satIso, 'label' => ucfirst(strftime('%A %e %B', $sat->getTimestamp())), 'dow' => 6];
 }
 if (hasPlanningForDate($plannedDayMap, $sunIso)) {
-  $days[] = [
-    'iso'   => $sunIso,
-    'label' => ucfirst(strftime('%A %e %B', $sun->getTimestamp())),
-    'dow'   => 7
-  ];
+  $days[] = ['iso' => $sunIso, 'label' => ucfirst(strftime('%A %e %B', $sun->getTimestamp())), 'dow' => 7];
 }
 
 /* ==============================
-   Heures pointées de la semaine
+   Heures pointées
 ============================== */
 $hoursMap = [];
 $stH = $pdo->prepare("
@@ -143,9 +136,8 @@ foreach ($stH->fetchAll(PDO::FETCH_ASSOC) as $r) {
   $hoursMap[(int)$r['utilisateur_id']][$r['date_jour']] = (float)$r['heures'];
 }
 
-
 /* ==============================
-   Absences de la semaine
+   Absences
 ============================== */
 $absMap = []; // $absMap[user_id][date] = 'conges'|'maladie'|'injustifie'
 $stmt = $pdo->prepare("
@@ -160,7 +152,7 @@ while ($r = $stmt->fetch(PDO::FETCH_ASSOC)) {
 }
 
 /* ==============================
-   Conduite A/R de la semaine
+   Conduite A/R
 ============================== */
 $conduiteMap = []; // $conduiteMap[user_id][date]['A'|'R']=true
 $stmt = $pdo->prepare("
@@ -173,10 +165,28 @@ $stmt->execute([':eid' => $entrepriseId, ':d1' => $startIso, ':d2' => $endIso]);
 while ($r = $stmt->fetch(PDO::FETCH_ASSOC)) {
   $conduiteMap[(int)$r['utilisateur_id']][$r['date_pointage']][$r['type']] = true;
 }
-?>
 
+function badgeRole($role)
+{
+  $r = mb_strtolower($role);
+  if ($r === 'employé') $r = 'employe';
+  switch ($r) {
+    case 'administrateur':
+    case 'admin':
+      return '<span class="badge bg-danger">Administrateur</span>';
+    case 'depot':
+      return '<span class="badge bg-info text-dark">Dépôt</span>';
+    case 'chef':
+      return '<span class="badge bg-success">Chef</span>';
+    case 'employe':
+      return '<span class="badge bg-warning text-dark">Employé</span>';
+    default:
+      return '<span class="badge bg-secondary">Autre</span>';
+  }
+}
+?>
 <div class="container my-4" id="pointageApp"
-  data-week-start="<?= htmlspecialchars($weekStart->format('Y-m-d')) ?>">
+     data-week-start="<?= htmlspecialchars($weekStart->format('Y-m-d')) ?>">
   <div class="row align-items-center mb-3">
     <div class="col-12 col-md-4"><!-- vide --></div>
     <div class="col-12 col-md-4 text-center">
@@ -193,9 +203,11 @@ while ($r = $stmt->fetch(PDO::FETCH_ASSOC)) {
   </div>
 
   <div class="d-flex align-items-center flex-wrap gap-2 mb-3" id="chantierFilters">
-    <button class="btn btn-sm btn-outline-secondary active" data-chantier="all">Tous</button>
-    <?php foreach ($visibleChantiers as $ch): ?>
-      <button class="btn btn-sm btn-outline-secondary" data-chantier="<?= (int)$ch['id'] ?>">
+    <!-- "Tous" actif si aucun chantier_id explicite -->
+    <button class="btn btn-sm btn-outline-secondary <?= $currentChantierId === 0 ? 'active' : '' ?>" data-chantier="all">Tous</button>
+    <?php foreach ($visibleChantiers as $ch): $cid = (int)$ch['id']; ?>
+      <button class="btn btn-sm btn-outline-secondary <?= ($cid === $currentChantierId ? 'active' : '') ?>"
+              data-chantier="<?= $cid ?>">
         <?= htmlspecialchars($ch['nom']) ?>
       </button>
     <?php endforeach; ?>
@@ -209,282 +221,167 @@ while ($r = $stmt->fetch(PDO::FETCH_ASSOC)) {
     $curr = (new DateTime('monday this week'))->format('Y-m-d');
     $next = (clone $weekStart)->modify('+7 days')->format('Y-m-d');
     ?>
-    <a class="btn btn-outline-secondary" href="?start=<?= $prev ?>">← Semaine -1</a>
-    <a class="btn btn-outline-secondary" href="?start=<?= $curr ?>">Cette semaine</a>
-    <a class="btn btn-outline-secondary" href="?start=<?= $next ?>">Semaine +1 →</a>
+    <a class="btn btn-outline-secondary" href="?start=<?= $prev ?><?= $currentChantierId ? '&chantier_id='.$currentChantierId : '' ?>">← Semaine -1</a>
+    <a class="btn btn-outline-secondary" href="?start=<?= $curr ?><?= $currentChantierId ? '&chantier_id='.$currentChantierId : '' ?>">Cette semaine</a>
+    <a class="btn btn-outline-secondary" href="?start=<?= $next ?><?= $currentChantierId ? '&chantier_id='.$currentChantierId : '' ?>">Semaine +1 →</a>
   </div>
 
   <!-- Tableau -->
-<div class="table-responsive">
-  <table class="table table-bordered align-middle">
-    <thead class="table-dark">
-      <tr>
-        <th style="min-width:220px">Employés</th>
-        <?php foreach ($days as $d): ?>
-          <th data-iso="<?= htmlspecialchars($d['iso']) ?>" class="<?= ($d['dow'] >= 6) ? 'weekend' : '' ?>">
-            <div class="small fw-semibold"><?= htmlspecialchars($d['label']) ?></div>
-          </th>
-        <?php endforeach; ?>
-      </tr>
-    </thead>
+  <div class="table-responsive">
+    <?php
+    $chMap = [];
+    foreach ($visibleChantiers as $ch) {
+      $chMap[(int)$ch['id']] = $ch['nom'];
+    }
+    ?>
+    <script>
+      window.CHANTIERS = <?= json_encode($chMap, JSON_UNESCAPED_UNICODE) ?>;
+    </script>
 
-    <tbody>
-      <?php foreach ($employees as $e):
-        $uid     = (int)$e['id'];
-        $idsStr  = $e['chantier_ids'] ?: '';
-        $nomsStr = $e['chantier_noms'] ?: '';
-        $idsArr  = $idsStr !== '' ? array_map('intval', explode(',', $idsStr)) : [];
-        $nomsArr = $nomsStr !== '' ? explode('||', $nomsStr) : [];
-      ?>
-        <tr data-user-id="<?= $uid ?>"
-            data-name="<?= htmlspecialchars(strtolower($e['nom'] . ' ' . $e['prenom'])) ?>"
-            data-chantiers="<?= htmlspecialchars($idsStr) ?>">
-
-          <td style="white-space:nowrap">
-            <strong><?= htmlspecialchars($e['nom'] . ' ' . $e['prenom']) ?></strong>
-            <span class="badge text-bg-light ms-2"><?= htmlspecialchars($e['fonction']) ?></span>
-          </td>
-
-          <?php foreach ($days as $d):
-            $dateIso = $d['iso'];
-            $dow     = (int)$d['dow']; // 1..7
-
-            // Chantiers planifiés pour le filtre
-            $plannedIdsForDay = isset($plannedDayMap[$uid][$dateIso])
-              ? implode(',', array_keys($plannedDayMap[$uid][$dateIso]))
-              : '';
-            $hasPlanning = !empty($plannedDayMap[$uid][$dateIso]);
-
-            // États sauvegardés (issus des maps déjà chargées en amont)
-            // hoursMap depuis `pointages` (SUM TIMESTAMPDIFF)
-            $hDone = isset($hoursMap[$uid][$dateIso]) ? (float)$hoursMap[$uid][$dateIso] : null;
-
-            // conduiteMap depuis `pointages_conduite` (date_pointage)
-            // -> on mappe sur $dateIso pour l'affichage
-            $aDone = !empty($conduiteMap[$uid][$dateIso]['A']);
-            $rDone = !empty($conduiteMap[$uid][$dateIso]['R']);
-
-            // absMap depuis `pointages_absences` (motif)
-            $abs      = $absMap[$uid][$dateIso] ?? null; // 'conges'|'maladie'|'injustifie'
-            $isAbsent = ($abs !== null);
-            $absLabel = $abs === 'conges' ? 'Congés'
-                      : ($abs === 'maladie' ? 'Maladie'
-                      : ($abs === 'injustifie' ? 'Injustifié' : ''));
-
-            $hasSavedState = ($hDone !== null) || $aDone || $rDone || $isAbsent;
-          ?>
-            <td data-date="<?= htmlspecialchars($dateIso) ?>"
-                data-planned-chantiers-day="<?= htmlspecialchars($plannedIdsForDay) ?>">
-
-              <?php if ($dow >= 6 && !$hasPlanning && !$hasSavedState): ?>
-                <!-- Week-end sans planning ET sans état sauvegardé : croix -->
-                <div class="text-center text-muted">×</div>
-              <?php else: ?>
-                <!-- Présence journée standard (8h15 = 8.25 h) -->
-                <div class="mb-2">
-                  <button class="btn btn-sm present-btn <?= $hDone ? 'btn-success' : 'btn-outline-success' ?>"
-                          data-hours="8.25" <?= $isAbsent ? 'disabled' : '' ?>>
-                    Présent 8h15
-                  </button>
-                </div>
-
-                <!-- Conduite A/R -->
-                <div class="d-flex gap-2 mb-2">
-                  <button class="btn btn-sm conduite-btn <?= $aDone ? 'btn-primary' : 'btn-outline-primary' ?>"
-                          data-type="A" <?= $isAbsent ? 'disabled' : '' ?>>A</button>
-                  <button class="btn btn-sm conduite-btn <?= $rDone ? 'btn-success' : 'btn-outline-success' ?>"
-                          data-type="R" <?= $isAbsent ? 'disabled' : '' ?>>R</button>
-                </div>
-
-                <!-- Absence -->
-                <div class="btn-group">
-                  <button class="btn btn-sm <?= $isAbsent ? 'btn-danger' : 'btn-outline-danger' ?> absence-btn">
-                    <?= $isAbsent ? 'Abs. ' . htmlspecialchars($absLabel) : 'Abs.' ?>
-                  </button>
-                  <button class="btn btn-sm btn-outline-danger dropdown-toggle dropdown-toggle-split" data-bs-toggle="dropdown"></button>
-                  <ul class="dropdown-menu small">
-                    <li><a class="dropdown-item absence-choice" data-reason="conges">Congés</a></li>
-                    <li><a class="dropdown-item absence-choice" data-reason="maladie">Maladie</a></li>
-                    <li><a class="dropdown-item absence-choice" data-reason="injustifie">Injustifié (non payé)</a></li>
-                  </ul>
-                </div>
-              <?php endif; ?>
-
-            </td>
+    <table class="table table-bordered table-hover table-striped align-middle">
+      <thead class="table-dark">
+        <tr>
+          <th style="min-width:220px">Employés</th>
+          <?php foreach ($days as $d): ?>
+            <th data-iso="<?= htmlspecialchars($d['iso']) ?>" class="<?= ($d['dow'] >= 6) ? 'weekend' : '' ?>">
+              <div class="small fw-semibold"><?= htmlspecialchars($d['label']) ?></div>
+            </th>
           <?php endforeach; ?>
-
         </tr>
-      <?php endforeach; ?>
-    </tbody>
-  </table>
-</div>
+      </thead>
 
+      <tbody>
+        <?php foreach ($employees as $e):
+          $uid     = (int)$e['id'];
+          $idsStr  = $e['chantier_ids'] ?: '';
+          $nomsStr = $e['chantier_noms'] ?: '';
+          $idsArr  = $idsStr !== '' ? array_map('intval', explode(',', $idsStr)) : [];
+          $nomsArr = $nomsStr !== '' ? explode('||', $nomsStr) : [];
+        ?>
+          <tr data-user-id="<?= $uid ?>"
+              data-role="<?= htmlspecialchars(strtolower($e['fonction'])) ?>"
+              data-name="<?= htmlspecialchars(strtolower($e['nom'] . ' ' . $e['prenom'])) ?>"
+              data-chantiers="<?= htmlspecialchars($idsStr) ?>">
 
-<!-- Modal Absence -->
-<div class="modal fade" id="absenceModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-sm modal-dialog-centered">
-    <div class="modal-content">
-      <div class="modal-header py-2">
-        <h6 class="modal-title">Déclarer une absence</h6>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
-      </div>
-      <div class="modal-body">
-        <form id="absenceForm">
-          <input type="hidden" name="utilisateur_id" id="absUserId">
-          <input type="hidden" name="date" id="absDate">
+            <td style="white-space:nowrap">
+              <strong><?= htmlspecialchars($e['nom'] . ' ' . $e['prenom']) ?></strong>
+              <?= badgeRole($e['fonction']) ?>
+            </td>
 
-          <div class="mb-3">
-            <label class="form-label">Motif</label>
-            <div class="d-grid gap-2">
-              <label class="btn btn-outline-secondary btn-sm text-start">
-                <input type="radio" class="form-check-input me-2" name="reason" value="conges" checked>
-                Congés
-              </label>
-              <label class="btn btn-outline-secondary btn-sm text-start">
-                <input type="radio" class="form-check-input me-2" name="reason" value="maladie">
-                Maladie
-              </label>
-              <label class="btn btn-outline-secondary btn-sm text-start">
-                <input type="radio" class="form-check-input me-2" name="reason" value="injustifie">
-                Injustifié (non payé)
-              </label>
+            <?php foreach ($days as $d):
+              $dateIso = $d['iso'];
+              $dow     = (int)$d['dow']; // 1..7
+
+              // Chantiers planifiés pour le filtre
+              $plannedIdsForDay = isset($plannedDayMap[$uid][$dateIso])
+                ? implode(',', array_keys($plannedDayMap[$uid][$dateIso]))
+                : '';
+              $hasPlanning = !empty($plannedDayMap[$uid][$dateIso]);
+
+              // États sauvegardés
+              $hDone = isset($hoursMap[$uid][$dateIso]) ? (float)$hoursMap[$uid][$dateIso] : null;
+
+              $aDone = !empty($conduiteMap[$uid][$dateIso]['A']);
+              $rDone = !empty($conduiteMap[$uid][$dateIso]['R']);
+
+              $abs      = $absMap[$uid][$dateIso] ?? null; // 'conges'|'maladie'|'injustifie'
+              $isAbsent = ($abs !== null);
+              $absLabel = $abs === 'conges' ? 'Congés'
+                        : ($abs === 'maladie' ? 'Maladie'
+                        : ($abs === 'injustifie' ? 'Injustifié' : ''));
+
+              $hasSavedState = ($hDone !== null) || $aDone || $rDone || $isAbsent;
+            ?>
+              <td data-date="<?= htmlspecialchars($dateIso) ?>"
+                  data-planned-chantiers-day="<?= htmlspecialchars($plannedIdsForDay) ?>">
+
+                <?php if ($dow >= 6 && !$hasPlanning && !$hasSavedState): ?>
+                  <div class="text-center text-muted">×</div>
+                <?php else: ?>
+                  <!-- Présence (8h15 = 8.25 h) -->
+                  <div class="mb-2">
+                    <button class="btn btn-sm present-btn <?= $hDone ? 'btn-success' : 'btn-outline-success' ?>"
+                            data-hours="8.25" <?= $isAbsent ? 'disabled' : '' ?>>
+                      Présent 8h15
+                    </button>
+                  </div>
+
+                  <!-- Conduite A/R -->
+                  <div class="d-flex gap-2 mb-2">
+                    <button class="btn btn-sm conduite-btn <?= $aDone ? 'btn-primary' : 'btn-outline-primary' ?>"
+                            data-type="A" <?= $isAbsent ? 'disabled' : '' ?>>A</button>
+                    <button class="btn btn-sm conduite-btn <?= $rDone ? 'btn-success' : 'btn-outline-success' ?>"
+                            data-type="R" <?= $isAbsent ? 'disabled' : '' ?>>R</button>
+                  </div>
+
+                  <!-- Absence -->
+                  <div class="btn-group">
+                    <button class="btn btn-sm <?= $isAbsent ? 'btn-danger' : 'btn-outline-danger' ?> absence-btn">
+                      <?= $isAbsent ? 'Abs. ' . htmlspecialchars($absLabel) : 'Abs.' ?>
+                    </button>
+                    <button class="btn btn-sm btn-outline-danger dropdown-toggle dropdown-toggle-split" data-bs-toggle="dropdown"></button>
+                    <ul class="dropdown-menu small">
+                      <li><a class="dropdown-item absence-choice" data-reason="conges">Congés</a></li>
+                      <li><a class="dropdown-item absence-choice" data-reason="maladie">Maladie</a></li>
+                      <li><a class="dropdown-item absence-choice" data-reason="injustifie">Injustifié (non payé)</a></li>
+                    </ul>
+                  </div>
+                <?php endif; ?>
+
+              </td>
+            <?php endforeach; ?>
+
+          </tr>
+        <?php endforeach; ?>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Modal Absence -->
+  <div class="modal fade" id="absenceModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-sm modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header py-2">
+          <h6 class="modal-title">Déclarer une absence</h6>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
+        </div>
+        <div class="modal-body">
+          <form id="absenceForm">
+            <input type="hidden" name="utilisateur_id" id="absUserId">
+            <input type="hidden" name="date" id="absDate">
+
+            <div class="mb-3">
+              <label class="form-label">Motif</label>
+              <div class="d-grid gap-2">
+                <label class="btn btn-outline-secondary btn-sm text-start">
+                  <input type="radio" class="form-check-input me-2" name="reason" value="conges" checked>
+                  Congés
+                </label>
+                <label class="btn btn-outline-secondary btn-sm text-start">
+                  <input type="radio" class="form-check-input me-2" name="reason" value="maladie">
+                  Maladie
+                </label>
+                <label class="btn btn-outline-secondary btn-sm text-start">
+                  <input type="radio" class="form-check-input me-2" name="reason" value="injustifie">
+                  Injustifié (non payé)
+                </label>
+              </div>
             </div>
-          </div>
 
-          <div class="mb-2">
-            <label class="form-label">Heures d’absence</label>
-            <input type="number" step="0.25" min="0.25" max="8.25" class="form-control form-control-sm" id="absHours" value="8.25">
-            <div class="form-text">8.25 = journée complète (8h15)</div>
-          </div>
-        </form>
-      </div>
-      <div class="modal-footer py-2">
-        <button type="button" class="btn btn-light btn-sm" data-bs-dismiss="modal">Annuler</button>
-        <button type="button" class="btn btn-danger btn-sm" id="absenceSave">Enregistrer</button>
+            <div class="mb-2">
+              <label class="form-label">Heures d’absence</label>
+              <input type="number" step="0.25" min="0.25" max="8.25" class="form-control form-control-sm" id="absHours" value="8.25">
+              <div class="form-text">8.25 = journée complète (8h15)</div>
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer py-2">
+          <button type="button" class="btn btn-light btn-sm" data-bs-dismiss="modal">Annuler</button>
+          <button type="button" class="btn btn-danger btn-sm" id="absenceSave">Enregistrer</button>
+        </div>
       </div>
     </div>
   </div>
-</div>
 
-<script>
-(function () {
-  const filtersBar = document.getElementById('chantierFilters');
-  const tbodyRows  = document.querySelectorAll('tbody tr[data-user-id]');
-  const thead      = document.querySelector('thead');
-
-  // Jours visibles dans l’entête
-  const headerThs = Array.from(document.querySelectorAll('thead th[data-iso]'));
-  const dayIsos   = headerThs.map(th => th.dataset.iso);
-
-  // YYYY-MM-DD en local (pas d'effet UTC)
-  function todayLocalISO() {
-    const d = new Date();
-    d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
-    return d.toISOString().slice(0,10);
-  }
-  const todayIso = todayLocalISO();
-
-  // 👉 si "aujourd’hui" n’est pas dans la semaine affichée : pas de jour actif
-  let activeDay = dayIsos.includes(todayIso) ? todayIso : null;
-
-  function getActiveColIndex() {
-    if (!activeDay) return -1;
-    const i = dayIsos.indexOf(activeDay);
-    return i === -1 ? -1 : i + 1; // +1 car col 0 = "Employés"
-  }
-
-  function highlightActiveDay() {
-    // retire toute surbrillance existante
-    document.querySelectorAll('.day-active').forEach(el => el.classList.remove('day-active'));
-
-    const col = getActiveColIndex();
-    if (col < 0) return; // 👉 rien à surligner si le jour n’est pas visible
-
-    const th = thead?.querySelectorAll('tr th')[col];
-    if (th) th.classList.add('day-active');
-
-    document.querySelectorAll('tbody tr').forEach(tr => {
-      const td = tr.querySelectorAll('td')[col];
-      if (td) td.classList.add('day-active');
-    });
-  }
-
-  // Cliquer sur un en-tête choisit explicitement ce jour (même si ce n’est pas “aujourd’hui”)
-  thead?.addEventListener('click', (e) => {
-    const th = e.target.closest('th[data-iso]');
-    if (!th) return;
-    activeDay = th.dataset.iso || null;
-    applyFilter();
-  });
-
-  // ----- Filtre chantier (inchangé, mais tolère activeDay=null)
-  let activeChantier = 'all';
-
-  function applyFilter() {
-    highlightActiveDay();
-
-    tbodyRows.forEach(tr => {
-      if (activeChantier === 'all' || !activeDay) {
-        // pas de jour actif → pas de filtre de ligne
-        tr.classList.remove('d-none');
-        return;
-      }
-      const cell = tr.querySelector(`td[data-date="${activeDay}"]`);
-      if (!cell) { tr.classList.add('d-none'); return; }
-      const planned = (cell.dataset.plannedChantiersDay || '').split(',').filter(Boolean);
-      tr.classList.toggle('d-none', !planned.includes(String(activeChantier)));
-    });
-  }
-
-  // boutons de filtre de chantier
-  const filtersBarEl = document.getElementById('chantierFilters');
-  filtersBarEl?.addEventListener('click', (e) => {
-    const btn = e.target.closest('button[data-chantier]');
-    if (!btn) return;
-    filtersBarEl.querySelectorAll('button').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    activeChantier = btn.dataset.chantier || 'all';
-    applyFilter();
-  });
-
-  // init
-  const current = filtersBarEl?.querySelector('button.active[data-chantier]') || filtersBarEl?.querySelector('button[data-chantier="all"]');
-  if (current) activeChantier = current.dataset.chantier;
-  applyFilter();
-})();
-</script>
-
-
-<style>
-  thead th.day-active,
-  tbody td.day-active {
-    position: relative;
-    background-color: #f8f9fa !important;
-    box-shadow: inset 0 0 0 9999px rgba(108,117,125,.08);
-  }
-  thead th.day-active::before,
-  tbody td.day-active::before {
-    content: "";
-    position: absolute;
-    top: -1px; bottom: -1px; left: -1px; right: -1px;
-    border-left: 2px solid #dee2e6;
-    border-right: 2px solid #dee2e6;
-    pointer-events: none;
-  }
-  thead th.day-active .small.fw-semibold {
-    color: #343a40;
-    font-weight: 600;
-  }
-  .day-active { box-shadow: inset 0 0 0 9999px rgba(0,0,0,.02); }
-  thead th.day-active { background: rgba(0,0,0,.05); }
-  thead th { cursor: default; }
-  thead th .small.text-muted { cursor: pointer; }
-
-  /* Week-end ajouté : fond léger */
-  th.weekend { background: #fafafa; }
-
-  .absence-pill { margin-top: 2px; }
-</style>
-
-<script src="js/pointage.js"></script>
-<?php require_once __DIR__ . '/../templates/footer.php'; ?>
+  <script src="js/pointage.js"></script>
+  <?php require_once __DIR__ . '/../templates/footer.php'; ?>

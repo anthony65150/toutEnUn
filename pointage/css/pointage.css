@@ -1,0 +1,50 @@
+
+    thead th.day-active,
+    tbody td.day-active {
+      position: relative;
+      background-color: #f8f9fa !important;
+      box-shadow: inset 0 0 0 9999px rgba(108, 117, 125, .08);
+    }
+
+    thead th.day-active::before,
+    tbody td.day-active::before {
+      content: "";
+      position: absolute;
+      top: -1px;
+      bottom: -1px;
+      left: -1px;
+      right: -1px;
+      border-left: 2px solid #dee2e6;
+      border-right: 2px solid #dee2e6;
+      pointer-events: none;
+    }
+
+    thead th.day-active .small.fw-semibold {
+      color: #343a40;
+      font-weight: 600;
+    }
+
+    .day-active {
+      box-shadow: inset 0 0 0 9999px rgba(0, 0, 0, .02);
+    }
+
+    thead th.day-active {
+      background: rgba(0, 0, 0, .05);
+    }
+
+    thead th {
+      cursor: default;
+    }
+
+    thead th .small.text-muted {
+      cursor: pointer;
+    }
+
+    /* Week-end ajouté : fond léger */
+    th.weekend {
+      background: #fafafa;
+    }
+
+    .absence-pill {
+      margin-top: 2px;
+    }

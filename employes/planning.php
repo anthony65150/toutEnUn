@@ -117,10 +117,11 @@ $employes = $st->fetchAll(PDO::FETCH_ASSOC);
 
 
 /* Affectations semaine (bornées par entreprise) */
-$sqlAff = "SELECT utilisateur_id, chantier_id, date_jour
+$sqlAff = "SELECT utilisateur_id, chantier_id, date_jour, is_active
            FROM planning_affectations
            WHERE date_jour BETWEEN :s AND :e
              AND entreprise_id = :eid";
+
 $st = $pdo->prepare($sqlAff);
 $st->execute([
   ':s' => $start->format('Y-m-d'),
@@ -134,7 +135,10 @@ $affectRows = $st->fetchAll(PDO::FETCH_ASSOC);
 $affects = [];
 foreach ($affectRows as $r) {
   $uid = (int)$r['utilisateur_id'];
-  $affects[$uid][$r['date_jour']] = $r['chantier_id'] !== null ? (int)$r['chantier_id'] : null;
+  $affects[$uid][$r['date_jour']] = [
+    'chantier_id' => $r['chantier_id'] !== null ? (int)$r['chantier_id'] : null,
+    'is_active'   => (int)($r['is_active'] ?? 0)
+  ];
 }
 
 /* CSRF (si besoin) */
@@ -144,97 +148,26 @@ if (empty($_SESSION['csrf_token'])) {
 
 require __DIR__ . '/../templates/header.php';
 require __DIR__ . '/../templates/navigation/navigation.php';
+function badgeRole($role)
+{
+  $r = mb_strtolower($role);
+  if ($r === 'employé') $r = 'employe';
+  switch ($r) {
+    case 'administrateur':
+    case 'admin':
+      return '<span class="badge bg-danger">Administrateur</span>';
+    case 'depot':
+      return '<span class="badge bg-info text-dark">Dépôt</span>';
+    case 'chef':
+      return '<span class="badge bg-success">Chef</span>';
+    case 'employe':
+      return '<span class="badge bg-warning text-dark">Employé</span>';
+    default:
+      return '<span class="badge bg-secondary">Autre</span>';
+  }
+}
 ?>
-<style>
-  .chip {
-    display: inline-flex;
-    align-items: center;
-    gap: .5rem;
-    padding: .35rem .6rem;
-    border-radius: 999px;
-    color: #fff;
-    font-weight: 600;
-    cursor: grab;
-    user-select: none
-  }
 
-  .chip .dot {
-    width: .6rem;
-    height: .6rem;
-    border-radius: 50%;
-    background: rgba(255, 255, 255, .8)
-  }
-
-  .table-sticky thead th {
-    position: sticky;
-    top: 0;
-    background: #fff;
-    z-index: 2
-  }
-
-  .cell-drop,
-  .cell-off {
-    min-height: 48px;
-    border: 1px dashed #e2e8f0;
-    border-radius: .5rem;
-    position: relative;
-    padding: 0
-  }
-
-  .cell-drop.dragover {
-    border-color: #0d6efd;
-    background: #eef6ff
-  }
-
-  .cell-drop.has-chip {
-    border-style: solid
-  }
-
-  .cell-off {
-    background: #fafafa
-  }
-
-  .wkx {
-    position: absolute;
-    top: 4px;
-    right: 6px;
-    line-height: 1;
-    font-weight: 700;
-    font-size: 14px;
-    color: #9aa3af;
-    background: transparent;
-    border: 0;
-    cursor: pointer;
-    padding: 0
-  }
-
-  .wkx:hover {
-    color: #6b7280
-  }
-
-  .assign-chip {
-    display: flex;
-    width: 100%;
-    min-height: 48px;
-    border-radius: .5rem;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 .75rem;
-    color: #fff;
-    font-weight: 600
-  }
-
-  .assign-chip .x {
-    cursor: pointer;
-    font-weight: 800;
-    opacity: .9;
-    margin-left: .5rem
-  }
-
-  .assign-chip .x:hover {
-    opacity: 1
-  }
-</style>
 
 <div class="container mt-4">
   <div class="d-flex justify-content-between align-items-center mb-3">
@@ -244,6 +177,7 @@ require __DIR__ . '/../templates/navigation/navigation.php';
   </div>
 
   <input type="text" id="searchInput" class="form-control mb-3" placeholder="Rechercher un employé..." autocomplete="off" />
+
 
   <!-- Palette chantiers -->
   <div class="mb-3 d-flex flex-wrap gap-2" id="palette">
@@ -302,8 +236,11 @@ require __DIR__ . '/../templates/navigation/navigation.php';
           <tr data-emp-id="<?= (int)$emp['id'] ?>">
             <td class="fw-semibold">
               <?= htmlspecialchars($emp['nom']) ?>
-              <span class="badge text-bg-secondary ms-1"><?= htmlspecialchars($emp['role']) ?></span>
+              <?= badgeRole($emp['role']) ?>
             </td>
+
+
+
 
             <?php foreach ($days as $d):
               $isWeekend = ($d['dow'] >= 6);
@@ -311,13 +248,10 @@ require __DIR__ . '/../templates/navigation/navigation.php';
 
 
               // 1) On charge d'abord une vraie affectation si elle existe (semaine ou week-end)
-              $cid = $affects[$emp['id']][$d['iso']] ?? null;
+              $aff = $affects[$emp['id']][$d['iso']] ?? null;
+              $cid = $aff['chantier_id'] ?? null;
+              $isActive = (int)($aff['is_active'] ?? 0);
 
-              // 2) Si aucune affectation ET qu'on est un chef,
-              //    on ne met le chantier par défaut QUE du lundi au vendredi.
-              if ($cid === null && !$isWeekend && ($emp['role'] ?? '') === 'chef') {
-                $cid = $respDefault[(int)$emp['id']] ?? null;
-              }
 
               // 3) Construire le chip si on a un chantier
               $chip = null;
@@ -325,31 +259,51 @@ require __DIR__ . '/../templates/navigation/navigation.php';
                 $c = array_values(array_filter($chantiers, fn($x) => (int)$x['id'] === (int)$cid))[0] ?? null;
                 if ($c) {
                   $h = (((int)$cid * 47) % 360);
-                  $chip = ['nom' => $c['nom'], 'color' => "hsl($h, 70%, 45%)", 'id' => (int)$cid];
+                  $chip = [
+                    'nom'   => $c['nom'],
+                    'color' => "hsl($h, 70%, 45%)",
+                    'id'    => (int)$cid
+                  ];
                 }
               }
             ?>
               <td>
                 <?php if ($chip): ?>
-                  <div class="cell-drop has-chip" data-date="<?= htmlspecialchars($d['iso']) ?>" data-emp="<?= (int)$emp['id'] ?>">
-                    <span class="assign-chip" style="background: <?= htmlspecialchars($chip['color']) ?>;"
+                  <!-- Affecté à un chantier -->
+                  <div class="cell-drop has-chip"
+                    data-date="<?= htmlspecialchars($d['iso']) ?>"
+                    data-emp="<?= (int)$emp['id'] ?>">
+                    <span class="assign-chip"
+                      style="background: <?= htmlspecialchars($chip['color']) ?>;"
                       data-chantier-id="<?= (int)$chip['id'] ?>">
                       <?= htmlspecialchars($chip['nom']) ?>
                       <span class="x" title="Retirer">×</span>
                     </span>
                   </div>
+
+                <?php elseif ($isActive): ?>
+                  <!-- Jour activé (ex: week-end activé) mais pas de chantier -->
+                  <div class="cell-drop"
+                    data-date="<?= htmlspecialchars($d['iso']) ?>"
+                    data-emp="<?= (int)$emp['id'] ?>"></div>
+
+                <?php elseif ($isWeekend): ?>
+                  <!-- Week-end inactif -->
+                  <div class="cell-off"
+                    data-date="<?= htmlspecialchars($d['iso']) ?>"
+                    data-emp="<?= (int)$emp['id'] ?>">
+                    <button type="button" class="wkx"
+                      title="Jour non travaillé — activer exceptionnellement">×</button>
+                  </div>
+
                 <?php else: ?>
-                  <?php if ($isWeekend): ?>
-                    <!-- Week-end sans affectation : croix (non travaillé par défaut) -->
-                    <div class="cell-off" data-date="<?= htmlspecialchars($d['iso']) ?>" data-emp="<?= (int)$emp['id'] ?>">
-                      <button type="button" class="wkx" title="Jour non travaillé — activer exceptionnellement">×</button>
-                    </div>
-                  <?php else: ?>
-                    <!-- Semaine sans affectation : cellule active vide -->
-                    <div class="cell-drop" data-date="<?= htmlspecialchars($d['iso']) ?>" data-emp="<?= (int)$emp['id'] ?>"></div>
-                  <?php endif; ?>
+                  <!-- Semaine sans affectation (actif par défaut) -->
+                  <div class="cell-drop"
+                    data-date="<?= htmlspecialchars($d['iso']) ?>"
+                    data-emp="<?= (int)$emp['id'] ?>"></div>
                 <?php endif; ?>
               </td>
+
             <?php endforeach; ?>
 
 
@@ -364,189 +318,8 @@ require __DIR__ . '/../templates/navigation/navigation.php';
     window.PLANNING_DATE_START = <?= json_encode($start->format('Y-m-d')) ?>;
     window.API_MOVE = "/employes/api/moveAffectation.php";
     window.API_DELETE = "/employes/api/deleteAffectation.php";
-    window.API_PREFILL = "/employes/api/prefillWeekChefs.php"; // utilisé par ton planning.js si tu l’appelles
   </script>
   <script src="/employes/js/planning.js"></script>
 
-  <script>
-    /* ===== Drag & paint utilitaires (inchangé) ===== */
-    let dragPaint = null; // {id,label,color,painted:Set}
-    function startDragPaint(id, color, label) {
-      dragPaint = {
-        id: Number(id),
-        color: (color || ''),
-        label: (label || 'Chantier'),
-        painted: new Set()
-      };
-    }
-
-    function endDragPaint() {
-      dragPaint = null;
-    }
-
-    function makeChipHTML(label, color, id) {
-      const span = document.createElement('span');
-      span.className = 'assign-chip';
-      span.style.background = color || '#334155';
-      span.dataset.chantierId = id;
-      span.innerHTML = `${label} <span class="x" title="Retirer">×</span>`;
-      return span;
-    }
-
-    function bindChipEvents(chip) {
-      chip.querySelector('.x')?.addEventListener('click', () => {
-        const cell = chip.closest('.cell-drop');
-        const empId = cell.dataset.emp,
-          date = cell.dataset.date;
-        fetch(window.API_DELETE, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded'
-          },
-          body: new URLSearchParams({
-            emp_id: empId,
-            date
-          })
-        }).then(r => r.json()).then(d => {
-          if (!d.ok) throw new Error(d.message || 'Erreur');
-          chip.remove();
-          cell.classList.remove('has-chip');
-        }).catch(console.error);
-      });
-      chip.setAttribute('draggable', 'true');
-      chip.addEventListener('dragstart', e => {
-        const id = Number(chip.dataset.chantierId);
-        const color = chip.style.background || '';
-        const tmp = chip.cloneNode(true);
-        tmp.querySelector('.x')?.remove();
-        const label = tmp.textContent.trim();
-        e.dataTransfer.setData('chantier_id', String(id));
-        e.dataTransfer.setData('color', color);
-        e.dataTransfer.setData('label', label);
-        e.dataTransfer.effectAllowed = 'copyMove';
-        startDragPaint(id, color, label);
-      });
-      chip.addEventListener('dragend', endDragPaint);
-    }
-
-    function applyToCell(cell, brush) {
-      const empId = cell.dataset.emp,
-        date = cell.dataset.date;
-      if (!empId || !date) return;
-      cell.querySelector('.assign-chip')?.remove();
-      const chip = makeChipHTML(brush.label, brush.color, brush.id);
-      cell.appendChild(chip);
-      cell.classList.add('has-chip');
-      bindChipEvents(chip);
-      fetch(window.API_MOVE, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded'
-          },
-          body: new URLSearchParams({
-            emp_id: empId,
-            chantier_id: String(brush.id),
-            date
-          })
-        })
-        .then(async (r) => {
-          const raw = await r.text();
-          let d;
-          try {
-            d = JSON.parse(raw);
-          } catch {
-            throw new Error(`HTTP ${r.status} – ${raw.slice(0,200)}`);
-          }
-          if (!r.ok || !d.ok) throw new Error(d.message || `HTTP ${r.status}`);
-        })
-        .catch(err => {
-          console.error(err);
-          chip.remove();
-          cell.classList.remove('has-chip');
-        });
-    }
-
-    function attachDropToCell(cell) {
-      cell.addEventListener('dragover', e => {
-        e.preventDefault();
-        cell.classList.add('dragover');
-      });
-      cell.addEventListener('dragleave', () => cell.classList.remove('dragover'));
-      cell.addEventListener('drop', e => {
-        e.preventDefault();
-        cell.classList.remove('dragover');
-        const id = Number(e.dataTransfer.getData('chantier_id') || 0);
-        const color = e.dataTransfer.getData('color') || '';
-        const label = e.dataTransfer.getData('label') || 'Chantier';
-        if (!id) return;
-        applyToCell(cell, {
-          id,
-          color,
-          label
-        });
-      });
-      cell.addEventListener('dragenter', e => {
-        if (!dragPaint) return;
-        e.preventDefault();
-        const key = cell.dataset.emp + "|" + cell.dataset.date;
-        if (dragPaint.painted.has(key)) return;
-        dragPaint.painted.add(key);
-        applyToCell(cell, dragPaint);
-      });
-    }
-
-    function attachPaintToOffCell(off) {
-      off.addEventListener('dragenter', e => {
-        if (!dragPaint) return;
-        e.preventDefault();
-        const active = document.createElement('div');
-        active.className = 'cell-drop';
-        active.dataset.date = off.dataset.date;
-        active.dataset.emp = off.dataset.emp;
-        off.replaceWith(active);
-        attachDropToCell(active);
-        const key = active.dataset.emp + "|" + active.dataset.date;
-        if (!dragPaint.painted.has(key)) {
-          dragPaint.painted.add(key);
-          applyToCell(active, dragPaint);
-        }
-      });
-    }
-    document.addEventListener('DOMContentLoaded', () => {
-      document.querySelectorAll('#palette .chip').forEach(ch => {
-        ch.addEventListener('dragstart', e => {
-          const id = Number(ch.dataset.chantierId);
-          const color = ch.dataset.chipColor || '';
-          const label = ch.textContent.trim();
-          e.dataTransfer.setData('chantier_id', String(id));
-          e.dataTransfer.setData('color', color);
-          e.dataTransfer.setData('label', label);
-          e.dataTransfer.effectAllowed = 'copyMove';
-          startDragPaint(id, color, label);
-        });
-        ch.addEventListener('dragend', endDragPaint);
-      });
-      document.querySelectorAll('.cell-drop').forEach(cell => {
-        attachDropToCell(cell);
-        const chip = cell.querySelector('.assign-chip');
-        if (chip) {
-          bindChipEvents(chip);
-          cell.classList.add('has-chip');
-        }
-      });
-      document.querySelectorAll('.cell-off').forEach(attachPaintToOffCell);
-      document.querySelectorAll('.cell-off .wkx').forEach(btn => {
-        btn.addEventListener('click', () => {
-          const off = btn.closest('.cell-off');
-          const active = document.createElement('div');
-          active.className = 'cell-drop';
-          active.dataset.date = off.dataset.date;
-          active.dataset.emp = off.dataset.emp;
-          off.replaceWith(active);
-          attachDropToCell(active);
-        });
-      });
-    });
-  </script>
 
   <?php require __DIR__ . '/../templates/footer.php'; ?>
