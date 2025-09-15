@@ -51,26 +51,38 @@ if ($role === 'administrateur') {
 }
 
 /* ==============================
-   Employés
+   Agences (pour filtre)
+============================== */
+$sqlAg = "SELECT id, nom
+          FROM agences
+          WHERE entreprise_id = :e
+          ORDER BY nom";
+$st = $pdo->prepare($sqlAg);
+$st->execute([':e' => $entrepriseId]);
+$agences = $st->fetchAll(PDO::FETCH_ASSOC);
+
+/* ==============================
+   Employés (inclure dépôt) + agence
 ============================== */
 $stmt = $pdo->prepare("
   SELECT u.id, u.prenom, u.nom, u.fonction,
+         u.agence_id, a.nom AS agence_nom,
          GROUP_CONCAT(DISTINCT uc.chantier_id ORDER BY uc.chantier_id SEPARATOR ',') AS chantier_ids,
          GROUP_CONCAT(DISTINCT c.nom ORDER BY c.nom SEPARATOR '||') AS chantier_noms
   FROM utilisateurs u
   LEFT JOIN utilisateur_chantiers uc ON uc.utilisateur_id = u.id
   LEFT JOIN chantiers c ON c.id = uc.chantier_id AND c.entreprise_id = :eid2
+  LEFT JOIN agences   a ON a.id = u.agence_id AND a.entreprise_id = :eid3
   WHERE u.entreprise_id = :eid1
-    AND u.fonction IN ('employe','chef')
-  GROUP BY u.id, u.prenom, u.nom, u.fonction
-  ORDER BY u.nom, u.prenom
+    AND u.fonction IN ('employe','chef','depot')
+  GROUP BY u.id, u.prenom, u.nom, u.fonction, u.agence_id, a.nom
+  ORDER BY (a.nom IS NULL), a.nom, u.nom, u.prenom
 ");
-$stmt->execute([':eid1' => $entrepriseId, ':eid2' => $entrepriseId]);
+$stmt->execute([':eid1' => $entrepriseId, ':eid2' => $entrepriseId, ':eid3' => $entrepriseId]);
 $employees = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 /* ==============================
    Planning de la semaine (affectations)
-   $plannedDayMap[user_id][Y-m-d] = [chantier_id => true, ...]
 ============================== */
 $plannedDayMap = [];
 if ($pdo->query("SHOW TABLES LIKE 'planning_affectations'")->rowCount()) {
@@ -91,7 +103,7 @@ if ($pdo->query("SHOW TABLES LIKE 'planning_affectations'")->rowCount()) {
 }
 
 /* ==============================
-   Construction dynamique des jours (Lun→Ven + Sam/Dim si planning)
+   Jours (Lun→Ven + Sam/Dim si planning)
 ============================== */
 function hasPlanningForDate(array $map, string $iso): bool {
   foreach ($map as $byDate) {
@@ -99,7 +111,6 @@ function hasPlanningForDate(array $map, string $iso): bool {
   }
   return false;
 }
-
 $days = [];
 for ($i = 0; $i < 5; $i++) { // Lun -> Ven
   $d = (clone $weekStart)->modify("+$i day");
@@ -113,7 +124,6 @@ $sat = (clone $weekStart)->modify('+5 day');
 $sun = (clone $weekStart)->modify('+6 day');
 $satIso = $sat->format('Y-m-d');
 $sunIso = $sun->format('Y-m-d');
-
 if (hasPlanningForDate($plannedDayMap, $satIso)) {
   $days[] = ['iso' => $satIso, 'label' => ucfirst(strftime('%A %e %B', $sat->getTimestamp())), 'dow' => 6];
 }
@@ -139,7 +149,7 @@ foreach ($stH->fetchAll(PDO::FETCH_ASSOC) as $r) {
 /* ==============================
    Absences
 ============================== */
-$absMap = []; // $absMap[user_id][date] = 'conges'|'maladie'|'injustifie'
+$absMap = [];
 $stmt = $pdo->prepare("
   SELECT utilisateur_id, date_jour, motif
   FROM pointages_absences
@@ -154,7 +164,7 @@ while ($r = $stmt->fetch(PDO::FETCH_ASSOC)) {
 /* ==============================
    Conduite A/R
 ============================== */
-$conduiteMap = []; // $conduiteMap[user_id][date]['A'|'R']=true
+$conduiteMap = [];
 $stmt = $pdo->prepare("
   SELECT utilisateur_id, date_pointage, type
   FROM pointages_conduite
@@ -197,13 +207,28 @@ function badgeRole($role)
     </div>
   </div>
 
-  <!-- Recherche + filtres chantiers -->
+  <!-- Filtres agence(centré) -->
+  <?php if (!empty($agences)): ?>
+  <div class="d-flex justify-content-center mb-2">
+    <div id="agenceFilters" class="d-flex flex-wrap gap-2">
+      <button type="button" class="btn btn-sm btn-primary" data-agence="all">Tous</button>
+      <button type="button" class="btn btn-sm btn-outline-secondary" data-agence="0">Sans agence</button>
+      <?php foreach ($agences as $ag): ?>
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-agence="<?= (int)$ag['id'] ?>">
+          <?= htmlspecialchars($ag['nom']) ?>
+        </button>
+      <?php endforeach; ?>
+    </div>
+  </div>
+<?php endif; ?>
+
+
+  <!-- Recherche + filtres chantiers existants -->
   <div class="mb-3">
     <input type="search" id="searchInput" class="form-control" placeholder="Rechercher un employé…">
   </div>
 
   <div class="d-flex align-items-center flex-wrap gap-2 mb-3" id="chantierFilters">
-    <!-- "Tous" actif si aucun chantier_id explicite -->
     <button class="btn btn-sm btn-outline-secondary <?= $currentChantierId === 0 ? 'active' : '' ?>" data-chantier="all">Tous</button>
     <?php foreach ($visibleChantiers as $ch): $cid = (int)$ch['id']; ?>
       <button class="btn btn-sm btn-outline-secondary <?= ($cid === $currentChantierId ? 'active' : '') ?>"
@@ -212,7 +237,16 @@ function badgeRole($role)
       </button>
     <?php endforeach; ?>
   </div>
-  <div id="camionControls" class="d-flex align-items-center flex-wrap gap-3 mb-3"></div>
+  <div id="camionControls" class="mb-2 d-flex align-items-center gap-2">
+  <label for="camionCount" class="mb-0 small text-muted">Nombre de camions</label>
+  <div class="input-group input-group-sm camion-stepper" style="width:140px">
+    <button class="btn btn-outline-secondary" type="button" data-action="decr" aria-label="Diminuer">−</button>
+    <input id="camionCount" type="text" class="form-control text-center"
+           value="0" inputmode="numeric" pattern="[0-9]*" aria-label="Nombre de camions">
+    <button class="btn btn-outline-secondary" type="button" data-action="incr" aria-label="Augmenter">+</button>
+  </div>
+</div>
+
 
   <!-- Nav semaine -->
   <div class="d-flex justify-content-center gap-2 mb-3">
@@ -260,31 +294,30 @@ function badgeRole($role)
         ?>
           <tr data-user-id="<?= $uid ?>"
               data-role="<?= htmlspecialchars(strtolower($e['fonction'])) ?>"
+              data-agence-id="<?= (int)($e['agence_id'] ?? 0) ?>"
               data-name="<?= htmlspecialchars(strtolower($e['nom'] . ' ' . $e['prenom'])) ?>"
               data-chantiers="<?= htmlspecialchars($idsStr) ?>">
 
-            <td style="white-space:nowrap">
+            <td class="emp-name" style="white-space:nowrap">
               <strong><?= htmlspecialchars($e['nom'] . ' ' . $e['prenom']) ?></strong>
               <?= badgeRole($e['fonction']) ?>
             </td>
 
             <?php foreach ($days as $d):
               $dateIso = $d['iso'];
-              $dow     = (int)$d['dow']; // 1..7
+              $dow     = (int)$d['dow'];
 
-              // Chantiers planifiés pour le filtre
               $plannedIdsForDay = isset($plannedDayMap[$uid][$dateIso])
                 ? implode(',', array_keys($plannedDayMap[$uid][$dateIso]))
                 : '';
               $hasPlanning = !empty($plannedDayMap[$uid][$dateIso]);
 
-              // États sauvegardés
               $hDone = isset($hoursMap[$uid][$dateIso]) ? (float)$hoursMap[$uid][$dateIso] : null;
 
               $aDone = !empty($conduiteMap[$uid][$dateIso]['A']);
               $rDone = !empty($conduiteMap[$uid][$dateIso]['R']);
 
-              $abs      = $absMap[$uid][$dateIso] ?? null; // 'conges'|'maladie'|'injustifie'
+              $abs      = $absMap[$uid][$dateIso] ?? null;
               $isAbsent = ($abs !== null);
               $absLabel = $abs === 'conges' ? 'Congés'
                         : ($abs === 'maladie' ? 'Maladie'
@@ -382,6 +415,14 @@ function badgeRole($role)
       </div>
     </div>
   </div>
+
+<script>
+  window.POINTAGE_DAYS   = <?= json_encode(array_column($days,'iso')) ?>;
+  window.API_CAMIONS_CFG = "/pointage/api/camions_config.php";
+</script>
+
+
+
 
   <script src="js/pointage.js"></script>
   <?php require_once __DIR__ . '/../templates/footer.php'; ?>

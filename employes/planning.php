@@ -14,56 +14,40 @@ $page = 'planning';
 /** ====== Multi-entreprise : source fiable ====== */
 $entrepriseId = (int)($_SESSION['utilisateurs']['entreprise_id'] ?? 0);
 if ($entrepriseId <= 0) {
-  // On force la présence de l'entreprise en session pour ce module
   header('Location: /connexion.php');
   exit;
 }
-// 1) Semaine demandée (vue) ou semaine courante
+
+/* ----- Semaine affichée ou courante ----- */
 if (isset($_GET['year'], $_GET['week'])) {
   $viewYear = (int) $_GET['year'];
   $viewWeek = (int) $_GET['week'];
 } else {
-  $now = new DateTime();
+  $now      = new DateTime();
   $viewYear = (int) $now->format('o'); // année ISO
   $viewWeek = (int) $now->format('W'); // semaine ISO
 }
 
-// 2) Lundi de la semaine AFFICHÉE + bornes
+/* ----- Lundi de la semaine affichée + bornes ----- */
 $start = new DateTime();
-$start->setISODate($viewYear, $viewWeek);         // lundi
-$end = (clone $start)->modify('+6 day');          // dimanche
+$start->setISODate($viewYear, $viewWeek);     // lundi
+$end   = (clone $start)->modify('+6 day');    // dimanche
 
-// 3) Liens nav (si tu en as besoin ailleurs)
-$prevMonday  = (clone $start)->modify('-7 day')->format('Y-m-d');
-$nextMonday  = (clone $start)->modify('+7 day')->format('Y-m-d');
+/* ----- Nav ----- */
+$prevMonday = (clone $start)->modify('-7 day')->format('Y-m-d');
+$nextMonday = (clone $start)->modify('+7 day')->format('Y-m-d');
 
-// 4) Semaine courante (si tu veux l'afficher à droite sans bouger)
-$today = new DateTime();
+/* ----- Semaine courante (affichage à droite) ----- */
+$today       = new DateTime();
 $currentYear = (int) $today->format('o');
 $currentWeek = (int) $today->format('W');
+$todayIso    = (new DateTime('today'))->format('Y-m-d');
 
-// 5) Libellés FR
+/* ----- Libellés FR & jours ----- */
 $jours = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche'];
 $mois  = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
 $monthLabel = $mois[(int)$start->format('n') - 1] . ' ' . $start->format('Y');
 
-// 6) Jours (base = $start)
-$days = [];
-for ($i = 0; $i < 7; $i++) {
-  $d = (clone $start)->modify("+$i day");
-  $days[] = [
-    'iso'   => $d->format('Y-m-d'),                                        // ← à mettre dans data-date
-    'label' => $jours[$i] . ' ' . (int)$d->format('j') . ' ' . $mois[(int)$d->format('n') - 1],
-    'dow'   => (int)$d->format('N')
-  ];
-}
-
-/* Libellés FR */
-$jours = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche'];
-$mois  = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
-$monthLabel = $mois[(int)$start->format('n') - 1] . ' ' . $start->format('Y');
-
-/* Jours (1..7) */
 $days = [];
 for ($i = 0; $i < 7; $i++) {
   $d = (clone $start)->modify("+$i day");
@@ -78,67 +62,123 @@ for ($i = 0; $i < 7; $i++) {
 
 /* ====== Données ====== */
 
-/* Chantiers (palette) — tolérant si chef_id absent */
-$hasChefId = false;
-try {
-  $chk = $pdo->query("SHOW COLUMNS FROM chantiers LIKE 'chef_id'");
-  $hasChefId = $chk && $chk->rowCount() > 0;
-} catch (Throwable $e) {
-  $hasChefId = false;
-}
-
-$sqlCh = "SELECT id, nom, responsable_id FROM chantiers WHERE entreprise_id = :e ORDER BY nom";
+/* Chantiers (palette) */
+$sqlCh = "SELECT id, nom, responsable_id
+          FROM chantiers
+          WHERE entreprise_id = :e
+          ORDER BY nom";
 $st = $pdo->prepare($sqlCh);
 $st->execute([':e' => $entrepriseId]);
 $chantiers = $st->fetchAll(PDO::FETCH_ASSOC);
 
-/* Map : [responsable_id => chantier_id] (si plusieurs, on garde le plus petit id) */
-$respDefault = [];
-foreach ($chantiers as $c) {
-  if (!empty($c['responsable_id'])) {
-    $rid = (int)$c['responsable_id'];
-    if (!isset($respDefault[$rid]) || $c['id'] < $respDefault[$rid]) {
-      $respDefault[$rid] = (int)$c['id'];
-    }
-  }
-}
+/* Dépôts (palette) — pour les pastilles Dépôt */
+$sqlDep = "SELECT id, nom
+           FROM depots
+           WHERE entreprise_id = :e
+           ORDER BY nom";
+$st = $pdo->prepare($sqlDep);
+$st->execute([':e' => $entrepriseId]);
+$depots = $st->fetchAll(PDO::FETCH_ASSOC);
 
-/* Employés (uniquement l’entreprise courante) — Nom puis Prénom */
+/* Agences (pour le filtre) */
+$sqlAg = "SELECT id, nom
+          FROM agences
+          WHERE entreprise_id = :e
+          ORDER BY nom";
+$st = $pdo->prepare($sqlAg);
+$st->execute([':e' => $entrepriseId]);
+$agences = $st->fetchAll(PDO::FETCH_ASSOC);
+
+
+/* Maps rapides pour noms (affichage) */
+$chantierById = [];
+foreach ($chantiers as $c) $chantierById[(int)$c['id']] = $c['nom'];
+$depotById = [];
+foreach ($depots as $d) $depotById[(int)$d['id']] = $d['nom'];
+
+/* Employés : tout le monde SAUF administrateur, avec agence */
+$employes = []; // ← évite le warning si la requête ne renvoie rien
+
 $sqlEmp = "SELECT u.id,
                   CONCAT(u.nom, ' ', u.prenom) AS nom,
-                  u.fonction AS role
+                  u.fonction AS role,
+                  u.agence_id,
+                  a.nom AS agence_nom
            FROM utilisateurs u
-           WHERE u.entreprise_id = :e
-             AND u.fonction IN ('employe','chef','interim')
-           ORDER BY u.nom, u.prenom";
-$st = $pdo->prepare($sqlEmp);
-$st->execute([':e' => $entrepriseId]);
-$employes = $st->fetchAll(PDO::FETCH_ASSOC);
+           LEFT JOIN agences a
+                  ON a.id = u.agence_id
+                 AND a.entreprise_id = :e2
+           WHERE u.entreprise_id = :e1
+             AND u.fonction <> 'administrateur'
+           ORDER BY (a.nom IS NULL), a.nom, u.nom, u.prenom";
 
+$st = $pdo->prepare($sqlEmp);
+$st->execute([':e1' => $entrepriseId, ':e2' => $entrepriseId]);
+$employes = $st->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+
+
+
+/* Détection schéma planning_affectations : type / depot_id existent ? */
+$hasTypeCol = false;
+$hasDepotCol = false;
+try {
+  $rs = $pdo->query("SHOW COLUMNS FROM planning_affectations LIKE 'type'");
+  $hasTypeCol = $rs && $rs->rowCount() > 0;
+} catch (Throwable $e) {
+}
+try {
+  $rs = $pdo->query("SHOW COLUMNS FROM planning_affectations LIKE 'depot_id'");
+  $hasDepotCol = $rs && $rs->rowCount() > 0;
+} catch (Throwable $e) {
+}
 
 /* Affectations semaine (bornées par entreprise) */
-$sqlAff = "SELECT utilisateur_id, chantier_id, date_jour, is_active
-           FROM planning_affectations
-           WHERE date_jour BETWEEN :s AND :e
-             AND entreprise_id = :eid";
-
+if ($hasTypeCol || $hasDepotCol) {
+  // Schéma moderne
+  $sqlAff = "SELECT utilisateur_id, chantier_id, depot_id, type, date_jour, is_active
+             FROM planning_affectations
+             WHERE date_jour BETWEEN :s AND :e
+               AND entreprise_id = :eid";
+} else {
+  // Compat : pas de type/depot_id
+  $sqlAff = "SELECT utilisateur_id, chantier_id, date_jour, is_active
+             FROM planning_affectations
+             WHERE date_jour BETWEEN :s AND :e
+               AND entreprise_id = :eid";
+}
 $st = $pdo->prepare($sqlAff);
 $st->execute([
-  ':s' => $start->format('Y-m-d'),
-  ':e' => $end->format('Y-m-d'),
+  ':s'  => $start->format('Y-m-d'),
+  ':e'  => $end->format('Y-m-d'),
   ':eid' => $entrepriseId
 ]);
-
 $affectRows = $st->fetchAll(PDO::FETCH_ASSOC);
 
-/* Map affectations */
+/* Map affectations normalisée */
 $affects = [];
 foreach ($affectRows as $r) {
   $uid = (int)$r['utilisateur_id'];
-  $affects[$uid][$r['date_jour']] = [
-    'chantier_id' => $r['chantier_id'] !== null ? (int)$r['chantier_id'] : null,
-    'is_active'   => (int)($r['is_active'] ?? 0)
-  ];
+
+  if ($hasTypeCol || $hasDepotCol) {
+    $type = $r['type'] ?? 'chantier';
+    $affects[$uid][$r['date_jour']] = [
+      'type'        => $type,
+      'chantier_id' => isset($r['chantier_id']) && $r['chantier_id'] !== null ? (int)$r['chantier_id'] : null,
+      'depot_id'    => isset($r['depot_id']) && $r['depot_id'] !== null ? (int)$r['depot_id'] : null,
+      'is_active'   => (int)($r['is_active'] ?? 0)
+    ];
+  } else {
+    // Compat : on considère chantier_id=0 comme "dépôt"
+    $cid = isset($r['chantier_id']) ? (int)$r['chantier_id'] : null;
+    $type = ($cid === 0 ? 'depot' : 'chantier');
+    $affects[$uid][$r['date_jour']] = [
+      'type'        => $type,
+      'chantier_id' => $cid && $cid > 0 ? $cid : null,
+      'depot_id'    => null, // inconnu en compat
+      'is_active'   => (int)($r['is_active'] ?? 0)
+    ];
+  }
 }
 
 /* CSRF (si besoin) */
@@ -148,6 +188,7 @@ if (empty($_SESSION['csrf_token'])) {
 
 require __DIR__ . '/../templates/header.php';
 require __DIR__ . '/../templates/navigation/navigation.php';
+
 function badgeRole($role)
 {
   $r = mb_strtolower($role);
@@ -161,6 +202,7 @@ function badgeRole($role)
     case 'chef':
       return '<span class="badge bg-success">Chef</span>';
     case 'employe':
+    case 'interim':
       return '<span class="badge bg-warning text-dark">Employé</span>';
     default:
       return '<span class="badge bg-secondary">Autre</span>';
@@ -168,23 +210,40 @@ function badgeRole($role)
 }
 ?>
 
-
 <div class="container mt-4">
   <div class="d-flex justify-content-between align-items-center mb-3">
     <a href="javascript:history.back()" class="btn btn-outline-secondary">← Retour</a>
     <h1 class="m-0 text-center flex-grow-1">Planning</h1>
     <div style="width:120px"></div>
   </div>
+  <?php if (!empty($agences)): ?>
+    <div class="d-flex justify-content-center mb-3">
+      <div id="agenceFilters" class="d-flex flex-wrap gap-2">
+        <button type="button" class="btn btn-primary" data-agence="all">Tous</button>
+        <button type="button" class="btn btn-outline-secondary" data-agence="0">Sans agence</button>
+        <?php foreach ($agences as $ag): ?>
+          <button type="button"
+            class="btn btn-outline-secondary"
+            data-agence="<?= (int)$ag['id'] ?>">
+            <?= htmlspecialchars($ag['nom']) ?>
+          </button>
+        <?php endforeach; ?>
+      </div>
+    </div>
+  <?php endif; ?>
+
+
 
   <input type="text" id="searchInput" class="form-control mb-3" placeholder="Rechercher un employé..." autocomplete="off" />
 
-
   <!-- Palette chantiers -->
-  <div class="mb-3 d-flex flex-wrap gap-2" id="palette">
+  <div class="mb-2 d-flex flex-wrap gap-2" id="palette-chantiers">
     <?php foreach ($chantiers as $c):
-      $h = (($c['id'] * 47) % 360);
+      $h  = (($c['id'] * 47) % 360);
       $bg = "hsl($h, 70%, 45%)"; ?>
-      <div class="chip" draggable="true"
+      <div class="chip"
+        draggable="true"
+        data-type="chantier"
         data-chantier-id="<?= (int)$c['id'] ?>"
         data-chip-color="<?= htmlspecialchars($bg) ?>"
         style="background:<?= $bg ?>;">
@@ -193,7 +252,20 @@ function badgeRole($role)
     <?php endforeach; ?>
   </div>
 
-  <!-- En-têtes mois & semaine + nav + bouton -->
+  <!-- Palette dépôts -->
+  <?php if (!empty($depots)): ?>
+    <div class="mb-3 d-flex flex-wrap gap-2" id="palette-depots">
+      <div class="chip"
+        draggable="true"
+        data-type="depot"
+        data-depot-id="0"
+        style="background:#cff4fc;color:#084c61;border:1px solid rgba(0,0,0,.08)">
+        <span class="dot" style="background:#0dcaf0"></span>Dépôt
+      </div>
+    </div>
+  <?php endif; ?>
+
+  <!-- En-têtes mois & semaine + nav -->
   <div id="weekNav"
     class="d-flex align-items-center justify-content-between my-3"
     data-week="<?= (int)$viewWeek ?>" data-year="<?= (int)$viewYear ?>">
@@ -205,17 +277,10 @@ function badgeRole($role)
       <button type="button" class="btn btn-outline-secondary" data-week-shift="1">Semaine +1 →</button>
     </div>
 
-    <!-- À droite : au choix -->
     <div class="ms-3">
-      <!-- soit la semaine affichée -->
       <span>Semaine <?= (int)$viewWeek ?></span>
-      <!-- soit la semaine courante :
-    <span>Cette semaine : <?= (int)$currentWeek ?></span> -->
     </div>
   </div>
-
-
-
 
   <!-- Tableau -->
   <div class="table-responsive">
@@ -227,62 +292,72 @@ function badgeRole($role)
             <th class="text-center <?= ($d['iso'] === $todayIso ? 'table-primary' : '') ?>">
               <?= htmlspecialchars(ucfirst($d['label'])) ?>
             </th>
-
           <?php endforeach; ?>
         </tr>
       </thead>
       <tbody id="gridBody">
         <?php foreach ($employes as $emp): ?>
-          <tr data-emp-id="<?= (int)$emp['id'] ?>">
+          <tr data-emp-id="<?= (int)$emp['id'] ?>"
+            data-agence-id="<?= (int)($emp['agence_id'] ?? 0) ?>">
+
             <td class="fw-semibold">
               <?= htmlspecialchars($emp['nom']) ?>
               <?= badgeRole($emp['role']) ?>
             </td>
 
-
-
-
             <?php foreach ($days as $d):
               $isWeekend = ($d['dow'] >= 6);
-              $todayIso = (new DateTime('today'))->format('Y-m-d');
-
-
-              // 1) On charge d'abord une vraie affectation si elle existe (semaine ou week-end)
-              $aff = $affects[$emp['id']][$d['iso']] ?? null;
-              $cid = $aff['chantier_id'] ?? null;
+              $aff      = $affects[$emp['id']][$d['iso']] ?? null;
               $isActive = (int)($aff['is_active'] ?? 0);
 
-
-              // 3) Construire le chip si on a un chantier
+              /* Construire le chip si on a une affectation */
               $chip = null;
-              if ($cid !== null) {
-                $c = array_values(array_filter($chantiers, fn($x) => (int)$x['id'] === (int)$cid))[0] ?? null;
-                if ($c) {
-                  $h = (((int)$cid * 47) % 360);
+              if ($aff) {
+                $type = $aff['type'] ?? 'chantier';
+
+                if ($type === 'depot') {
+                  $did = $aff['depot_id'] ?? null;
+                  // avec colonnes -> nom précis ; sinon (compat) libellé générique
+                  $nomDepot = ($did !== null && isset($depotById[$did])) ? ('Dépôt — ' . $depotById[$did]) : 'Dépôt';
                   $chip = [
-                    'nom'   => $c['nom'],
-                    'color' => "hsl($h, 70%, 45%)",
-                    'id'    => (int)$cid
+                    'nom'   => $nomDepot,
+                    'color' => '#cff4fc',
+                    'id'    => $did ?? 0,
+                    'type'  => 'depot'
                   ];
+                } else {
+                  $cid = $aff['chantier_id'] ?? null;
+                  if ($cid !== null && isset($chantierById[$cid])) {
+                    $h = (((int)$cid * 47) % 360);
+                    $chip = [
+                      'nom'   => $chantierById[$cid],
+                      'color' => "hsl($h, 70%, 45%)",
+                      'id'    => (int)$cid,
+                      'type'  => 'chantier'
+                    ];
+                  }
                 }
               }
             ?>
               <td>
                 <?php if ($chip): ?>
-                  <!-- Affecté à un chantier -->
+                  <!-- Affecté -->
                   <div class="cell-drop has-chip"
                     data-date="<?= htmlspecialchars($d['iso']) ?>"
                     data-emp="<?= (int)$emp['id'] ?>">
-                    <span class="assign-chip"
+                    <span class="assign-chip<?= $chip['type'] === 'depot' ? ' assign-chip-depot' : '' ?>"
                       style="background: <?= htmlspecialchars($chip['color']) ?>;"
-                      data-chantier-id="<?= (int)$chip['id'] ?>">
+                      data-type="<?= htmlspecialchars($chip['type']) ?>"
+                      <?= $chip['type'] === 'depot'
+                        ? 'data-depot-id="' . (int)$chip['id'] . '"'
+                        : 'data-chantier-id="' . (int)$chip['id'] . '"' ?>>
                       <?= htmlspecialchars($chip['nom']) ?>
                       <span class="x" title="Retirer">×</span>
                     </span>
                   </div>
 
                 <?php elseif ($isActive): ?>
-                  <!-- Jour activé (ex: week-end activé) mais pas de chantier -->
+                  <!-- Jour activé mais sans affectation -->
                   <div class="cell-drop"
                     data-date="<?= htmlspecialchars($d['iso']) ?>"
                     data-emp="<?= (int)$emp['id'] ?>"></div>
@@ -303,23 +378,20 @@ function badgeRole($role)
                     data-emp="<?= (int)$emp['id'] ?>"></div>
                 <?php endif; ?>
               </td>
-
             <?php endforeach; ?>
-
-
           </tr>
         <?php endforeach; ?>
       </tbody>
     </table>
   </div>
 
-
   <script>
+    // Endpoints
     window.PLANNING_DATE_START = <?= json_encode($start->format('Y-m-d')) ?>;
     window.API_MOVE = "/employes/api/moveAffectation.php";
     window.API_DELETE = "/employes/api/deleteAffectation.php";
   </script>
-  <script src="/employes/js/planning.js"></script>
 
+  <script src="/employes/js/planning.js"></script>
 
   <?php require __DIR__ . '/../templates/footer.php'; ?>

@@ -1,11 +1,11 @@
 // planning/js/planning.js
-// Variables fournies par planning.php :
+// Exposé par planning.php :
 //   window.PLANNING_DATE_START
 //   window.API_MOVE
 //   window.API_DELETE
+let CURRENT_AGENCE = "all";
 
-
-/* ===== Toast utilitaire ===== */
+/* ===== Toast ===== */
 function toast(msg) {
   let t = document.getElementById("plan-toast");
   if (!t) {
@@ -40,126 +40,159 @@ function toast(msg) {
   });
 }
 
+/* ===== Drag paint state ===== */
+// { type:'chantier'|'depot', id:Number, label:String, color:String, painted:Set }
+let dragPaint = null;
 
-
-/* ===== Drag utilitaires ===== */
-let dragPaint = null; // {id,label,color,painted:Set}
-
-function startDragPaint(id, color, label) {
+function startDragPaint(type, id, color, label) {
   dragPaint = {
+    type: type || "chantier",
     id: Number(id),
     color: color || "",
-    label: label || "Chantier",
+    label: label || (type === "depot" ? "Dépôt" : "Chantier"),
     painted: new Set(),
   };
 }
+function endDragPaint() { dragPaint = null; }
 
-function endDragPaint() {
-  dragPaint = null;
-}
-
-/* ===== Création de chip assigné ===== */
-function makeAssign(label, color, chantierId) {
+/* ===== Chip assigné ===== */
+function makeAssign(label, color, type, id) {
   const span = document.createElement("span");
-  span.className = "assign-chip";
+  span.className = "assign-chip" + (type === "depot" ? " assign-chip-depot" : "");
   span.style.background = color || "#334155";
-  span.dataset.chantierId = chantierId;
+  span.dataset.type = type || "chantier";
+  if (type === "depot") {
+    span.dataset.depotId = id;
+  } else {
+    span.dataset.chantierId = id;
+  }
   span.innerHTML = `${label} <span class="x" title="Retirer">×</span>`;
 
-  // retirer
-span.querySelector(".x")?.addEventListener("click", (e) => {
-  e.preventDefault();
-  e.stopPropagation();
+  // suppression
+  span.querySelector(".x")?.addEventListener("click", async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
 
-  const cell = span.closest(".cell-drop");
-  if (!cell) return;
-  const empId = cell.dataset.emp;
-  const date  = cell.dataset.date;
+    const cell = span.closest(".cell-drop");
+    if (!cell) return;
+    const empId = cell.dataset.emp;
+    const date  = cell.dataset.date;
 
-  fetch(window.API_DELETE, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    credentials: "same-origin",
-    body: new URLSearchParams({ emp_id: empId, date }),
-  })
-  .then(async (r) => {
-    const raw = await r.text();
-    let d;
-    try { d = JSON.parse(raw); } catch { throw new Error(`HTTP ${r.status} – ${raw.slice(0, 200)}`); }
-    if (!r.ok || !d.ok) throw new Error(d.message || `HTTP ${r.status}`);
+    try {
+      const r = await fetch(window.API_DELETE, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        credentials: "same-origin",
+        body: new URLSearchParams({ emp_id: empId, date }),
+      });
+      const raw = await r.text();
+      let d;
+      try { d = JSON.parse(raw); } catch { throw new Error(`HTTP ${r.status} – ${raw.slice(0, 200)}`); }
+      if (!r.ok || !d.ok) throw new Error(d.message || `HTTP ${r.status}`);
 
-    span.remove();
-    cell.classList.remove("has-chip");
-    toast("Affectation retirée");
+      span.remove();
+      cell.classList.remove("has-chip");
+      toast("Affectation retirée");
 
-    // si week-end et plus de pastille => repasser en OFF
-    if (isWeekendISO(date) && !cell.querySelector('.assign-chip')) {
-      const off = document.createElement('div');
-      off.className = 'cell-off';
-      off.dataset.emp  = empId;
-      off.dataset.date = date;
-      off.innerHTML = '<button type="button" class="wkx" title="Jour non travaillé — activer exceptionnellement">×</button>';
-      cell.replaceWith(off);
-      attachPaintToOffCell(off);
+      // si week-end et plus de pastille => repasser en OFF
+      if (typeof isWeekendISO === "function" && isWeekendISO(date) && !cell.querySelector('.assign-chip')) {
+        const off = document.createElement('div');
+        off.className = 'cell-off';
+        off.dataset.emp  = empId;
+        off.dataset.date = date;
+        off.innerHTML = '<button type="button" class="wkx" title="Jour non travaillé — activer exceptionnellement">×</button>';
+        cell.replaceWith(off);
+        attachPaintToOffCell(off);
+      }
+    } catch (err) {
+      toast(err.message || "Erreur réseau");
     }
-  })
-  .catch((err) => toast(err.message || "Erreur réseau"));
-});
-
+  });
 
   // re-drag
   span.addEventListener("dragstart", (e) => {
-    e.dataTransfer.setData("chantier_id", chantierId);
+    const t = span.dataset.type || "chantier";
+    e.dataTransfer.setData("type", t);
+    if (t === "depot") {
+      e.dataTransfer.setData("depot_id", span.dataset.depotId || "");
+    } else {
+      e.dataTransfer.setData("chantier_id", span.dataset.chantierId || "");
+    }
     e.dataTransfer.setData("color", span.style.background || "");
     e.dataTransfer.setData("label", label);
     e.dataTransfer.effectAllowed = "move";
-    startDragPaint(chantierId, span.style.background, label);
+    startDragPaint(t, id, span.style.background, label);
   });
   span.setAttribute("draggable", "true");
 
   return span;
 }
 
-/* ===== Helpers ===== */
-function sameAssignment(cell, chantierId) {
-  const cur = cell.querySelector(".assign-chip");
-  if (!cur) return false;
-  return String(cur.dataset.chantierId || "") === String(chantierId || "");
-}
-
-/* ===== Drag sources ===== */
+/* ===== Drag sources (palettes & chips existants) ===== */
 function attachDragSources() {
-  // palette
-  document.querySelectorAll("#palette .chip").forEach((chip) => {
+  // palettes chantiers + dépôts
+  document.querySelectorAll("#palette-chantiers .chip, #palette-depots .chip").forEach((chip) => {
     chip.addEventListener("dragstart", (e) => {
-      e.dataTransfer.setData("chantier_id", chip.dataset.chantierId);
-      e.dataTransfer.setData("color", chip.dataset.chipColor || "");
-      e.dataTransfer.setData("label", chip.innerText.trim());
+      const type  = chip.dataset.type || "chantier";
+      const color = chip.dataset.chipColor || chip.style.background || "";
+      const label = chip.innerText.trim();
+
+      e.dataTransfer.setData("type", type);
+      if (type === "depot") {
+        e.dataTransfer.setData("depot_id", chip.dataset.depotId);
+      } else {
+        e.dataTransfer.setData("chantier_id", chip.dataset.chantierId);
+      }
+      e.dataTransfer.setData("color", color);
+      e.dataTransfer.setData("label", label);
       e.dataTransfer.effectAllowed = "copy";
-      startDragPaint(
-        chip.dataset.chantierId,
-        chip.dataset.chipColor,
-        chip.innerText.trim()
-      );
+
+      const id = type === "depot" ? chip.dataset.depotId : chip.dataset.chantierId;
+      startDragPaint(type, id, color, label);
     });
     chip.addEventListener("dragend", endDragPaint);
   });
 
-  // permettre de re-drag une assignation depuis une cellule
+  // re-drag depuis une cellule
   document.querySelectorAll(".assign-chip").forEach((ch) => {
     ch.addEventListener("dragstart", (e) => {
-      const p = ch.closest(".cell-drop");
-      e.dataTransfer.setData("chantier_id", ch.dataset.chantierId);
+      const t = ch.dataset.type || "chantier";
+      e.dataTransfer.setData("type", t);
+      if (t === "depot") {
+        e.dataTransfer.setData("depot_id", ch.dataset.depotId || "");
+      } else {
+        e.dataTransfer.setData("chantier_id", ch.dataset.chantierId || "");
+      }
       e.dataTransfer.setData("color", ch.style.background || "");
       e.dataTransfer.setData("label", (ch.childNodes[0]?.nodeValue || "").trim());
       e.dataTransfer.effectAllowed = "move";
-      startDragPaint(ch.dataset.chantierId, ch.style.background, ch.innerText.trim());
+
+      const id = t === "depot" ? ch.dataset.depotId : ch.dataset.chantierId;
+      startDragPaint(t, id, ch.style.background, ch.innerText.trim());
     });
     ch.setAttribute("draggable", "true");
   });
 }
 
 /* ===== Drop targets ===== */
+function persistMove(cell, type, id) {
+  const body = new URLSearchParams({
+    emp_id: cell.dataset.emp,
+    date: cell.dataset.date,
+  });
+  if (type === "depot") {
+    body.append("depot_id", String(id));
+  } else {
+    body.append("chantier_id", String(id));
+  }
+  return fetch(window.API_MOVE, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    credentials: "same-origin",
+    body,
+  }).then(r => r.json());
+}
+
 function attachDropTargets() {
   document.querySelectorAll(".cell-drop").forEach((cell) => {
     cell.addEventListener("dragover", (e) => {
@@ -168,7 +201,7 @@ function attachDropTargets() {
     });
     cell.addEventListener("dragleave", () => cell.classList.remove("dragover"));
 
-    // Survol = remplir direct si dragPaint actif
+    // Hover paint = assigner à l'entrée
     cell.addEventListener("dragenter", (e) => {
       if (!dragPaint) return;
       e.preventDefault();
@@ -176,120 +209,56 @@ function attachDropTargets() {
       if (dragPaint.painted.has(key)) return;
       dragPaint.painted.add(key);
 
-      // applique la pastille (UI)
+      // UI
       cell.querySelector(".assign-chip")?.remove();
-      const chip = makeAssign(dragPaint.label, dragPaint.color, dragPaint.id);
+      const chip = makeAssign(dragPaint.label, dragPaint.color, dragPaint.type, dragPaint.id);
       cell.appendChild(chip);
       cell.classList.add("has-chip");
 
-      // API MOVE (le back met is_active=1)
-      fetch(window.API_MOVE, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        credentials: "same-origin",
-        body: new URLSearchParams({
-          emp_id: cell.dataset.emp,
-          chantier_id: String(dragPaint.id),
-          date: cell.dataset.date,
-        }),
-      })
-      .then(r => r.json())
-      .then(d => {
-        if (!d.ok) throw new Error(d.message || "Erreur API");
-      })
-      .catch(err => {
-        console.error(err);
-        // rollback UI
-        chip.remove();
-        cell.classList.remove("has-chip");
-      });
+      // API
+      persistMove(cell, dragPaint.type, dragPaint.id)
+        .then(d => {
+          if (!d.ok) throw new Error(d.message || "Erreur API");
+        })
+        .catch(err => {
+          console.error(err);
+          chip.remove();
+          cell.classList.remove("has-chip");
+          toast(err.message || "Échec enregistrement");
+        });
     });
 
-    // Drop classique (si on lâche pile sur la cellule sans “peinture” active)
+    // Drop classique si pas de paint en cours
     cell.addEventListener("drop", (e) => {
       e.preventDefault();
       cell.classList.remove("dragover");
       if (!dragPaint) {
-        const chantierId = Number(e.dataTransfer.getData("chantier_id") || 0);
+        const type  = e.dataTransfer.getData("type") || "chantier";
+        const id    = type === "depot"
+          ? Number(e.dataTransfer.getData("depot_id") || 0)
+          : Number(e.dataTransfer.getData("chantier_id") || 0);
         const color = e.dataTransfer.getData("color") || "";
-        const label = e.dataTransfer.getData("label") || "Chantier";
-        if (!chantierId) return;
+        const label = e.dataTransfer.getData("label") || (type === "depot" ? "Dépôt" : "Chantier");
+        if (!id) return;
 
         cell.querySelector(".assign-chip")?.remove();
-        const chip = makeAssign(label, color, chantierId);
+        const chip = makeAssign(label, color, type, id);
         cell.appendChild(chip);
         cell.classList.add("has-chip");
 
-        fetch(window.API_MOVE, {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          credentials: "same-origin",
-          body: new URLSearchParams({
-            emp_id: cell.dataset.emp,
-            chantier_id: String(chantierId),
-            date: cell.dataset.date,
-          }),
-        }).catch(console.error);
+        persistMove(cell, type, id).catch(console.error);
       }
     });
   });
 }
 
-
-/* ===== Paint pour cell-off (weekend, jours off) ===== */
-function attachPaintToOffCell(off) {
-  off.addEventListener("dragenter", (e) => {
-    if (!dragPaint) return;
-    e.preventDefault();
-    const active = document.createElement("div");
-    active.className = "cell-drop";
-    active.dataset.date = off.dataset.date;
-    active.dataset.emp = off.dataset.emp;
-    off.replaceWith(active);
-    attachDropTargets();
-    const key = active.dataset.emp + "|" + active.dataset.date;
-    if (!dragPaint.painted.has(key)) {
-      dragPaint.painted.add(key);
-      const chip = makeAssign(dragPaint.label, dragPaint.color, dragPaint.id);
-      active.appendChild(chip);
-      active.classList.add("has-chip");
-
-      // active le jour + enregistre affectation
-      fetch(window.API_PREFILL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        credentials: 'same-origin',
-        body: new URLSearchParams({
-          emp_id: active.dataset.emp,
-          date: active.dataset.date,
-          chantier_id: String(dragPaint.id),
-          active: '1'
-        })
-      }).catch(console.error);
-
-      fetch(window.API_MOVE, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        credentials: 'same-origin',
-        body: new URLSearchParams({
-          emp_id: active.dataset.emp,
-          chantier_id: String(dragPaint.id),
-          date: active.dataset.date
-        })
-      }).catch(console.error);
-    }
-  });
-}
-
-
-
 /* ===== Paint pour cell-off (weekend, jours off) ===== */
 function attachPaintToOffCell(off) {
   off.addEventListener("dragenter", (e) => {
     if (!dragPaint) return;
     e.preventDefault();
 
-    // transformer OFF -> active
+    // OFF -> actif
     const active = document.createElement("div");
     active.className = "cell-drop";
     active.dataset.date = off.dataset.date;
@@ -301,54 +270,46 @@ function attachPaintToOffCell(off) {
     if (!dragPaint.painted.has(key)) {
       dragPaint.painted.add(key);
 
-      // poser la pastille (UI)
-      const chip = makeAssign(dragPaint.label, dragPaint.color, dragPaint.id);
+      // UI
+      const chip = makeAssign(dragPaint.label, dragPaint.color, dragPaint.type, dragPaint.id);
       active.appendChild(chip);
       active.classList.add("has-chip");
 
-      // persister l'affectation (MOVE) — back => is_active=1
-      fetch(window.API_MOVE, {
-        method: 'POST',
-        headers: { 'Content-Type':'application/x-www-form-urlencoded' },
-        credentials: 'same-origin',
-        body: new URLSearchParams({
-          emp_id: active.dataset.emp,
-          chantier_id: String(dragPaint.id),
-          date: active.dataset.date
+      // API (MOVE active aussi le jour côté back)
+      persistMove(active, dragPaint.type, dragPaint.id)
+        .then(d => {
+          if (!d.ok) throw new Error(d.message || "Erreur API");
         })
-      })
-      .then(r => r.json())
-      .then(d => {
-        if (!d.ok) throw new Error(d.message || 'Erreur API');
-      })
-      .catch(err => {
-        console.error(err);
-        // rollback UI complet
-        chip.remove();
-        active.classList.remove("has-chip");
-        const back = document.createElement('div');
-        back.className = 'cell-off';
-        back.dataset.date = active.dataset.date;
-        back.dataset.emp  = active.dataset.emp;
-        back.innerHTML = '<button type="button" class="wkx" title="Jour non travaillé — activer exceptionnellement">×</button>';
-        active.replaceWith(back);
-        attachPaintToOffCell(back);
-        toast('Échec enregistrement');
-      });
+        .catch(err => {
+          console.error(err);
+          chip.remove();
+          active.classList.remove("has-chip");
+          const back = document.createElement('div');
+          back.className = 'cell-off';
+          back.dataset.date = active.dataset.date;
+          back.dataset.emp  = active.dataset.emp;
+          back.innerHTML = '<button type="button" class="wkx" title="Jour non travaillé — activer exceptionnellement">×</button>';
+          active.replaceWith(back);
+          attachPaintToOffCell(back);
+          toast('Échec enregistrement');
+        });
     }
   });
 }
-
 
 /* ===== Filtre employé ===== */
 function filterRows(q) {
   q = (q || "").toLowerCase();
   document.querySelectorAll("#gridBody tr").forEach((tr) => {
-    const name =
-      (tr.querySelector("td:first-child")?.innerText || "").toLowerCase();
-    tr.style.display = name.includes(q) ? "" : "none";
+    const name = (tr.querySelector("td:first-child")?.innerText || "").toLowerCase();
+    const agId = tr.dataset.agenceId || "0";
+    const matchName = name.includes(q);
+    const matchAgence =
+      CURRENT_AGENCE === "all" ? true : String(agId) === String(CURRENT_AGENCE);
+    tr.style.display = (matchName && matchAgence) ? "" : "none";
   });
 }
+
 
 /* ===== Navigation semaines ===== */
 document.addEventListener("click", (e) => {
@@ -383,19 +344,15 @@ function getISOWeekYear(d) {
   date.setUTCDate(date.getUTCDate() - day + 3);
   const firstThu = new Date(Date.UTC(date.getUTCFullYear(), 0, 4));
   const firstThuDay = (firstThu.getUTCDay() + 6) % 7;
-  const week =
-    1 +
-    Math.round(((date - firstThu) / 86400000 - 3 + firstThuDay) / 7);
+  const week = 1 + Math.round(((date - firstThu) / 86400000 - 3 + firstThuDay) / 7);
   return { week, year: date.getUTCFullYear() };
 }
-
 function isoWeekMonday(year, week) {
   const d = new Date(Date.UTC(year, 0, 1 + (week - 1) * 7));
   const dow = (d.getUTCDay() + 6) % 7;
   d.setUTCDate(d.getUTCDate() - dow);
   return d;
 }
-
 function addWeeks(week, year, shift) {
   const d = isoWeekMonday(year, week);
   d.setUTCDate(d.getUTCDate() + shift * 7);
@@ -417,7 +374,29 @@ document.addEventListener("DOMContentLoaded", () => {
       t = setTimeout(() => filterRows(v), 120);
     });
   }
+    // Filtres agence
+  const agBar = document.getElementById("agenceFilters");
+  if (agBar) {
+    agBar.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-agence]");
+      if (!btn) return;
+      // style actif
+      agBar.querySelectorAll("button").forEach(b=>{
+        b.classList.remove("btn-primary");
+        b.classList.add("btn-outline-secondary");
+      });
+      btn.classList.remove("btn-outline-secondary");
+      btn.classList.add("btn-primary");
+
+      CURRENT_AGENCE = btn.dataset.agence || "all";
+      const q = document.getElementById("searchInput")?.value || "";
+      filterRows(q);
+    });
+  }
+
 });
+
+/* ===== Suppression via croix (sélecteur délégué de secours) ===== */
 document.addEventListener('click', async (e) => {
   const x = e.target.closest('.assign-chip .x');
   if (!x) return;
@@ -452,8 +431,7 @@ document.addEventListener('click', async (e) => {
     cell.classList.remove('has-chip');
     toast('Affectation retirée');
 
-    // week-end -> OFF s'il ne reste plus de pastille
-    if (isWeekendISO(dateIso) && !cell.querySelector('.assign-chip')) {
+    if (typeof isWeekendISO === "function" && isWeekendISO(dateIso) && !cell.querySelector('.assign-chip')) {
       const off = document.createElement('div');
       off.className = 'cell-off';
       off.dataset.emp  = empId;
@@ -469,4 +447,3 @@ document.addEventListener('click', async (e) => {
     chip.setAttribute('draggable', 'true');
   }
 });
-

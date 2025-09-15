@@ -51,13 +51,15 @@ SELECT
   ur.id AS resp_id,
   CONCAT(COALESCE(ur.prenom,''), ' ', COALESCE(ur.nom,'')) AS resp_nom,
 
+  /* Équipe du jour (hors chefs) : employés + intérims + autres + dépôt */
   GROUP_CONCAT(DISTINCT
-    CASE WHEN u_all.fonction IN ('employe','interim')
+    CASE WHEN u_all.fonction IN ('employe','interim','autre','depot')
          THEN CONCAT(u_all.prenom, ' ', u_all.nom)
          ELSE NULL END
     ORDER BY u_all.nom, u_all.prenom SEPARATOR ', '
   ) AS equipe_du_jour,
 
+  /* Autres chefs (que le responsable) */
   GROUP_CONCAT(DISTINCT
     CASE WHEN u_chef.id IS NOT NULL AND u_chef.id <> c.responsable_id
          THEN CONCAT(u_chef.prenom, ' ', u_chef.nom)
@@ -68,23 +70,23 @@ SELECT
   GROUP_CONCAT(DISTINCT u_chef.id) AS chef_ids_all,
 
   /* ===== Compteurs ===== */
-  /* employés + intérim affectés aujourd'hui (distinct) */
+  /* Employés + intérims + autres + dépôt affectés aujourd'hui (distinct) */
   COUNT(DISTINCT CASE
-      WHEN u_all.id IS NOT NULL AND u_all.fonction IN ('employe','interim')
+      WHEN u_all.id IS NOT NULL AND u_all.fonction IN ('employe','interim','autre','depot')
       THEN u_all.id END
   ) AS nb_ouvriers_today,
 
-  /* tous les chefs : responsable (si présent) + autres chefs distincts */
+  /* Tous les chefs : responsable (si présent) + autres chefs distincts */
   (CASE WHEN ur.id IS NULL THEN 0 ELSE 1 END)
   + COUNT(DISTINCT CASE
       WHEN u_chef.id IS NOT NULL AND u_chef.id <> c.responsable_id
       THEN u_chef.id END
     ) AS nb_chefs_total,
 
-  /* total demandé pour l'affichage à côté du nom */
+  /* total pour l’affichage à côté du nom */
   (
     COUNT(DISTINCT CASE
-      WHEN u_all.id IS NOT NULL AND u_all.fonction IN ('employe','interim')
+      WHEN u_all.id IS NOT NULL AND u_all.fonction IN ('employe','interim','autre','depot')
       THEN u_all.id END
     )
     +
@@ -118,6 +120,7 @@ WHERE c.entreprise_id = :eid6
 GROUP BY c.id
 ORDER BY c.nom
 ";
+
 
 
 $st = $pdo->prepare($sql);
