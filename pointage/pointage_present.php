@@ -1,126 +1,136 @@
 <?php
 // /pointage/pointage_present.php
 declare(strict_types=1);
-
-ini_set('display_errors', '1');
-ini_set('display_startup_errors', '1');
-error_reporting(E_ALL);
-
+ini_set('display_errors','1'); ini_set('display_startup_errors','1'); error_reporting(E_ALL);
 require_once __DIR__ . '/../config/init.php';
 header('Content-Type: application/json; charset=utf-8');
 
 try {
-  // --- Sécurité requête & session
+  // --- Sécurité ---
   if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST' || !isset($_SESSION['utilisateurs'])) {
     http_response_code(403);
-    echo json_encode(['success' => false, 'message' => 'Accès refusé'], JSON_UNESCAPED_UNICODE);
+    echo json_encode(['success'=>false,'message'=>'Accès refusé']);
     exit;
   }
 
-  $user         = $_SESSION['utilisateurs'];
-  $entrepriseId = (int)($user['entreprise_id'] ?? 0);
-  $role         = (string)($user['fonction'] ?? '');
-  $uidParam     = (int)($_POST['utilisateur_id'] ?? 0);
-  $date         = (string)($_POST['date'] ?? '');
-  $hours        = (float)($_POST['hours'] ?? 0);
-  $chantierId   = isset($_POST['chantier_id']) && $_POST['chantier_id'] !== '' ? (int)$_POST['chantier_id'] : null;
+  $u = $_SESSION['utilisateurs'];
+  $entrepriseId = (int)($u['entreprise_id'] ?? 0);
+  $role         = (string)($u['fonction'] ?? '');
+  $selfId       = (int)($u['id'] ?? 0);
 
-  // --- Seuls les admins peuvent pointer pour quelqu’un d’autre
-  $uid = ($role === 'administrateur' && $uidParam > 0) ? $uidParam : (int)($user['id'] ?? 0);
+  // --- Params ---
+  $uidParam   = (int)($_POST['utilisateur_id'] ?? 0);
+  $date       = (string)($_POST['date'] ?? '');
+  $hoursStr   = (string)($_POST['hours'] ?? '0');
+  $chantierId = isset($_POST['chantier_id']) ? (int)$_POST['chantier_id'] : null;
 
-  // --- Validations de base
-  if ($entrepriseId <= 0 || $uid <= 0 || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+  $uid = $uidParam > 0 ? $uidParam : $selfId;
+
+  // --- Validations ---
+  if ($entrepriseId<=0 || $uid<=0 || !preg_match('/^\d{4}-\d{2}-\d{2}$/',$date)) {
     http_response_code(400);
-    echo json_encode(['success' => false, 'message' => 'Paramètres invalides'], JSON_UNESCAPED_UNICODE);
+    echo json_encode(['success'=>false,'message'=>'Paramètres invalides']);
     exit;
   }
 
-  // Heures (0 accepté pour décocher)
-  if ($hours < 0 || $hours > 24) {
-    http_response_code(400);
-    echo json_encode(['success' => false, 'message' => 'Bornes heures invalides'], JSON_UNESCAPED_UNICODE);
-    exit;
-  }
-  $hours = round($hours, 2); // 8.25, etc.
+// --- Autorisations ---
+if ($role !== 'administrateur') {
+  if ($role === 'chef') {
+    // 1) Chef & salarié partagent au moins un chantier (table utilisateur_chantiers) ?
+    $hasCommon = $pdo->prepare("
+      SELECT 1
+      FROM utilisateur_chantiers ucChef
+      JOIN utilisateur_chantiers ucEmp ON ucEmp.chantier_id = ucChef.chantier_id
+      WHERE ucChef.utilisateur_id = :chef AND ucEmp.utilisateur_id = :emp
+      LIMIT 1
+    ");
+    $hasCommon->execute([':chef'=>$selfId, ':emp'=>$uid]);
 
-  // (Option) si chantierId fourni, vérifier qu’il appartient bien à l’entreprise
-  if ($chantierId !== null) {
-    $stChk = $pdo->prepare("SELECT 1 FROM chantiers WHERE id = ? AND entreprise_id = ? LIMIT 1");
-    $stChk->execute([$chantierId, $entrepriseId]);
-    if (!$stChk->fetchColumn()) {
-      http_response_code(404);
-      echo json_encode(['success' => false, 'message' => 'Chantier introuvable'], JSON_UNESCAPED_UNICODE);
+    if (!$hasCommon->fetchColumn()) {
+      // 2) Sinon : s'il existe un planning pour le salarié ce jour-là,
+      //    autoriser si le chef est aussi affecté à ce chantier (peu importe la date)
+      $plannedEmp = $pdo->prepare("
+        SELECT pa.chantier_id
+        FROM planning_affectations pa
+        JOIN chantiers c ON c.id = pa.chantier_id AND c.entreprise_id = :eid
+        WHERE pa.utilisateur_id = :emp AND pa.date_jour = :d
+      ");
+      $plannedEmp->execute([':eid'=>$entrepriseId, ':emp'=>$uid, ':d'=>$date]);
+      $plannedList = $plannedEmp->fetchAll(PDO::FETCH_COLUMN);
+
+      if ($plannedList && count($plannedList) > 0) {
+        $chefHasThatDay = $pdo->prepare("
+          SELECT 1
+          FROM utilisateur_chantiers uc
+          WHERE uc.utilisateur_id = :chef
+            AND uc.chantier_id IN (" . implode(',', array_map('intval',$plannedList)) . ")
+          LIMIT 1
+        ");
+        $chefHasThatDay->execute([':chef'=>$selfId]);
+
+        if (!$chefHasThatDay->fetchColumn()) {
+          http_response_code(403);
+          echo json_encode(['success'=>false,'message'=>'Salarié hors équipe']);
+          exit;
+        }
+      } else {
+        http_response_code(403);
+        echo json_encode(['success'=>false,'message'=>'Salarié hors équipe']);
+        exit;
+      }
+    }
+  } else {
+    // employé / dépôt : uniquement eux-mêmes
+    if ($uid !== $selfId) {
+      http_response_code(403);
+      echo json_encode(['success'=>false,'message'=>'Action non autorisée']);
       exit;
     }
   }
+}
 
-  // --- Table cible
-  $pdo->exec("
-    CREATE TABLE IF NOT EXISTS pointages_jour (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      entreprise_id INT NOT NULL,
-      utilisateur_id INT NOT NULL,
-      date_jour DATE NOT NULL,
-      chantier_id INT NULL,
-      heures DECIMAL(5,2) NOT NULL DEFAULT 0,
-      updated_at DATETIME NULL,
-      UNIQUE KEY uq (entreprise_id, utilisateur_id, date_jour),
-      KEY idx_ent_date (entreprise_id, date_jour)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-  ");
 
-  // --- Si hours == 0 → suppression de la présence (décocher)
-  if ($hours == 0.0) {
-    $del = $pdo->prepare("
-      DELETE FROM pointages_jour
-      WHERE entreprise_id = :e AND utilisateur_id = :u AND date_jour = :d
-    ");
-    $del->execute([':e' => $entrepriseId, ':u' => $uid, ':d' => $date]);
+  // --- Normaliser heures (0..8.25 par pas de 0.25) ---
+  $h = (float)str_replace(',', '.', $hoursStr);
+  if ($h < 0) $h = 0.0;
+  if ($h > 8.25) $h = 8.25;
+  if ($h > 0) $h = round($h / 0.25) * 0.25;
 
-    echo json_encode(['success' => true, 'hours' => 0, 'deleted' => true], JSON_UNESCAPED_UNICODE);
+  // --- 0h => suppression ---
+  if ($h === 0.0) {
+    $pdo->prepare("DELETE FROM pointages_jour WHERE entreprise_id=? AND utilisateur_id=? AND date_jour=?")
+        ->execute([$entrepriseId, $uid, $date]);
+    echo json_encode(['success'=>true,'removed'=>true,'hours'=>0.0]);
     exit;
   }
 
-  // --- Si heures > 0 → enlever une éventuelle absence ce jour-là
+  // --- UPSERT présence (placeholders DISTINCTS) ---
   $stmt = $pdo->prepare("
-    DELETE FROM pointages_absences
-    WHERE entreprise_id = ? AND utilisateur_id = ? AND date_jour = ?
-  ");
-  $stmt->execute([$entrepriseId, $uid, $date]);
-
-  // --- UPSERT présence
-  // NOTE: VALUES() est déprécié sur MySQL ≥ 8.0.20.
-  // Si besoin, je te fournis la variante compatible (`AS new`).
-  $up = $pdo->prepare("
-    INSERT INTO pointages_jour (entreprise_id, utilisateur_id, date_jour, chantier_id, heures, updated_at)
-    VALUES (:e, :u, :d, :c, :h, NOW())
+    INSERT INTO pointages_jour
+      (entreprise_id, utilisateur_id, date_jour, chantier_id, heures, updated_at)
+    VALUES
+      (:e, :u, :d, :c_ins, :h_ins, NOW())
     ON DUPLICATE KEY UPDATE
-      chantier_id = VALUES(chantier_id),
-      heures      = VALUES(heures),
+      heures      = :h_upd,
+      chantier_id = COALESCE(:c_upd, chantier_id),
       updated_at  = NOW()
   ");
+  $cVal = $chantierId ?: null; // NULL si non fourni
+  $stmt->execute([
+    ':e'     => $entrepriseId,
+    ':u'     => $uid,
+    ':d'     => $date,
+    ':c_ins' => $cVal,
+    ':h_ins' => $h,
+    ':h_upd' => $h,
+    ':c_upd' => $cVal,
+  ]);
 
-  $up->bindValue(':e', $entrepriseId, PDO::PARAM_INT);
-  $up->bindValue(':u', $uid,          PDO::PARAM_INT);
-  $up->bindValue(':d', $date,         PDO::PARAM_STR);
-  if ($chantierId === null) {
-    $up->bindValue(':c', null, PDO::PARAM_NULL);
-  } else {
-    $up->bindValue(':c', $chantierId, PDO::PARAM_INT);
-  }
-  // DECIMAL → bind en string
-  $up->bindValue(':h', number_format($hours, 2, '.', ''), PDO::PARAM_STR);
-
-  $up->execute();
-
-  echo json_encode([
-    'success'     => true,
-    'hours'       => (float)$hours,
-    'chantier_id' => $chantierId
-  ], JSON_UNESCAPED_UNICODE);
+  echo json_encode(['success'=>true,'hours'=>$h]);
+  exit;
 
 } catch (Throwable $e) {
-  error_log(basename(__FILE__) . ': ' . $e->getMessage());
   http_response_code(500);
-  echo json_encode(['success' => false, 'message' => 'Erreur serveur'], JSON_UNESCAPED_UNICODE);
+  echo json_encode(['success'=>false,'message'=>'PHP: '.$e->getMessage()]);
+  exit;
 }

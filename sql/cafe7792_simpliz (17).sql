@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Hôte : 127.0.0.1
--- Généré le : sam. 13 sep. 2025 à 21:45
+-- Généré le : mar. 16 sep. 2025 à 22:46
 -- Version du serveur : 10.4.32-MariaDB
 -- Version de PHP : 8.0.30
 
@@ -155,41 +155,69 @@ CREATE TABLE `planning_affectations` (
   `id` int(10) UNSIGNED NOT NULL,
   `entreprise_id` int(10) UNSIGNED NOT NULL,
   `utilisateur_id` int(11) NOT NULL,
-  `chantier_id` int(11) NOT NULL,
+  `chantier_id` int(11) DEFAULT NULL,
+  `depot_id` int(11) DEFAULT NULL,
   `date_jour` date NOT NULL,
+  `type` enum('chantier','depot') NOT NULL DEFAULT 'chantier',
   `role` enum('chef','employe') NOT NULL DEFAULT 'employe',
   `heures` decimal(5,2) DEFAULT 0.00,
   `commentaire` varchar(255) DEFAULT NULL,
-  `created_at` timestamp NOT NULL DEFAULT current_timestamp()
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `is_active` tinyint(1) NOT NULL DEFAULT 0
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
 -- Déchargement des données de la table `planning_affectations`
 --
 
-INSERT INTO `planning_affectations` (`id`, `entreprise_id`, `utilisateur_id`, `chantier_id`, `date_jour`, `role`, `heures`, `commentaire`, `created_at`) VALUES
-(46, 1, 16, 1, '2025-09-01', 'employe', 0.00, NULL, '2025-09-04 17:26:30'),
-(47, 1, 16, 1, '2025-09-02', 'employe', 0.00, NULL, '2025-09-04 17:26:30'),
-(48, 1, 16, 1, '2025-09-03', 'employe', 0.00, NULL, '2025-09-04 17:26:31'),
-(53, 1, 16, 1, '2025-09-04', 'employe', 0.00, NULL, '2025-09-04 17:27:02'),
-(111, 1, 16, 1, '2025-09-05', 'employe', 0.00, NULL, '2025-09-05 19:41:24'),
-(131, 1, 4, 1, '2025-09-01', 'employe', 0.00, NULL, '2025-09-05 20:28:46'),
-(138, 1, 5, 2, '2025-09-01', 'employe', 0.00, NULL, '2025-09-05 20:29:52'),
-(172, 1, 5, 2, '2025-09-08', 'employe', 0.00, NULL, '2025-09-08 20:05:12'),
-(173, 1, 5, 2, '2025-09-09', 'employe', 0.00, NULL, '2025-09-08 20:05:12'),
-(174, 1, 5, 2, '2025-09-10', 'employe', 0.00, NULL, '2025-09-08 20:05:12'),
-(175, 1, 5, 2, '2025-09-11', 'employe', 0.00, NULL, '2025-09-08 20:05:12'),
-(176, 1, 5, 2, '2025-09-12', 'employe', 0.00, NULL, '2025-09-08 20:05:13'),
-(294, 1, 4, 1, '2025-09-08', 'employe', 0.00, NULL, '2025-09-13 13:51:19'),
-(295, 1, 4, 1, '2025-09-09', 'employe', 0.00, NULL, '2025-09-13 13:51:19'),
-(296, 1, 4, 1, '2025-09-10', 'employe', 0.00, NULL, '2025-09-13 13:51:19'),
-(297, 1, 4, 1, '2025-09-11', 'employe', 0.00, NULL, '2025-09-13 13:51:19'),
-(298, 1, 4, 1, '2025-09-12', 'employe', 0.00, NULL, '2025-09-13 13:51:19'),
-(303, 1, 16, 2, '2025-09-08', 'employe', 0.00, NULL, '2025-09-13 13:51:52'),
-(304, 1, 16, 2, '2025-09-09', 'employe', 0.00, NULL, '2025-09-13 13:51:52'),
-(305, 1, 16, 2, '2025-09-10', 'employe', 0.00, NULL, '2025-09-13 13:51:52'),
-(306, 1, 16, 2, '2025-09-11', 'employe', 0.00, NULL, '2025-09-13 13:51:53'),
-(307, 1, 16, 2, '2025-09-12', 'employe', 0.00, NULL, '2025-09-13 13:51:53');
+INSERT INTO `planning_affectations` (`id`, `entreprise_id`, `utilisateur_id`, `chantier_id`, `depot_id`, `date_jour`, `type`, `role`, `heures`, `commentaire`, `created_at`, `is_active`) VALUES
+(46, 1, 16, 1, NULL, '2025-09-01', 'chantier', 'employe', 0.00, NULL, '2025-09-04 17:26:30', 0),
+(47, 1, 16, 1, NULL, '2025-09-02', 'chantier', 'employe', 0.00, NULL, '2025-09-04 17:26:30', 0),
+(48, 1, 16, 1, NULL, '2025-09-03', 'chantier', 'employe', 0.00, NULL, '2025-09-04 17:26:31', 0),
+(53, 1, 16, 1, NULL, '2025-09-04', 'chantier', 'employe', 0.00, NULL, '2025-09-04 17:27:02', 0),
+(111, 1, 16, 1, NULL, '2025-09-05', 'chantier', 'employe', 0.00, NULL, '2025-09-05 19:41:24', 0),
+(131, 1, 4, 1, NULL, '2025-09-01', 'chantier', 'employe', 0.00, NULL, '2025-09-05 20:28:46', 0),
+(138, 1, 5, 2, NULL, '2025-09-01', 'chantier', 'employe', 0.00, NULL, '2025-09-05 20:29:52', 0),
+(173, 1, 5, 2, NULL, '2025-09-09', 'chantier', 'employe', 0.00, NULL, '2025-09-08 20:05:12', 1),
+(174, 1, 5, 2, NULL, '2025-09-10', 'chantier', 'employe', 0.00, NULL, '2025-09-08 20:05:12', 1),
+(175, 1, 5, 2, NULL, '2025-09-11', 'chantier', 'employe', 0.00, NULL, '2025-09-08 20:05:12', 1),
+(294, 1, 4, 1, NULL, '2025-09-08', 'chantier', 'employe', 0.00, NULL, '2025-09-13 13:51:19', 0),
+(296, 1, 4, 1, NULL, '2025-09-10', 'chantier', 'employe', 0.00, NULL, '2025-09-13 13:51:19', 0),
+(297, 1, 4, 1, NULL, '2025-09-11', 'chantier', 'employe', 0.00, NULL, '2025-09-13 13:51:19', 0),
+(298, 1, 4, 1, NULL, '2025-09-12', 'chantier', 'employe', 0.00, NULL, '2025-09-13 13:51:19', 1),
+(303, 1, 16, 2, NULL, '2025-09-08', 'chantier', 'employe', 0.00, NULL, '2025-09-13 13:51:52', 1),
+(304, 1, 16, 2, NULL, '2025-09-09', 'chantier', 'employe', 0.00, NULL, '2025-09-13 13:51:52', 0),
+(305, 1, 16, 2, NULL, '2025-09-10', 'chantier', 'employe', 0.00, NULL, '2025-09-13 13:51:52', 1),
+(306, 1, 16, 2, NULL, '2025-09-11', 'chantier', 'employe', 0.00, NULL, '2025-09-13 13:51:53', 1),
+(307, 1, 16, 2, NULL, '2025-09-12', 'chantier', 'employe', 0.00, NULL, '2025-09-13 13:51:53', 1),
+(394, 1, 4, 1, NULL, '2025-09-15', 'chantier', 'employe', 0.00, NULL, '2025-09-14 11:54:42', 1),
+(395, 1, 4, 1, NULL, '2025-09-16', 'chantier', 'employe', 0.00, NULL, '2025-09-14 11:54:43', 0),
+(396, 1, 4, 1, NULL, '2025-09-17', 'chantier', 'employe', 0.00, NULL, '2025-09-14 11:54:43', 0),
+(397, 1, 4, 1, NULL, '2025-09-18', 'chantier', 'employe', 0.00, NULL, '2025-09-14 11:54:43', 0),
+(398, 1, 4, 1, NULL, '2025-09-19', 'chantier', 'employe', 0.00, NULL, '2025-09-14 11:54:43', 0),
+(451, 1, 4, 1, NULL, '2025-09-09', 'chantier', 'employe', 0.00, NULL, '2025-09-14 14:24:07', 0),
+(482, 1, 5, 2, NULL, '2025-09-12', 'chantier', 'employe', 0.00, NULL, '2025-09-14 15:17:48', 1),
+(490, 1, 5, 2, NULL, '2025-09-08', 'chantier', 'employe', 0.00, NULL, '2025-09-14 15:34:50', 1),
+(505, 1, 5, 2, NULL, '2025-09-15', 'chantier', 'employe', 0.00, NULL, '2025-09-16 19:27:26', 1),
+(506, 1, 5, 2, NULL, '2025-09-16', 'chantier', 'employe', 0.00, NULL, '2025-09-16 19:27:26', 1),
+(507, 1, 5, 2, NULL, '2025-09-17', 'chantier', 'employe', 0.00, NULL, '2025-09-16 19:27:26', 1),
+(508, 1, 5, 2, NULL, '2025-09-18', 'chantier', 'employe', 0.00, NULL, '2025-09-16 19:27:27', 1),
+(509, 1, 5, 2, NULL, '2025-09-19', 'chantier', 'employe', 0.00, NULL, '2025-09-16 19:27:27', 1),
+(511, 1, 16, 1, NULL, '2025-09-15', 'chantier', 'employe', 0.00, NULL, '2025-09-16 19:27:32', 1),
+(512, 1, 16, 1, NULL, '2025-09-16', 'chantier', 'employe', 0.00, NULL, '2025-09-16 19:27:32', 1),
+(513, 1, 16, 1, NULL, '2025-09-17', 'chantier', 'employe', 0.00, NULL, '2025-09-16 19:27:32', 1),
+(514, 1, 16, 1, NULL, '2025-09-18', 'chantier', 'employe', 0.00, NULL, '2025-09-16 19:27:33', 1),
+(515, 1, 16, 1, NULL, '2025-09-19', 'chantier', 'employe', 0.00, NULL, '2025-09-16 19:27:33', 1),
+(516, 1, 6, NULL, NULL, '2025-09-15', 'depot', 'employe', 0.00, NULL, '2025-09-16 19:27:36', 1),
+(517, 1, 6, NULL, NULL, '2025-09-16', 'depot', 'employe', 0.00, NULL, '2025-09-16 19:27:36', 1),
+(518, 1, 6, NULL, NULL, '2025-09-17', 'depot', 'employe', 0.00, NULL, '2025-09-16 19:27:36', 1),
+(519, 1, 6, NULL, NULL, '2025-09-18', 'depot', 'employe', 0.00, NULL, '2025-09-16 19:27:36', 1),
+(520, 1, 6, NULL, NULL, '2025-09-19', 'depot', 'employe', 0.00, NULL, '2025-09-16 19:27:37', 1),
+(521, 1, 8, NULL, NULL, '2025-09-19', 'depot', 'employe', 0.00, NULL, '2025-09-16 19:27:37', 1),
+(522, 1, 8, NULL, NULL, '2025-09-18', 'depot', 'employe', 0.00, NULL, '2025-09-16 19:27:37', 1),
+(523, 1, 8, NULL, NULL, '2025-09-17', 'depot', 'employe', 0.00, NULL, '2025-09-16 19:27:37', 1),
+(524, 1, 8, NULL, NULL, '2025-09-16', 'depot', 'employe', 0.00, NULL, '2025-09-16 19:27:38', 1),
+(525, 1, 8, NULL, NULL, '2025-09-15', 'depot', 'employe', 0.00, NULL, '2025-09-16 19:27:38', 1);
 
 -- --------------------------------------------------------
 
@@ -203,9 +231,9 @@ CREATE TABLE `pointages_absences` (
   `utilisateur_id` int(11) NOT NULL,
   `date_jour` date NOT NULL,
   `motif` enum('conges','maladie','injustifie') NOT NULL,
+  `heures` decimal(5,2) DEFAULT NULL,
   `created_at` datetime NOT NULL DEFAULT current_timestamp(),
-  `updated_at` datetime DEFAULT NULL,
-  `heures` decimal(5,2) DEFAULT NULL
+  `updated_at` datetime DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- --------------------------------------------------------
@@ -244,8 +272,8 @@ CREATE TABLE `pointages_conduite` (
   `entreprise_id` int(11) NOT NULL,
   `utilisateur_id` int(11) NOT NULL,
   `chantier_id` int(11) NOT NULL,
-  `type` enum('A','R') NOT NULL,
   `date_pointage` date NOT NULL,
+  `type` enum('A','R') NOT NULL,
   `created_at` datetime NOT NULL DEFAULT current_timestamp(),
   `updated_at` datetime DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
@@ -266,13 +294,17 @@ CREATE TABLE `pointages_jour` (
   `updated_at` datetime DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+-- --------------------------------------------------------
+
 --
--- Déchargement des données de la table `pointages_jour`
+-- Structure de la table `pointage_camions_cfg`
 --
 
-INSERT INTO `pointages_jour` (`id`, `entreprise_id`, `utilisateur_id`, `date_jour`, `chantier_id`, `heures`, `updated_at`) VALUES
-(80, 1, 5, '2025-09-13', NULL, 8.25, NULL),
-(81, 1, 16, '2025-09-13', NULL, 8.25, NULL);
+CREATE TABLE `pointage_camions_cfg` (
+  `entreprise_id` int(11) NOT NULL,
+  `chantier_id` int(11) NOT NULL,
+  `nb_camions` int(11) NOT NULL DEFAULT 1
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- --------------------------------------------------------
 
@@ -553,8 +585,8 @@ ALTER TABLE `planning_affectations`
 --
 ALTER TABLE `pointages_absences`
   ADD PRIMARY KEY (`id`),
-  ADD UNIQUE KEY `uq` (`entreprise_id`,`utilisateur_id`,`date_jour`),
-  ADD UNIQUE KEY `uniq_abs` (`entreprise_id`,`utilisateur_id`,`date_jour`);
+  ADD UNIQUE KEY `uq_abs` (`entreprise_id`,`utilisateur_id`,`date_jour`),
+  ADD KEY `idx_ent_date` (`entreprise_id`,`date_jour`);
 
 --
 -- Index pour la table `pointages_camions`
@@ -568,16 +600,22 @@ ALTER TABLE `pointages_camions`
 --
 ALTER TABLE `pointages_conduite`
   ADD PRIMARY KEY (`id`),
-  ADD UNIQUE KEY `uniq_conduite_jour` (`entreprise_id`,`utilisateur_id`,`chantier_id`,`type`,`date_pointage`),
-  ADD UNIQUE KEY `uniq_conduite` (`entreprise_id`,`utilisateur_id`,`date_pointage`,`type`);
+  ADD UNIQUE KEY `uq_conduite` (`entreprise_id`,`utilisateur_id`,`chantier_id`,`date_pointage`,`type`),
+  ADD KEY `idx_ent_date` (`entreprise_id`,`date_pointage`);
 
 --
 -- Index pour la table `pointages_jour`
 --
 ALTER TABLE `pointages_jour`
   ADD PRIMARY KEY (`id`),
-  ADD UNIQUE KEY `uq` (`entreprise_id`,`utilisateur_id`,`date_jour`),
-  ADD UNIQUE KEY `uniq_jour` (`entreprise_id`,`utilisateur_id`,`date_jour`);
+  ADD UNIQUE KEY `uq_presence` (`entreprise_id`,`utilisateur_id`,`date_jour`),
+  ADD KEY `idx_ent_date` (`entreprise_id`,`date_jour`);
+
+--
+-- Index pour la table `pointage_camions_cfg`
+--
+ALTER TABLE `pointage_camions_cfg`
+  ADD PRIMARY KEY (`entreprise_id`,`chantier_id`);
 
 --
 -- Index pour la table `stock`
@@ -689,13 +727,13 @@ ALTER TABLE `notifications`
 -- AUTO_INCREMENT pour la table `planning_affectations`
 --
 ALTER TABLE `planning_affectations`
-  MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=355;
+  MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=526;
 
 --
 -- AUTO_INCREMENT pour la table `pointages_absences`
 --
 ALTER TABLE `pointages_absences`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=56;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=5;
 
 --
 -- AUTO_INCREMENT pour la table `pointages_camions`
@@ -707,13 +745,13 @@ ALTER TABLE `pointages_camions`
 -- AUTO_INCREMENT pour la table `pointages_conduite`
 --
 ALTER TABLE `pointages_conduite`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=111;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=10;
 
 --
 -- AUTO_INCREMENT pour la table `pointages_jour`
 --
 ALTER TABLE `pointages_jour`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=95;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=17;
 
 --
 -- AUTO_INCREMENT pour la table `stock`

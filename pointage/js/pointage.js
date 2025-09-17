@@ -76,6 +76,28 @@ function formatHM(dec){
 }
 const FULL_DAY = 8.25; // 8h15
 
+function resolveCellChantierId(td){
+  // 1) sélection explicite sur la cellule ?
+  const sel = td?.dataset?.selectedChantierId ? parseInt(td.dataset.selectedChantierId,10) : null;
+  if (Number.isFinite(sel) && sel > 0) return sel;
+
+  // 2) chantier filtré actif ?
+  const bar = document.getElementById('chantierFilters');
+  const btn = bar?.querySelector('button.active[data-chantier]');
+  const cid = btn ? parseInt(btn.dataset.chantier,10) : 0;
+  if (cid > 0) return cid;
+
+  // 3) un seul chantier planifié dans la cellule ?
+  const planned = (td?.dataset?.plannedChantiersDay || '').split(',').filter(Boolean);
+  if (planned.length === 1) {
+    const only = parseInt(planned[0],10);
+    if (Number.isFinite(only) && only > 0) return only;
+  }
+
+  return null; // non résolu
+}
+
+
 
   /* ==============================
    *   ENTÊTE / JOURS VISIBLES
@@ -119,6 +141,13 @@ const FULL_DAY = 8.25; // 8h15
    * ============================== */
   let activeChantier = (() => {
     const btn = filtersBar?.querySelector('button.active[data-chantier],button.active[data-chantier-id]');
+    const appRole = (app.dataset.role || '').toLowerCase();
+if (appRole !== 'administrateur') {
+  const title = document.getElementById('pageTitle');
+  if (title && btn.textContent) {
+    title.textContent = 'Pointage ' + btn.textContent.trim();
+  }
+}
     if (btn?.dataset.chantier)   return btn.dataset.chantier;
     if (btn?.dataset.chantierId) return btn.dataset.chantierId;
     return 'all';
@@ -273,175 +302,181 @@ const FULL_DAY = 8.25; // 8h15
   })();
 
   /* ==============================
-   *   PRÉSENCE (toggle 8h15)
-   * ============================== */
-  table?.addEventListener('click', async (e) => {
-    const btn = e.target.closest('.present-btn');
-    if (!btn) return;
+ *   PRÉSENCE (toggle 8h15)
+ * ============================== */
+table?.addEventListener('click', async (e) => {
+  const btn = e.target.closest('.present-btn');
+  if (!btn) return;
 
-    const td      = btn.closest('td');
-    const tr      = btn.closest('tr');
-    const userId  = tr?.dataset.userId;
-    const dateIso = td?.dataset.date;
-    if (!userId || !dateIso) return;
+  const td      = btn.closest('td');
+  const tr      = btn.closest('tr');
+  const userId  = tr?.dataset.userId;
+  const dateIso = td?.dataset.date;
+  if (!userId || !dateIso) return;
 
-    const hours    = btn.dataset.hours || '8.25';
-    const isActive = btn.classList.contains('btn-success');
+  const hours    = btn.dataset.hours || '8.25';
+  const isActive = btn.classList.contains('btn-success');
+  const chantierId = resolveCellChantierId(td);
 
-    try {
-      if (isActive) {
-        await postForm('/pointage/pointage_present.php', { utilisateur_id: userId, date: dateIso, hours: '0' });
-        btn.classList.remove('btn-success'); btn.classList.add('btn-outline-success');
-        btn.textContent = 'Présent 8h15';
-        return;
-      }
+  try {
+    if (isActive) {
+      // -> OFF
+      const payload = { utilisateur_id: userId, date: dateIso, hours: '0' };
+      if (chantierId) payload.chantier_id = chantierId;
+      await postForm('/pointage/pointage_present.php', payload);
 
-      // activer Présent → retirer absence éventuelle
-      try { await postForm('/pointage/pointage_absence.php', { utilisateur_id: userId, date: dateIso, remove: '1' }); } catch {}
-
-      // reset UI absence
-      const absBtn = td.querySelector('.absence-btn');
-      if (absBtn) { absBtn.classList.remove('btn-danger'); absBtn.classList.add('btn-outline-danger'); absBtn.textContent = 'Abs.'; }
-      td.querySelector('.absence-pill')?.remove();
-      td.querySelectorAll('.conduite-btn').forEach(b => b.disabled = false);
-
-      await postForm('/pointage/pointage_present.php', { utilisateur_id: userId, date: dateIso, hours });
-
-      btn.classList.remove('btn-outline-success'); btn.classList.add('btn-success');
+      btn.classList.remove('btn-success');
+      btn.classList.add('btn-outline-success');
       btn.textContent = 'Présent 8h15';
-    } catch (err) {
-      showError(err.message, err.debug);
+      return;
     }
-  });
+
+    // -> ON : retirer absence éventuelle
+    const del = { utilisateur_id: userId, date: dateIso, remove: '1' };
+    if (chantierId) del.chantier_id = chantierId;
+    try { await postForm('/pointage/pointage_absence.php', del); } catch {}
+
+    // reset UI absence
+    const absBtn = td.querySelector('.absence-btn');
+    if (absBtn) {
+      absBtn.classList.remove('btn-danger');
+      absBtn.classList.add('btn-outline-danger');
+      absBtn.textContent = 'Abs.';
+    }
+    td.querySelector('.absence-pill')?.remove();
+    td.querySelectorAll('.conduite-btn').forEach(b => b.disabled = false);
+
+    // poser présence
+    const payload = { utilisateur_id: userId, date: dateIso, hours };
+    if (chantierId) payload.chantier_id = chantierId;
+    await postForm('/pointage/pointage_present.php', payload);
+
+    btn.classList.remove('btn-outline-success');
+    btn.classList.add('btn-success');
+    btn.textContent = 'Présent 8h15';
+
+  } catch (err) {
+    showError(err.message, err.debug);
+  }
+});
+
 
   /* ==============================
-   *   ABSENCE (modal)
-   * ============================== */
-  table?.addEventListener('click', (e) => {
-    const trigger = e.target.closest('.absence-btn');
-    if (!trigger) return;
-    const td = trigger.closest('td');
-    const tr = trigger.closest('tr');
-    if (!td || !tr) return;
+ *   ABSENCE (modal)
+ * ============================== */
+table?.addEventListener('click', (e) => {
+  const trigger = e.target.closest('.absence-btn');
+  if (!trigger) return;
+  const td = trigger.closest('td');
+  const tr = trigger.closest('tr');
+  if (!td || !tr) return;
 
-    if (absenceModalEl) (absenceModalEl)._targetCell = td;
+  if (absenceModalEl) (absenceModalEl)._targetCell = td;
 
-    const uid = tr.dataset.userId || '';
-    const d   = td.dataset.date || '';
-    const fUser = document.getElementById('absUserId');
-    const fDate = document.getElementById('absDate');
-    const fHours= document.getElementById('absHours');
+  const uid = tr.dataset.userId || '';
+  const d   = td.dataset.date || '';
+  const fUser = document.getElementById('absUserId');
+  const fDate = document.getElementById('absDate');
+  const fHours= document.getElementById('absHours');
 
-    if (fUser)  fUser.value = uid;
-    if (fDate)  fDate.value = d;
-    if (absForm?.reason) absForm.reason.value = 'conges';
-    if (fHours) fHours.value = '8.25';
+  if (fUser)  fUser.value = uid;
+  if (fDate)  fDate.value = d;
+  if (absForm?.reason) absForm.reason.value = 'conges';
+  if (fHours) fHours.value = '8.25';
 
-    absenceModal?.show();
-  });
+  absenceModal?.show();
+});
 
-  absSaveBtn?.addEventListener('click', async () => {
-    if (!absenceModalEl?._targetCell) return;
-    const td      = absenceModalEl._targetCell;
-    const fUser   = document.getElementById('absUserId');
-    const fDate   = document.getElementById('absDate');
-    const fHours  = document.getElementById('absHours');
-    const userId  = fUser?.value || '';
-    const dateIso = fDate?.value  || '';
-    const reason  = absForm?.reason?.value || 'injustifie';
-    const hours   = parseFloat((fHours?.value || '0'));
+absSaveBtn?.addEventListener('click', async () => {
+  if (!absenceModalEl?._targetCell) return;
 
-    if (!userId || !dateIso) return;
-    if (!hours || hours < 0.25 || hours > 8.25) { showError('Saisis un nombre d’heures valide (0.25 à 8.25).'); return; }
+  const td      = absenceModalEl._targetCell;
+  const userId  = document.getElementById('absUserId')?.value || '';
+  const dateIso = document.getElementById('absDate')?.value  || '';
+  const hours   = parseFloat(document.getElementById('absHours')?.value || '0');
+  const reason  = absForm?.reason?.value || 'injustifie';
 
-    try {
-      await postForm('/pointage/pointage_absence.php', {
-        utilisateur_id: userId, date: dateIso, reason, hours: String(hours)
-      });
+  if (!userId || !dateIso) return;
+  if (!hours || hours < 0.25 || hours > 8.25) { showError('Saisis un nombre d’heures valide (0.25 à 8.25).'); return; }
 
-      const absBtn = td.querySelector('.absence-btn');
-if (absBtn) {
-  absBtn.classList.remove('btn-outline-danger');
-  absBtn.classList.add('btn-danger');
-  absBtn.textContent = 'Abs. ' + labelForReason(reason);
-}
+  const chantierId = resolveCellChantierId(td);
 
-// Pastille récap (inchangé)
-let pill = td.querySelector('.absence-pill');
-if (!pill) {
-  pill = document.createElement('button');
-  pill.type = 'button';
-  pill.className = 'btn btn-sm absence-pill ms-1';
-  const presentBtn = td.querySelector('.present-btn');
-  if (presentBtn) presentBtn.after(pill); else td.prepend(pill);
-}
-pill.className = 'btn btn-sm absence-pill ms-1 ' + (
-  reason === 'conges' ? 'btn-warning' : reason === 'maladie' ? 'btn-info' : 'btn-secondary'
-);
-pill.textContent = `${labelForReason(reason)} ${hours.toString().replace('.', ',')} h`;
+  try {
+    // 1) Enregistrer l'absence
+    const payloadAbs = { utilisateur_id: userId, date: dateIso, reason, hours: String(hours) };
+    if (chantierId) payloadAbs.chantier_id = chantierId;
+    await postForm('/pointage/pointage_absence.php', payloadAbs);
 
-// 👉 Calcul du complément de présence
-const presentBtn = td.querySelector('.present-btn');
-const remaining = Math.max(0, FULL_DAY - hours);
-
-// Appliquer la présence côté serveur et UI
-try {
-  await postForm('/pointage/pointage_present.php', {
-    utilisateur_id: userId,
-    date: dateIso,
-    hours: String(remaining) // 0 si journée entièrement absente
-  });
-
-  if (presentBtn) {
-    if (remaining > 0) {
-      presentBtn.classList.remove('btn-outline-success');
-      presentBtn.classList.add('btn-success');
-      presentBtn.dataset.hours = String(remaining);
-      presentBtn.textContent = 'Présent ' + formatHM(remaining);
-    } else {
-      // 0h de présent -> bouton retourné à l'état neutre par défaut
-      presentBtn.classList.remove('btn-success');
-      presentBtn.classList.add('btn-outline-success');
-      presentBtn.dataset.hours = String(FULL_DAY);
-      presentBtn.textContent = 'Présent ' + formatHM(FULL_DAY);
+    // 2) Mettre à jour le SEUL bouton rouge
+    const absBtn = td.querySelector('.absence-btn');
+    if (absBtn) {
+      absBtn.classList.remove('btn-outline-danger');
+      absBtn.classList.add('btn-danger');
+      absBtn.textContent = `${labelForReason(reason)} ${hours.toString().replace('.', ',')} h`;
     }
+    // on ne crée plus de pastille
+    td.querySelector('.absence-pill')?.remove();
+
+    // 3) Complément de présence
+    const remaining = Math.max(0, FULL_DAY - hours);
+    const presentBtn = td.querySelector('.present-btn');
+
+    const payloadPres = { utilisateur_id: userId, date: dateIso, hours: String(remaining) };
+    if (chantierId) payloadPres.chantier_id = chantierId;
+    await postForm('/pointage/pointage_present.php', payloadPres);
+
+    if (presentBtn) {
+      if (remaining > 0) {
+        presentBtn.classList.remove('btn-outline-success');
+        presentBtn.classList.add('btn-success');
+        presentBtn.dataset.hours = String(remaining);
+        presentBtn.textContent = 'Présent ' + formatHM(remaining);
+      } else {
+        presentBtn.classList.remove('btn-success');
+        presentBtn.classList.add('btn-outline-success');
+        presentBtn.dataset.hours = String(FULL_DAY);
+        presentBtn.textContent = 'Présent ' + formatHM(FULL_DAY);
+      }
+    }
+
+    // 4) Conduite désactivée si absence
+    td.querySelectorAll('.conduite-btn').forEach(b => b.disabled = true);
+
+    absenceModal?.hide();
+  } catch (err) {
+    showError(err.message, err.debug);
   }
-} catch(e){
-  // si la MAJ présence échoue, on ne casse pas l'absence déjà enregistrée
-  if (DEBUG) console.error('MAJ présence après absence KO', e);
-}
+});
 
-// Conduite désactivée si absence (inchangé)
-td.querySelectorAll('.conduite-btn').forEach(b => b.disabled = true);
 
-absenceModal?.hide();
-    } catch (err) {
-      showError(err.message, err.debug);
-    }
-  });
+// retirer une absence existante
+table?.addEventListener('click', async (e) => {
+  const btn = e.target.closest('.absence-btn');
+  if (!btn || !btn.classList.contains('btn-danger')) return;
 
-  // retirer une absence existante
-  table?.addEventListener('click', async (e) => {
-    const btn = e.target.closest('.absence-btn');
-    if (!btn || !btn.classList.contains('btn-danger')) return;
+  const td      = btn.closest('td');
+  const tr      = btn.closest('tr');
+  const userId  = tr?.dataset.userId;
+  const dateIso = td?.dataset.date;
+  if (!userId || !dateIso) return;
 
-    const td      = btn.closest('td');
-    const tr      = btn.closest('tr');
-    const userId  = tr?.dataset.userId;
-    const dateIso = td?.dataset.date;
-    if (!userId || !dateIso) return;
+  const chantierId = resolveCellChantierId(td);
 
-    try {
-      await postForm('/pointage/pointage_absence.php', { utilisateur_id: userId, date: dateIso, remove: '1' });
+  try {
+    const payloadDel = { utilisateur_id: userId, date: dateIso, remove: '1' };
+    if (chantierId) payloadDel.chantier_id = chantierId;
+    await postForm('/pointage/pointage_absence.php', payloadDel);
 
-      btn.classList.remove('btn-danger'); btn.classList.add('btn-outline-danger');
-      btn.textContent = 'Abs.';
-      td.querySelector('.absence-pill')?.remove();
-      td.querySelectorAll('.conduite-btn').forEach(b => b.disabled = false);
-    } catch (err) {
-      showError(err.message, err.debug);
-    }
-  });
+    btn.classList.remove('btn-danger');
+    btn.classList.add('btn-outline-danger');
+    btn.textContent = 'Abs.';   // libellé par défaut
+    td.querySelector('.absence-pill')?.remove();
+    td.querySelectorAll('.conduite-btn').forEach(b => b.disabled = false);
+  } catch (err) {
+    showError(err.message, err.debug);
+  }
+});
+
 
   /* ==============================
    *   CONDUITE A/R (capacité)
@@ -457,9 +492,12 @@ absenceModal?.hide();
     const type    = btn?.dataset.type; // 'A' | 'R'
     if (!userId || !dateIso || !type) return;
 
-    const planned     = (td.dataset.plannedChantiersDay || '').split(',').filter(Boolean);
-    const chantierId  = asIntOrNull(planned[0]);
-    if (!chantierId) { showError("Aucun chantier planifié ce jour."); return; }
+    const chantierId = resolveCellChantierId(td);
+if (!chantierId) {
+  showError("Ambiguïté chantier : sélectionne un chantier (bouton de filtre) ou définis-le sur la cellule.");
+  return;
+}
+
 
     const cap = getCap(chantierId, dateIso);
 

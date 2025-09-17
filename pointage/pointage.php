@@ -105,7 +105,8 @@ if ($pdo->query("SHOW TABLES LIKE 'planning_affectations'")->rowCount()) {
 /* ==============================
    Jours (Lun→Ven + Sam/Dim si planning)
 ============================== */
-function hasPlanningForDate(array $map, string $iso): bool {
+function hasPlanningForDate(array $map, string $iso): bool
+{
   foreach ($map as $byDate) {
     if (!empty($byDate[$iso])) return true;
   }
@@ -147,18 +148,23 @@ foreach ($stH->fetchAll(PDO::FETCH_ASSOC) as $r) {
 }
 
 /* ==============================
-   Absences
+   Absences (motif + heures)
 ============================== */
 $absMap = [];
 $stmt = $pdo->prepare("
-  SELECT utilisateur_id, date_jour, motif
+  SELECT utilisateur_id, date_jour, motif, heures
   FROM pointages_absences
   WHERE entreprise_id = :eid
     AND date_jour >= :d1 AND date_jour < :d2
 ");
 $stmt->execute([':eid' => $entrepriseId, ':d1' => $startIso, ':d2' => $endIso]);
 while ($r = $stmt->fetch(PDO::FETCH_ASSOC)) {
-  $absMap[(int)$r['utilisateur_id']][$r['date_jour']] = $r['motif'];
+  $uidR = (int)$r['utilisateur_id'];
+  $dj   = $r['date_jour'];
+  $absMap[$uidR][$dj] = [
+    'motif'  => $r['motif'],
+    'heures' => ($r['heures'] === null ? null : (float)$r['heures']),
+  ];
 }
 
 /* ==============================
@@ -196,31 +202,49 @@ function badgeRole($role)
 }
 ?>
 <div class="container my-4" id="pointageApp"
-     data-week-start="<?= htmlspecialchars($weekStart->format('Y-m-d')) ?>">
+  data-week-start="<?= htmlspecialchars($weekStart->format('Y-m-d')) ?>"
+  data-role="<?= htmlspecialchars(strtolower($role)) ?>">
   <div class="row align-items-center mb-3">
     <div class="col-12 col-md-4"><!-- vide --></div>
     <div class="col-12 col-md-4 text-center">
-      <h1 class="mb-0">Pointage</h1>
+      <?php
+      // si chef: forcer un chantier sélectionné par défaut
+      if ($role !== 'administrateur' && $currentChantierId === 0 && !empty($visibleChantiers)) {
+        $currentChantierId = (int)$visibleChantiers[0]['id'];
+      }
+      $currentChantierName = '';
+      foreach ($visibleChantiers as $ch) {
+        if ((int)$ch['id'] === (int)$currentChantierId) {
+          $currentChantierName = $ch['nom'];
+          break;
+        }
+      }
+      ?>
+      <h1 id="pageTitle" class="mb-0">
+        <?= ($role === 'administrateur') ? 'Pointage' : 'Pointage ' . htmlspecialchars($currentChantierName ?: '') ?>
+      </h1>
     </div>
     <div class="col-12 col-md-4 text-md-end text-muted">
       Semaine <?= $weekNum ?>
     </div>
   </div>
 
+
   <!-- Filtres agence(centré) -->
-  <?php if (!empty($agences)): ?>
-  <div class="d-flex justify-content-center mb-2">
-    <div id="agenceFilters" class="d-flex flex-wrap gap-2">
-      <button type="button" class="btn btn-sm btn-primary" data-agence="all">Tous</button>
-      <button type="button" class="btn btn-sm btn-outline-secondary" data-agence="0">Sans agence</button>
-      <?php foreach ($agences as $ag): ?>
-        <button type="button" class="btn btn-sm btn-outline-secondary" data-agence="<?= (int)$ag['id'] ?>">
-          <?= htmlspecialchars($ag['nom']) ?>
-        </button>
-      <?php endforeach; ?>
+  <?php if ($role === 'administrateur' && !empty($agences)): ?>
+    <div class="d-flex justify-content-center mb-2">
+      <div id="agenceFilters" class="d-flex flex-wrap gap-2">
+        <button type="button" class="btn btn-sm btn-primary" data-agence="all">Tous</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-agence="0">Sans agence</button>
+        <?php foreach ($agences as $ag): ?>
+          <button type="button" class="btn btn-sm btn-outline-secondary" data-agence="<?= (int)$ag['id'] ?>">
+            <?= htmlspecialchars($ag['nom']) ?>
+          </button>
+        <?php endforeach; ?>
+      </div>
     </div>
-  </div>
-<?php endif; ?>
+  <?php endif; ?>
+
 
 
   <!-- Recherche + filtres chantiers existants -->
@@ -228,24 +252,31 @@ function badgeRole($role)
     <input type="search" id="searchInput" class="form-control" placeholder="Rechercher un employé…">
   </div>
 
-  <div class="d-flex align-items-center flex-wrap gap-2 mb-3" id="chantierFilters">
-    <button class="btn btn-sm btn-outline-secondary <?= $currentChantierId === 0 ? 'active' : '' ?>" data-chantier="all">Tous</button>
+  <?php
+  $chefHasSingleChantier = ($role !== 'administrateur' && count($visibleChantiers) <= 1);
+  ?>
+  <div class="d-flex align-items-center flex-wrap gap-2 mb-3 <?= $chefHasSingleChantier ? 'd-none' : '' ?>" id="chantierFilters">
+    <?php if ($role === 'administrateur'): ?>
+      <button class="btn btn-sm btn-outline-secondary <?= $currentChantierId === 0 ? 'active' : '' ?>" data-chantier="all">Tous</button>
+    <?php endif; ?>
+
     <?php foreach ($visibleChantiers as $ch): $cid = (int)$ch['id']; ?>
-      <button class="btn btn-sm btn-outline-secondary <?= ($cid === $currentChantierId ? 'active' : '') ?>"
-              data-chantier="<?= $cid ?>">
+      <button class="btn btn-sm btn-outline-secondary <?= ($cid === (int)$currentChantierId ? 'active' : '') ?>"
+        data-chantier="<?= $cid ?>">
         <?= htmlspecialchars($ch['nom']) ?>
       </button>
     <?php endforeach; ?>
   </div>
+
   <div id="camionControls" class="mb-2 d-flex align-items-center gap-2">
-  <label for="camionCount" class="mb-0 small text-muted">Nombre de camions</label>
-  <div class="input-group input-group-sm camion-stepper" style="width:140px">
-    <button class="btn btn-outline-secondary" type="button" data-action="decr" aria-label="Diminuer">−</button>
-    <input id="camionCount" type="text" class="form-control text-center"
-           value="0" inputmode="numeric" pattern="[0-9]*" aria-label="Nombre de camions">
-    <button class="btn btn-outline-secondary" type="button" data-action="incr" aria-label="Augmenter">+</button>
+    <label for="camionCount" class="mb-0 small text-muted">Nombre de camions</label>
+    <div class="input-group input-group-sm camion-stepper" style="width:140px">
+      <button class="btn btn-outline-secondary" type="button" data-action="decr" aria-label="Diminuer">−</button>
+      <input id="camionCount" type="text" class="form-control text-center"
+        value="0" inputmode="numeric" pattern="[0-9]*" aria-label="Nombre de camions">
+      <button class="btn btn-outline-secondary" type="button" data-action="incr" aria-label="Augmenter">+</button>
+    </div>
   </div>
-</div>
 
 
   <!-- Nav semaine -->
@@ -255,9 +286,9 @@ function badgeRole($role)
     $curr = (new DateTime('monday this week'))->format('Y-m-d');
     $next = (clone $weekStart)->modify('+7 days')->format('Y-m-d');
     ?>
-    <a class="btn btn-outline-secondary" href="?start=<?= $prev ?><?= $currentChantierId ? '&chantier_id='.$currentChantierId : '' ?>">← Semaine -1</a>
-    <a class="btn btn-outline-secondary" href="?start=<?= $curr ?><?= $currentChantierId ? '&chantier_id='.$currentChantierId : '' ?>">Cette semaine</a>
-    <a class="btn btn-outline-secondary" href="?start=<?= $next ?><?= $currentChantierId ? '&chantier_id='.$currentChantierId : '' ?>">Semaine +1 →</a>
+    <a class="btn btn-outline-secondary" href="?start=<?= $prev ?><?= $currentChantierId ? '&chantier_id=' . $currentChantierId : '' ?>">← Semaine -1</a>
+    <a class="btn btn-outline-secondary" href="?start=<?= $curr ?><?= $currentChantierId ? '&chantier_id=' . $currentChantierId : '' ?>">Cette semaine</a>
+    <a class="btn btn-outline-secondary" href="?start=<?= $next ?><?= $currentChantierId ? '&chantier_id=' . $currentChantierId : '' ?>">Semaine +1 →</a>
   </div>
 
   <!-- Tableau -->
@@ -293,10 +324,10 @@ function badgeRole($role)
           $nomsArr = $nomsStr !== '' ? explode('||', $nomsStr) : [];
         ?>
           <tr data-user-id="<?= $uid ?>"
-              data-role="<?= htmlspecialchars(strtolower($e['fonction'])) ?>"
-              data-agence-id="<?= (int)($e['agence_id'] ?? 0) ?>"
-              data-name="<?= htmlspecialchars(strtolower($e['nom'] . ' ' . $e['prenom'])) ?>"
-              data-chantiers="<?= htmlspecialchars($idsStr) ?>">
+            data-role="<?= htmlspecialchars(strtolower($e['fonction'])) ?>"
+            data-agence-id="<?= (int)($e['agence_id'] ?? 0) ?>"
+            data-name="<?= htmlspecialchars(strtolower($e['nom'] . ' ' . $e['prenom'])) ?>"
+            data-chantiers="<?= htmlspecialchars($idsStr) ?>">
 
             <td class="emp-name" style="white-space:nowrap">
               <strong><?= htmlspecialchars($e['nom'] . ' ' . $e['prenom']) ?></strong>
@@ -317,16 +348,20 @@ function badgeRole($role)
               $aDone = !empty($conduiteMap[$uid][$dateIso]['A']);
               $rDone = !empty($conduiteMap[$uid][$dateIso]['R']);
 
-              $abs      = $absMap[$uid][$dateIso] ?? null;
-              $isAbsent = ($abs !== null);
-              $absLabel = $abs === 'conges' ? 'Congés'
-                        : ($abs === 'maladie' ? 'Maladie'
-                        : ($abs === 'injustifie' ? 'Injustifié' : ''));
+              $absData   = $absMap[$uid][$dateIso] ?? null;
+              $isAbsent  = is_array($absData);
+              $absMotif  = $absData['motif']  ?? null;
+              $absHeures = $absData['heures'] ?? null;
+
+              $absLabel = $absMotif === 'conges' ? 'Congés'
+                : ($absMotif === 'maladie' ? 'Maladie'
+                  : ($absMotif === 'injustifie' ? 'Injustifié' : ''));
+
 
               $hasSavedState = ($hDone !== null) || $aDone || $rDone || $isAbsent;
             ?>
               <td data-date="<?= htmlspecialchars($dateIso) ?>"
-                  data-planned-chantiers-day="<?= htmlspecialchars($plannedIdsForDay) ?>">
+                data-planned-chantiers-day="<?= htmlspecialchars($plannedIdsForDay) ?>">
 
                 <?php if ($dow >= 6 && !$hasPlanning && !$hasSavedState): ?>
                   <div class="text-center text-muted">×</div>
@@ -334,7 +369,7 @@ function badgeRole($role)
                   <!-- Présence (8h15 = 8.25 h) -->
                   <div class="mb-2">
                     <button class="btn btn-sm present-btn <?= $hDone ? 'btn-success' : 'btn-outline-success' ?>"
-                            data-hours="8.25" <?= $isAbsent ? 'disabled' : '' ?>>
+                      data-hours="8.25" <?= $isAbsent ? 'disabled' : '' ?>>
                       Présent 8h15
                     </button>
                   </div>
@@ -342,23 +377,28 @@ function badgeRole($role)
                   <!-- Conduite A/R -->
                   <div class="d-flex gap-2 mb-2">
                     <button class="btn btn-sm conduite-btn <?= $aDone ? 'btn-primary' : 'btn-outline-primary' ?>"
-                            data-type="A" <?= $isAbsent ? 'disabled' : '' ?>>A</button>
+                      data-type="A" <?= $isAbsent ? 'disabled' : '' ?>>A</button>
                     <button class="btn btn-sm conduite-btn <?= $rDone ? 'btn-success' : 'btn-outline-success' ?>"
-                            data-type="R" <?= $isAbsent ? 'disabled' : '' ?>>R</button>
+                      data-type="R" <?= $isAbsent ? 'disabled' : '' ?>>R</button>
                   </div>
 
                   <!-- Absence -->
-                  <div class="btn-group">
-                    <button class="btn btn-sm <?= $isAbsent ? 'btn-danger' : 'btn-outline-danger' ?> absence-btn">
-                      <?= $isAbsent ? 'Abs. ' . htmlspecialchars($absLabel) : 'Abs.' ?>
-                    </button>
-                    <button class="btn btn-sm btn-outline-danger dropdown-toggle dropdown-toggle-split" data-bs-toggle="dropdown"></button>
-                    <ul class="dropdown-menu small">
-                      <li><a class="dropdown-item absence-choice" data-reason="conges">Congés</a></li>
-                      <li><a class="dropdown-item absence-choice" data-reason="maladie">Maladie</a></li>
-                      <li><a class="dropdown-item absence-choice" data-reason="injustifie">Injustifié (non payé)</a></li>
-                    </ul>
-                  </div>
+                  <?php
+                  $absText = 'Abs.';
+                  if ($isAbsent) {
+                    $absText = $absLabel;
+                    if ($absHeures !== null) {
+                      $absText .= ' ' . str_replace('.', ',', (string)$absHeures) . ' h';
+                    }
+                  }
+                  $absClass = $isAbsent ? 'btn-danger' : 'btn-outline-danger';
+                  ?>
+                  <button type="button" class="btn btn-sm <?= $absClass ?> absence-btn">
+                    <?= htmlspecialchars($absText) ?>
+                  </button>
+
+
+
                 <?php endif; ?>
 
               </td>
@@ -416,10 +456,10 @@ function badgeRole($role)
     </div>
   </div>
 
-<script>
-  window.POINTAGE_DAYS   = <?= json_encode(array_column($days,'iso')) ?>;
-  window.API_CAMIONS_CFG = "/pointage/api/camions_config.php";
-</script>
+  <script>
+    window.POINTAGE_DAYS = <?= json_encode(array_column($days, 'iso')) ?>;
+    window.API_CAMIONS_CFG = "/pointage/api/camions_config.php";
+  </script>
 
 
 
