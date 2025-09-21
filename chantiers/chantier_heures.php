@@ -171,7 +171,9 @@ require_once __DIR__ . '/../templates/navigation/navigation.php';
               data-id="<?= (int)$t['id'] ?>"
               data-name="<?= htmlspecialchars($t['nom']) ?>"
               data-qte="<?= htmlspecialchars((string)$qte) ?>"
-              data-tu-hours="<?= htmlspecialchars(h2($tuH)) ?>">
+              data-tu-hours="<?= htmlspecialchars(h2($tuH)) ?>"
+              data-shortcut="<?= htmlspecialchars($t['shortcut'] ?? '') ?>"
+              data-unite="<?= htmlspecialchars($t['unite'] ?? '') ?>">
               <td class="text-start">
                 <div class="fw-semibold"><?= htmlspecialchars($t['nom']) ?></div>
               </td>
@@ -198,8 +200,15 @@ require_once __DIR__ . '/../templates/navigation/navigation.php';
 
               <?php if ($role === 'administrateur'): ?>
                 <td>
-                  <button class="btn btn-sm btn-primary save-row" title="Enregistrer"><i class="bi bi-save"></i></button>
-                  <button class="btn btn-sm btn-danger delete-row ms-1" title="Supprimer"><i class="bi bi-trash"></i></button>
+                  <!-- Bouton MODIFIER (jaune, crayon) -->
+                  <button class="btn btn-sm btn-warning edit-row" title="Modifier">
+                    <i class="bi bi-pencil"></i>
+                  </button>
+
+                  <!-- Supprimer -->
+                  <button class="btn btn-sm btn-danger delete-row ms-1" title="Supprimer">
+                    <i class="bi bi-trash"></i>
+                  </button>
                 </td>
               <?php endif; ?>
             </tr>
@@ -258,6 +267,57 @@ require_once __DIR__ . '/../templates/navigation/navigation.php';
     </div>
   </div>
 <?php endif; ?>
+
+<?php if ($role === 'administrateur'): ?>
+  <!-- Modal modifier tâche -->
+  <div class="modal fade" id="tacheEditModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+      <form class="modal-content" id="tacheEditForm">
+        <div class="modal-header">
+          <h5 class="modal-title">Modifier la tâche</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
+        </div>
+
+        <div class="modal-body">
+          <input type="hidden" name="tache_id" id="editTacheId">
+          <input type="hidden" name="chantier_id" value="<?= (int)$chantierId ?>">
+          <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token']) ?>">
+
+          <div class="form-group">
+            <label for="editTaskName">Nom de la tâche</label>
+            <input type="text" class="form-control" id="editTaskName" name="task_name" required>
+          </div>
+
+          <div class="form-group">
+            <label for="editTaskShortcut">Raccourci (affiché pour le pointage)</label>
+            <input type="text" class="form-control" id="editTaskShortcut" name="shortcut" placeholder="ex: Ferraillage">
+          </div>
+
+          <div class="row g-2">
+            <div class="col-6">
+              <label class="form-label" for="editTacheUnite">Unité (ex: u, m²)</label>
+              <input type="text" class="form-control" name="unite" id="editTacheUnite">
+            </div>
+            <div class="col-6">
+              <label class="form-label" for="editTacheQte">Quantité</label>
+              <input type="number" step="0.01" min="0" class="form-control" name="quantite" id="editTacheQte" value="0">
+            </div>
+          </div>
+          <div class="mt-3">
+            <label class="form-label" for="editTacheTUh">TU (h / unité) — heures décimales</label>
+            <input type="number" step="0.01" min="0" class="form-control" name="tu_heures" id="editTacheTUh" value="0">
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+          <button type="submit" class="btn btn-primary">Enregistrer</button>
+        </div>
+      </form>
+    </div>
+  </div>
+<?php endif; ?>
+
 
 <!-- Modal confirmation suppression -->
 <div class="modal fade" id="confirmDeleteModal" tabindex="-1" aria-hidden="true">

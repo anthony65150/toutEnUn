@@ -95,42 +95,47 @@ function confirmDelete({ label = 'cet élément' } = {}) {
 
   // SAVE (💾) — envoie tu_heures tel quel
   document.getElementById('heuresTbody')?.addEventListener('click', async (e) => {
-    if (!e.target.closest('.save-row')) return;
-    if (!isAdmin) return;
+  const btn = e.target.closest('.save-row');
+  if (!btn) return;          // ne réagit plus au bouton .edit-row
+  if (!isAdmin) return;
 
-    const tr  = e.target.closest('tr');
-    const id  = tr?.dataset.id;
-    if (!id) return;
+  const tr  = btn.closest('tr');
+  const id  = tr?.dataset.id;
+  if (!id) return;
 
-    const qte     = parseFloat(tr.dataset.qte || '0');
-    const tuHours = parseFloat(tr.dataset.tuHours || '0');
-    const pct     = parseFloat(tr.querySelector('.avc-input')?.value || '0');
+  const qte     = parseFloat(tr.dataset.qte || '0');
+  const tuHours = parseFloat(tr.dataset.tuHours || '0');
+  const pct     = parseFloat(tr.querySelector('.avc-input')?.value || '0');
 
-    try {
-      const res = await fetch('./ajax/chantier_heures_save.php', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          csrf_token: csrfToken,
-          tache_id: parseInt(id, 10),
-          chantier_id: chantierId,
-          quantite: qte,
-          tu_heures: tuHours, // HEURES DIRECT
-          avancement_pct: pct
-        })
-      });
-      const j = await res.json();
-      if (!j?.success) throw new Error(j?.message || 'Échec sauvegarde');
+  try {
+    const res = await fetch('./ajax/chantier_heures_save.php', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept':'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({
+        csrf_token: csrfToken,
+        tache_id: parseInt(id, 10),
+        chantier_id: chantierId,
+        quantite: qte,
+        tu_heures: tuHours,
+        avancement_pct: pct
+      })
+    });
 
-      tr.classList.add('table-success');
-      setTimeout(() => tr.classList.remove('table-success'), 1200);
-    } catch (err) {
-      console.error(err);
-      tr.classList.add('table-danger');
-      setTimeout(() => tr.classList.remove('table-danger'), 1200);
-      alert('Sauvegarde impossible : ' + (err.message || err));
-    }
-  });
+    const raw = await res.text();       // ← lit le brut pour éviter le “<”
+    let j; try { j = JSON.parse(raw); } catch { throw new Error(raw.slice(0,800)); }
+    if (!res.ok || !j?.success) throw new Error(j?.message || 'Échec sauvegarde');
+
+    tr.classList.add('table-success');
+    setTimeout(() => tr.classList.remove('table-success'), 1200);
+  } catch (err) {
+    console.error(err);
+    tr.classList.add('table-danger');
+    setTimeout(() => tr.classList.remove('table-danger'), 1200);
+    alert('Sauvegarde impossible : ' + (err.message || err));
+  }
+});
+
 
   // DELETE (🗑️) avec modale
   document.getElementById('heuresTbody')?.addEventListener('click', async (e) => {
@@ -205,17 +210,26 @@ function confirmDelete({ label = 'cet élément' } = {}) {
   payload.avancement_pct = 0;
 
   try {
-    const res = await fetch('./ajax/chantier_tache_upsert.php', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    const j = await res.json();
-    if (!j?.success) throw new Error(j?.message || 'Échec enregistrement');
-    location.reload();
-  } catch (err) {
-    alert('Erreur: ' + (err.message || err));
-  }
+  const res = await fetch('./ajax/chantier_tache_upsert.php', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+    credentials: 'same-origin',               // <-- important pour la session/CSRF
+    body: JSON.stringify(payload)
+  });
+
+  const raw = await res.text();               // <-- on lit BRUT
+  console.log('[CREATE raw]', raw);           // <-- si PHP crashe, tu le vois ici
+  let j;
+  try { j = JSON.parse(raw); }
+  catch { throw new Error(raw.slice(0, 800)); }
+
+  if (!res.ok || !j?.success) throw new Error(j?.message || 'Échec enregistrement');
+
+  location.reload();
+} catch (err) {
+  alert('Erreur: ' + (err.message || err));
+}
+
 });
 
 
@@ -224,3 +238,160 @@ function confirmDelete({ label = 'cet élément' } = {}) {
 document.querySelectorAll('#heuresTbody tr').forEach(tr => recalcRow(tr));
 
 })();
+
+
+
+
+// modal modifier
+(() => {
+  const tbody = document.getElementById('heuresTbody');
+  if (!tbody) return;
+
+  // URL de mise à jour (à adapter si besoin)
+  const UPDATE_URL = '/chantiers/taches_update.php';
+
+  // helpers
+  const fmt2 = (n) => Number(n || 0).toFixed(2);
+
+  // refs modale
+  const modalEl = document.getElementById('tacheEditModal');
+  const modal   = new bootstrap.Modal(modalEl);
+  const form    = document.getElementById('tacheEditForm');
+
+  const f = {
+    id:  document.getElementById('editTacheId'),
+    nom: document.getElementById('editTaskName'),
+    sh:  document.getElementById('editTaskShortcut'),
+    u:   document.getElementById('editTacheUnite'),
+    qte: document.getElementById('editTacheQte'),
+    tu:  document.getElementById('editTacheTUh'),
+  };
+
+  let currentTr = null;
+
+  // Ouvrir la modale sur clic du bouton "modifier" (jaune)
+  tbody.addEventListener('click', (e) => {
+    const btn = e.target.closest('.edit-row');
+    if (!btn) return;
+
+    currentTr = btn.closest('tr');
+    if (!currentTr) return;
+
+    const id   = currentTr.dataset.id || '';
+    const nom  = currentTr.dataset.name || '';
+    const sh   = currentTr.dataset.shortcut || '';
+    const u    = currentTr.dataset.unite || '';
+
+    // quantité & unité: on a tout en data-*, donc on prend direct
+    const qte  = currentTr.dataset.qte || '0';
+    const tu   = currentTr.dataset.tuHours || '0';
+
+    f.id.value  = id;
+    f.nom.value = nom;
+    f.sh.value  = sh;
+    f.u.value   = u;
+    f.qte.value = qte;
+    f.tu.value  = tu;
+
+    modal.show();
+  });
+
+  // Soumission (enregistrer la modif)
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (!currentTr) return;
+
+  const UPDATE_URL = './ajax/chantier_tache_upsert.php'; // ✅ même endpoint que la création
+
+  const payload = {
+    csrf_token:  form.querySelector('[name="csrf_token"]').value,
+    chantier_id: form.querySelector('[name="chantier_id"]').value,
+    tache_id:    parseInt(document.getElementById('editTacheId').value || '0', 10),
+
+    // mêmes noms que le PHP attend :
+    nom:        document.getElementById('editTaskName').value.trim(),
+    shortcut:   document.getElementById('editTaskShortcut').value.trim(),
+    unite:      document.getElementById('editTacheUnite').value.trim(),
+    quantite:   parseFloat((document.getElementById('editTacheQte').value || '0').replace(',', '.')) || 0,
+    tu_heures:  parseFloat((document.getElementById('editTacheTUh').value || '0').replace(',', '.')) || 0
+  };
+
+  let data;
+  try {
+    const res = await fetch(UPDATE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify(payload)
+    });
+
+    const raw = await res.text();        // ← on lit BRUT
+    console.log('[EDIT raw]', raw);      // ← tu verras l’erreur PHP exacte ici
+    try { data = JSON.parse(raw); }
+    catch { throw new Error(raw.slice(0, 800)); }
+
+    if (!res.ok || data?.success === false) {
+      throw new Error(data?.message || 'Échec enregistrement');
+    }
+  } catch (err) {
+    alert("Sauvegarde impossible : " + (err?.message || String(err)));
+    return;
+  }
+
+  // --- si on arrive ici : succès → MAJ DOM + recalculs ---
+  const qte = parseFloat(f.qte.value) || 0;
+  const tu  = parseFloat(f.tu.value) || 0;
+
+  currentTr.dataset.name     = f.nom.value;
+  currentTr.dataset.shortcut = f.sh.value;
+  currentTr.dataset.unite    = f.u.value;
+  currentTr.dataset.qte      = String(qte);
+  currentTr.dataset.tuHours  = String(tu);
+
+  const nameDiv = currentTr.querySelector('td:first-child .fw-semibold');
+  if (nameDiv) nameDiv.textContent = f.nom.value;
+
+  const fmt2 = (n) => Number(n || 0).toFixed(2);
+
+  const qteTd = currentTr.children[1];
+  if (qteTd) qteTd.textContent = fmt2(qte) + (f.u.value ? (' ' + f.u.value) : '');
+
+  const tuTd = currentTr.children[2];
+  if (tuTd) tuTd.textContent = fmt2(tu);
+
+  const tt = qte * tu;
+  const pctInput = currentTr.querySelector('.avc-input');
+  const pct = Math.min(100, Math.max(0, parseFloat(pctInput?.value || '0')));
+  const ts = tt * (pct / 100);
+
+  const hpCell = currentTr.querySelector('.hp-cell');
+  const hp = parseFloat(hpCell?.dataset.h || '0') || 0;
+  const ec = ts - hp;
+  const newTU = (qte > 0 && pct > 0) ? (hp / (qte * (pct / 100))) : 0;
+
+  const ttTd = currentTr.querySelector('.tt-cell');
+  if (ttTd) ttTd.textContent = fmt2(tt);
+
+  const tsTd = currentTr.querySelector('.ts-cell');
+  if (tsTd) { tsTd.dataset.h = fmt2(ts); tsTd.textContent = fmt2(ts); }
+
+  const ecTd = currentTr.querySelector('.ecart-cell');
+  if (ecTd) {
+    ecTd.dataset.h = fmt2(ec);
+    ecTd.textContent = fmt2(ec);
+    ecTd.classList.remove('cell-good','cell-bad');
+    ecTd.classList.add(ec < 0 ? 'cell-bad' : 'cell-good');
+  }
+
+  const newTd = currentTr.querySelector('.newtu-cell');
+  if (newTd) {
+    newTd.dataset.h = fmt2(newTU);
+    newTd.textContent = fmt2(newTU);
+    newTd.classList.remove('cell-good','cell-bad');
+    newTd.classList.add((newTU > tu + 1e-9) ? 'cell-bad' : 'cell-good');
+  }
+
+  currentTr.classList.add('table-success');
+  setTimeout(() => currentTr.classList.remove('table-success'), 1200);
+  modal.hide();
+});})();
