@@ -200,10 +200,109 @@ function badgeRole($role)
       return '<span class="badge bg-secondary">Autre</span>';
   }
 }
+
+function fmtHM(float $dec): string
+{
+  $h = (int)floor($dec);
+  $m = (int)round(($dec - $h) * 60);
+  return $h . 'h' . str_pad((string)$m, 2, '0', STR_PAD_LEFT);
+}
 ?>
+
+<?php
+/* ==== Tâche du jour (pour préafficher dans la cellule) ==== */
+$dates = array_column($days, 'iso');
+$tacheMap = [];
+
+if ($dates) {
+  $minD = min($dates);
+  $maxD = max($dates);
+
+  // Détection libellé (shortcut prioritaire)
+  $cols = $pdo->query("SHOW COLUMNS FROM chantier_taches")->fetchAll(PDO::FETCH_COLUMN, 0);
+  $hasShortcut = in_array('shortcut', $cols, true);
+  $labelCol = null;
+  foreach (['libelle', 'nom', 'titre', 'intitule', 'label'] as $c) {
+    if (in_array($c, $cols, true)) {
+      $labelCol = $c;
+      break;
+    }
+  }
+  $libExpr = "COALESCE(
+    NULLIF(ct.`shortcut`, ''),
+    " . ($labelCol ? "NULLIF(ct.`$labelCol`, '')," : "") . "
+    CAST(ct.`id` AS CHAR)
+  )";
+
+  // La colonne updated_at existe ?
+  $ptCols = $pdo->query("SHOW COLUMNS FROM pointages_taches")->fetchAll(PDO::FETCH_COLUMN, 0);
+  $hasUpdated = in_array('updated_at', $ptCols, true);
+
+  if ($hasUpdated) {
+    $sqlT = "
+      SELECT pt.utilisateur_id, pt.date_jour, pt.tache_id, pt.chantier_id, pt.heures,
+             $libExpr AS libelle
+      FROM pointages_taches pt
+      LEFT JOIN chantier_taches ct
+        ON ct.id = pt.tache_id AND ct.entreprise_id = ?
+      WHERE pt.entreprise_id = ?
+        AND pt.date_jour BETWEEN ? AND ?
+        AND NOT EXISTS (
+          SELECT 1
+          FROM pointages_taches x
+          WHERE x.entreprise_id = pt.entreprise_id
+            AND x.utilisateur_id = pt.utilisateur_id
+            AND x.date_jour      = pt.date_jour
+            AND (
+                 (x.updated_at > pt.updated_at)
+              OR (x.updated_at = pt.updated_at AND x.id > pt.id)
+            )
+        )
+    ";
+    $params = [$entrepriseId, $entrepriseId, $minD, $maxD];
+  } else {
+    $sqlT = "
+      SELECT pt.utilisateur_id, pt.date_jour, pt.tache_id, pt.chantier_id, pt.heures,
+             $libExpr AS libelle
+      FROM pointages_taches pt
+      JOIN (
+        SELECT utilisateur_id, date_jour, MAX(id) AS mid
+        FROM pointages_taches
+        WHERE entreprise_id = ? AND date_jour BETWEEN ? AND ?
+        GROUP BY utilisateur_id, date_jour
+      ) last ON last.utilisateur_id = pt.utilisateur_id
+           AND last.date_jour      = pt.date_jour
+           AND last.mid            = pt.id
+      LEFT JOIN chantier_taches ct
+        ON ct.id = pt.tache_id AND ct.entreprise_id = ?
+      WHERE pt.entreprise_id = ?
+    ";
+    $params = [$entrepriseId, $minD, $maxD, $entrepriseId, $entrepriseId];
+  }
+
+  $stT = $pdo->prepare($sqlT);
+  $stT->execute($params);
+
+  while ($r = $stT->fetch(PDO::FETCH_ASSOC)) {
+    $u = (int)$r['utilisateur_id'];
+    $d = $r['date_jour'];
+    $tacheMap[$u][$d] = [
+      'id'      => (int)$r['tache_id'],
+      'libelle' => (string)($r['libelle'] ?? ''),
+      'heures'  => (float)($r['heures'] ?? 0),
+      'cid'     => (int)$r['chantier_id'],
+    ];
+  }
+}
+
+
+
+?>
+
 <div class="container my-4" id="pointageApp"
   data-week-start="<?= htmlspecialchars($weekStart->format('Y-m-d')) ?>"
-  data-role="<?= htmlspecialchars(strtolower($role)) ?>">
+  data-role="<?= htmlspecialchars(strtolower($role)) ?>"
+  data-chantier-id="<?= (int)$currentChantierId ?>">
   <div class="row align-items-center mb-3">
     <div class="col-12 col-md-4"><!-- vide --></div>
     <div class="col-12 col-md-4 text-center">
@@ -366,13 +465,20 @@ function badgeRole($role)
                 <?php if ($dow >= 6 && !$hasPlanning && !$hasSavedState): ?>
                   <div class="text-center text-muted">×</div>
                 <?php else: ?>
-                  <!-- Présence (8h15 = 8.25 h) -->
+                  <!-- Présence -->
+                  <?php
+                  // $hDone est déjà calculé plus haut : heures dans pointages_jour ou null
+                  $presentIsActive = ($hDone !== null && $hDone > 0);
+                  $presentLabel    = $presentIsActive ? ('Présent ' . fmtHM((float)$hDone)) : 'Présent 8h15';
+                  ?>
                   <div class="mb-2">
-                    <button class="btn btn-sm present-btn <?= $hDone ? 'btn-success' : 'btn-outline-success' ?>"
+                    <button
+                      class="btn btn-sm present-btn <?= $presentIsActive ? 'btn-success' : 'btn-outline-success' ?>"
                       data-hours="8.25" <?= $isAbsent ? 'disabled' : '' ?>>
-                      Présent 8h15
+                      <?= htmlspecialchars($presentLabel) ?>
                     </button>
                   </div>
+
 
                   <!-- Conduite A/R -->
                   <div class="d-flex gap-2 mb-2">
@@ -396,6 +502,36 @@ function badgeRole($role)
                   <button type="button" class="btn btn-sm <?= $absClass ?> absence-btn">
                     <?= htmlspecialchars($absText) ?>
                   </button>
+
+                  <?php
+                  $tInfo   = $tacheMap[$uid][$dateIso] ?? null;
+                  $tId     = $tInfo['id']      ?? '';
+                  $tLib    = $tInfo['libelle'] ?? '';
+                  // On affiche les heures du jour venant de pointages_jour si dispo, sinon ce que tu avais déjà (Présent)
+                  $tHeures = isset($tInfo['heures']) ? (float)$tInfo['heures'] : ($hDone ?? null);
+                  ?>
+                  <div class="mt-2 task-slot"
+                    data-click-tache
+                    data-user-id="<?= $uid ?>"
+                    data-date="<?= htmlspecialchars($dateIso) ?>"
+                    data-tache-id="<?= htmlspecialchars((string)$tId) ?>"
+                    data-heures="<?= $tHeures !== null ? htmlspecialchars((string)$tHeures) : '' ?>"
+                    data-pt-chantier-id="<?= (int)($tacheMap[$uid][$dateIso]['cid'] ?? $currentChantierId) ?>">
+
+
+                    <?php if ($tId): ?>
+                      <span class="badge bg-primary"><?= htmlspecialchars($tLib) ?></span>
+                      <?php if ($tHeures !== null && (float)$tHeures !== 8.25): ?>
+                        <div class="small text-muted mt-1">
+                          <?= htmlspecialchars(number_format((float)$tHeures, 2, ',', '')) ?> h
+                        </div>
+                      <?php endif; ?>
+                    <?php else: ?>
+                      <button type="button" class="btn btn-sm btn-outline-secondary">+ Tâche</button>
+                    <?php endif; ?>
+
+                  </div>
+
 
 
 
@@ -456,6 +592,41 @@ function badgeRole($role)
     </div>
   </div>
 
+  <!-- Modal: Tâche du jour -->
+  <div class="modal fade" id="tacheJourModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-fullscreen-sm-down">
+      <form class="modal-content" id="tacheJourForm">
+        <div class="modal-header">
+          <h5 class="modal-title">Tâche du jour</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
+        </div>
+
+        <div class="modal-body">
+          <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token']) ?>">
+          <input type="hidden" name="utilisateur_id" id="tj_utilisateur_id">
+          <input type="hidden" name="date_jour" id="tj_date_jour">
+          <input type="hidden" name="tache_id" id="tj_tache_id">
+
+          <div class="mb-2">
+            <input id="tj_search" type="search" class="form-control" placeholder="Rechercher une tâche…">
+          </div>
+
+          <div id="tj_list" class="list-group" style="max-height: 50vh; overflow:auto;"></div>
+
+          <div class="form-text mt-2">
+            Les heures de la journée sont reprises du bouton <em>Présent</em> (ou du calcul Présent = 8h15 − Absence).
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annuler</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+
+
   <script>
     window.POINTAGE_DAYS = <?= json_encode(array_column($days, 'iso')) ?>;
     window.API_CAMIONS_CFG = "/pointage/api/camions_config.php";
@@ -463,6 +634,7 @@ function badgeRole($role)
 
 
 
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
 
   <script src="js/pointage.js"></script>
   <?php require_once __DIR__ . '/../templates/footer.php'; ?>

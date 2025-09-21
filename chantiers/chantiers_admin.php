@@ -154,71 +154,67 @@ require_once __DIR__ . '/../templates/navigation/navigation.php';
   <input type="text" id="chantierSearchInput" class="form-control mb-4" placeholder="Rechercher un chantier..." autocomplete="off" />
 
   <table class="table table-striped table-hover table-bordered text-center">
-    <thead class="table-dark">
-      <tr>
-        <th>Nom</th>
-        <th>Chef</th>
-        <th>Équipe (aujourd’hui)</th>
-        <th>Date début</th>
-        <th>Date fin</th>
-        <th>Actions</th>
-      </tr>
-    </thead>
-    <tbody id="chantiersTableBody">
-      <?php foreach ($rows as $c): ?>
-        <tr class="align-middle" data-row-id="<?= (int)$c['id'] ?>">
-          <td>
-            <a class="link-primary fw-semibold text-decoration-none"
-              href="chantier_contenu.php?id=<?= (int)$c['id'] ?>">
-              <?= htmlspecialchars($c['nom']) ?>
-              (<?= (int)($c['total_personnes'] ?? 0) ?>)
-            </a>
-          </td>
+  <thead class="table-dark">
+    <tr>
+      <th>Nom</th>
+      <th>Chef</th>
+      <th>Équipe (aujourd’hui)</th>
+      <th>Date début</th>
+      <th>Date fin</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+  <tbody id="chantiersTableBody">
+    <?php foreach ($rows as $c): ?>
+      <tr class="align-middle" data-row-id="<?= (int)$c['id'] ?>">
+        <td>
+          <a href="chantier_menu.php?id=<?= (int)$c['id'] ?>">
+            <?= htmlspecialchars($c['nom']) ?> (<?= (int)($c['total_personnes'] ?? 0) ?>)
+          </a>
+        </td>
 
-
-          <td class="text-center">
-            <?php if (!empty($c['resp_nom'])): ?>
-              <?= htmlspecialchars($c['resp_nom']) ?>
-              <?php if (!empty($c['autres_chefs'])): ?>
-                <div class="small text-muted">+ <?= htmlspecialchars($c['autres_chefs']) ?></div>
-              <?php endif; ?>
-            <?php else: ?>
-              <span class="text-muted">—</span>
+        <td class="text-center">
+          <?php if (!empty($c['resp_nom'])): ?>
+            <?= htmlspecialchars($c['resp_nom']) ?>
+            <?php if (!empty($c['autres_chefs'])): ?>
+              <div class="small text-muted">+ <?= htmlspecialchars($c['autres_chefs']) ?></div>
             <?php endif; ?>
-          </td>
+          <?php else: ?>
+            <span class="text-muted">—</span>
+          <?php endif; ?>
+        </td>
 
+        <td class="text-start">
+          <?= !empty($c['equipe_du_jour']) ? htmlspecialchars($c['equipe_du_jour']) : '—' ?>
+        </td>
 
-          <td class="text-start">
-            <?= !empty($c['equipe_du_jour']) ? htmlspecialchars($c['equipe_du_jour']) : '—' ?>
+        <td><?= htmlspecialchars($c['date_debut'] ?? '') ?></td>
+        <td><?= htmlspecialchars($c['date_fin'] ?? '') ?></td>
 
-          </td>
+        <td>
+          <button class="btn btn-sm btn-warning edit-btn"
+            data-bs-toggle="modal" data-bs-target="#chantierEditModal"
+            data-id="<?= (int)$c['id'] ?>"
+            data-nom="<?= htmlspecialchars($c['nom']) ?>"
+            data-description="<?= htmlspecialchars($c['description'] ?? '') ?>"
+            data-debut="<?= htmlspecialchars($c['date_debut'] ?? '') ?>"
+            data-fin="<?= htmlspecialchars($c['date_fin'] ?? '') ?>"
+            data-chef-ids="<?= htmlspecialchars($c['chef_ids_all'] ?? '') ?>"
+            title="Modifier">
+            <i class="bi bi-pencil-fill"></i>
+          </button>
 
-          <td><?= htmlspecialchars($c['date_debut'] ?? '') ?></td>
-          <td><?= htmlspecialchars($c['date_fin'] ?? '') ?></td>
+          <button class="btn btn-sm btn-danger delete-btn"
+            data-bs-toggle="modal" data-bs-target="#deleteModal"
+            data-id="<?= (int)$c['id'] ?>" title="Supprimer">
+            <i class="bi bi-trash-fill"></i>
+          </button>
+        </td>
+      </tr>
+    <?php endforeach; ?>
+  </tbody>
+</table>
 
-          <td>
-            <button class="btn btn-sm btn-warning edit-btn"
-              data-bs-toggle="modal" data-bs-target="#chantierEditModal"
-              data-id="<?= (int)$c['id'] ?>"
-              data-nom="<?= htmlspecialchars($c['nom']) ?>"
-              data-description="<?= htmlspecialchars($c['description'] ?? '') ?>"
-              data-debut="<?= htmlspecialchars($c['date_debut'] ?? '') ?>"
-              data-fin="<?= htmlspecialchars($c['date_fin'] ?? '') ?>"
-              data-chef-ids="<?= htmlspecialchars($c['chef_ids_all'] ?? '') ?>"
-              title="Modifier">
-              <i class="bi bi-pencil-fill"></i>
-            </button>
-
-            <button class="btn btn-sm btn-danger delete-btn"
-              data-bs-toggle="modal" data-bs-target="#deleteModal"
-              data-id="<?= (int)$c['id'] ?>" title="Supprimer">
-              <i class="bi bi-trash-fill"></i>
-            </button>
-          </td>
-        </tr>
-      <?php endforeach; ?>
-    </tbody>
-  </table>
 </div>
 
 <!-- Modal création -->

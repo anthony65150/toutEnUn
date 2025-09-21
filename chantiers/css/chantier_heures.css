@@ -1,0 +1,19 @@
+.w-110 { width: 110px; }
+.w-90  { width: 90px;  }
+.w-70  { width: 70px;  }
+
+.table td,
+.table th { vertical-align: middle !important; }
+
+
+.mono {
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+#confirmDeleteModal .modal-content { box-shadow: 0 14px 40px rgba(0,0,0,.2); }
+#confirmDeleteModal .modal-header,
+#confirmDeleteModal .modal-footer { border: 0; }
+
+.cell-good { color:#198754 !important; font-weight:600; }
+.cell-bad  { color:#dc3545 !important; font-weight:600; }
