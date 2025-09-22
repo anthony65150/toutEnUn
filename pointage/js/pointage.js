@@ -678,8 +678,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const modal      = new bootstrap.Modal(modalEl);
   const listTache  = document.getElementById('tj_list');
-  const searchTache= document.getElementById('tj_search');
-  const hidTacheId = document.getElementById('tj_tache_id');
+   const hidTacheId = document.getElementById('tj_tache_id');
   const hidUid     = document.getElementById('tj_utilisateur_id');
   const hidDate    = document.getElementById('tj_date_jour');
   const form       = document.getElementById('tacheJourForm');
@@ -758,13 +757,7 @@ root.addEventListener('click', async (e) => {
 
     // ouvre la modale
     try { modal.show(); } catch {}
-    modalEl.addEventListener('shown.bs.modal', () => {
-      if (searchTache) {
-        searchTache.value = '';
-        searchTache.focus({ preventScroll: true });
-      }
-    }, { once: true });
-
+ 
     // charge la liste
     try {
       const res = await fetch('/pointage/api/taches_list.php', {
@@ -901,4 +894,3 @@ form?.addEventListener('submit', async (e) => {
 });
 
 })();
-
