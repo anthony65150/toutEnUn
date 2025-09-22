@@ -402,7 +402,7 @@ if ($dates) {
       window.CHANTIERS = <?= json_encode($chMap, JSON_UNESCAPED_UNICODE) ?>;
     </script>
 
-    <table class="table table-bordered table-hover table-striped align-middle">
+    <table class="table table-bordered table-hover table-striped align-middle pointage-table">
       <thead class="table-dark">
         <tr>
           <th style="min-width:220px">Employés</th>
@@ -415,134 +415,122 @@ if ($dates) {
       </thead>
 
       <tbody>
-        <?php foreach ($employees as $e):
-          $uid     = (int)$e['id'];
-          $idsStr  = $e['chantier_ids'] ?: '';
-          $nomsStr = $e['chantier_noms'] ?: '';
-          $idsArr  = $idsStr !== '' ? array_map('intval', explode(',', $idsStr)) : [];
-          $nomsArr = $nomsStr !== '' ? explode('||', $nomsStr) : [];
-        ?>
-          <tr data-user-id="<?= $uid ?>"
-            data-role="<?= htmlspecialchars(strtolower($e['fonction'])) ?>"
-            data-agence-id="<?= (int)($e['agence_id'] ?? 0) ?>"
-            data-name="<?= htmlspecialchars(strtolower($e['nom'] . ' ' . $e['prenom'])) ?>"
-            data-chantiers="<?= htmlspecialchars($idsStr) ?>">
+<?php foreach ($employees as $e):
+  $uid     = (int)$e['id'];
+  $idsStr  = $e['chantier_ids'] ?: '';
+  $nomsStr = $e['chantier_noms'] ?: '';
+  $idsArr  = $idsStr !== '' ? array_map('intval', explode(',', $idsStr)) : [];
+  $nomsArr = $nomsStr !== '' ? explode('||', $nomsStr) : [];
+?>
+  <tr data-user-id="<?= $uid ?>"
+      data-role="<?= htmlspecialchars(strtolower($e['fonction'])) ?>"
+      data-agence-id="<?= (int)($e['agence_id'] ?? 0) ?>"
+      data-name="<?= htmlspecialchars(strtolower($e['nom'] . ' ' . $e['prenom'])) ?>"
+      data-chantiers="<?= htmlspecialchars($idsStr) ?>">
 
-            <td class="emp-name" style="white-space:nowrap">
-              <strong><?= htmlspecialchars($e['nom'] . ' ' . $e['prenom']) ?></strong>
-              <?= badgeRole($e['fonction']) ?>
-            </td>
+    <!-- Nom + rôle -->
+    <td class="emp-cell">
+      <strong><?= htmlspecialchars($e['nom'] . ' ' . $e['prenom']) ?></strong>
+      <?= badgeRole($e['fonction']) ?>
+    </td>
 
-            <?php foreach ($days as $d):
-              $dateIso = $d['iso'];
-              $dow     = (int)$d['dow'];
+    <?php foreach ($days as $d):
+      $dateIso = $d['iso'];
+      $dow     = (int)$d['dow'];
 
-              $plannedIdsForDay = isset($plannedDayMap[$uid][$dateIso])
-                ? implode(',', array_keys($plannedDayMap[$uid][$dateIso]))
-                : '';
-              $hasPlanning = !empty($plannedDayMap[$uid][$dateIso]);
+      $plannedIdsForDay = isset($plannedDayMap[$uid][$dateIso])
+        ? implode(',', array_keys($plannedDayMap[$uid][$dateIso]))
+        : '';
+      $hasPlanning = !empty($plannedDayMap[$uid][$dateIso]);
 
-              $hDone = isset($hoursMap[$uid][$dateIso]) ? (float)$hoursMap[$uid][$dateIso] : null;
+      $hDone = isset($hoursMap[$uid][$dateIso]) ? (float)$hoursMap[$uid][$dateIso] : null;
 
-              $aDone = !empty($conduiteMap[$uid][$dateIso]['A']);
-              $rDone = !empty($conduiteMap[$uid][$dateIso]['R']);
+      $aDone = !empty($conduiteMap[$uid][$dateIso]['A']);
+      $rDone = !empty($conduiteMap[$uid][$dateIso]['R']);
 
-              $absData   = $absMap[$uid][$dateIso] ?? null;
-              $isAbsent  = is_array($absData);
-              $absMotif  = $absData['motif']  ?? null;
-              $absHeures = $absData['heures'] ?? null;
+      $absData   = $absMap[$uid][$dateIso] ?? null;
+      $isAbsent  = is_array($absData);
+      $absMotif  = $absData['motif']  ?? null;
+      $absHeures = $absData['heures'] ?? null;
 
-              $absLabel = $absMotif === 'conges' ? 'Congés'
-                : ($absMotif === 'maladie' ? 'Maladie'
-                  : ($absMotif === 'injustifie' ? 'Injustifié' : ''));
+      $absLabel = $absMotif === 'conges' ? 'Congés'
+        : ($absMotif === 'maladie' ? 'Maladie'
+        : ($absMotif === 'injustifie' ? 'Injustifié' : ''));
 
+      $hasSavedState = ($hDone !== null) || $aDone || $rDone || $isAbsent;
 
-              $hasSavedState = ($hDone !== null) || $aDone || $rDone || $isAbsent;
-            ?>
-              <td data-date="<?= htmlspecialchars($dateIso) ?>"
-                data-planned-chantiers-day="<?= htmlspecialchars($plannedIdsForDay) ?>">
+      /* --- Calculs avant rendu --- */
+      $presentIsActive = ($hDone !== null && $hDone > 0);
+      $presentLabel    = $presentIsActive ? ('Présent ' . fmtHM((float)$hDone)) : 'Présent 8h15';
 
-                <?php if ($dow >= 6 && !$hasPlanning && !$hasSavedState): ?>
-                  <div class="text-center text-muted">×</div>
-                <?php else: ?>
-                  <!-- Présence -->
-                  <?php
-                  // $hDone est déjà calculé plus haut : heures dans pointages_jour ou null
-                  $presentIsActive = ($hDone !== null && $hDone > 0);
-                  $presentLabel    = $presentIsActive ? ('Présent ' . fmtHM((float)$hDone)) : 'Présent 8h15';
-                  ?>
-                  <div class="mb-2">
-                    <button
-                      class="btn btn-sm present-btn <?= $presentIsActive ? 'btn-success' : 'btn-outline-success' ?>"
-                      data-hours="8.25" <?= $isAbsent ? 'disabled' : '' ?>>
-                      <?= htmlspecialchars($presentLabel) ?>
-                    </button>
-                  </div>
+      $absText  = 'Abs.';
+      if ($isAbsent) {
+        $absText = $absLabel;
+        if ($absHeures !== null) $absText .= ' ' . str_replace('.', ',', (string)$absHeures) . ' h';
+      }
+      $absClass = $isAbsent ? 'btn-danger' : 'btn-outline-danger';
 
+      $tInfo   = $tacheMap[$uid][$dateIso] ?? null;
+      $tId     = $tInfo['id']      ?? '';
+      $tLib    = $tInfo['libelle'] ?? '';
+      $tHeures = isset($tInfo['heures']) ? (float)$tInfo['heures'] : ($hDone ?? null);
+    ?>
+      <td class="tl-cell text-center"
+          data-date="<?= htmlspecialchars($dateIso) ?>"
+          data-day-label="<?= htmlspecialchars($d['label']) ?>"
+          data-planned-chantiers-day="<?= htmlspecialchars($plannedIdsForDay) ?>">
 
-                  <!-- Conduite A/R -->
-                  <div class="d-flex gap-2 mb-2">
-                    <button class="btn btn-sm conduite-btn <?= $aDone ? 'btn-primary' : 'btn-outline-primary' ?>"
-                      data-type="A" <?= $isAbsent ? 'disabled' : '' ?>>A</button>
-                    <button class="btn btn-sm conduite-btn <?= $rDone ? 'btn-success' : 'btn-outline-success' ?>"
-                      data-type="R" <?= $isAbsent ? 'disabled' : '' ?>>R</button>
-                  </div>
+        <!-- Dot de la timeline -->
+        <span class="tl-dot <?= $isAbsent ? 'absent' : ($presentIsActive ? 'present' : (!empty($plannedIdsForDay) ? 'plan' : '')) ?>"></span>
 
-                  <!-- Absence -->
-                  <?php
-                  $absText = 'Abs.';
-                  if ($isAbsent) {
-                    $absText = $absLabel;
-                    if ($absHeures !== null) {
-                      $absText .= ' ' . str_replace('.', ',', (string)$absHeures) . ' h';
-                    }
-                  }
-                  $absClass = $isAbsent ? 'btn-danger' : 'btn-outline-danger';
-                  ?>
-                  <button type="button" class="btn btn-sm <?= $absClass ?> absence-btn">
-                    <?= htmlspecialchars($absText) ?>
-                  </button>
+        <?php if ($dow >= 6 && !$hasPlanning && !$hasSavedState): ?>
+          <div class="text-muted">×</div>
+        <?php else: ?>
+          <div class="tl-actions mb-2 d-flex flex-wrap gap-1 justify-content-center">
+            <button class="btn btn-sm present-btn <?= $presentIsActive ? 'btn-success' : 'btn-outline-success' ?>"
+                    data-hours="8.25" <?= $isAbsent ? 'disabled' : '' ?>>
+              <?= htmlspecialchars($presentLabel) ?>
+            </button>
 
-                  <?php
-                  $tInfo   = $tacheMap[$uid][$dateIso] ?? null;
-                  $tId     = $tInfo['id']      ?? '';
-                  $tLib    = $tInfo['libelle'] ?? '';
-                  // On affiche les heures du jour venant de pointages_jour si dispo, sinon ce que tu avais déjà (Présent)
-                  $tHeures = isset($tInfo['heures']) ? (float)$tInfo['heures'] : ($hDone ?? null);
-                  ?>
-                  <div class="mt-2 task-slot"
-                    data-click-tache
-                    data-user-id="<?= $uid ?>"
-                    data-date="<?= htmlspecialchars($dateIso) ?>"
-                    data-tache-id="<?= htmlspecialchars((string)$tId) ?>"
-                    data-heures="<?= $tHeures !== null ? htmlspecialchars((string)$tHeures) : '' ?>"
-                    data-pt-chantier-id="<?= (int)($tacheMap[$uid][$dateIso]['cid'] ?? $currentChantierId) ?>">
+            <button class="btn btn-sm conduite-btn <?= $aDone ? 'btn-primary' : 'btn-outline-primary' ?>"
+                    data-type="A" <?= $isAbsent ? 'disabled' : '' ?>>A</button>
 
+            <button class="btn btn-sm conduite-btn <?= $rDone ? 'btn-success' : 'btn-outline-success' ?>"
+                    data-type="R" <?= $isAbsent ? 'disabled' : '' ?>>R</button>
 
-                    <?php if ($tId): ?>
-                      <span class="badge bg-primary"><?= htmlspecialchars($tLib) ?></span>
-                      <?php if ($tHeures !== null && (float)$tHeures !== 8.25): ?>
-                        <div class="small text-muted mt-1">
-                          <?= htmlspecialchars(number_format((float)$tHeures, 2, ',', '')) ?> h
-                        </div>
-                      <?php endif; ?>
-                    <?php else: ?>
-                      <button type="button" class="btn btn-sm btn-outline-secondary">+ Tâche</button>
-                    <?php endif; ?>
+            <button type="button" class="btn btn-sm <?= $absClass ?> absence-btn">
+              <?= htmlspecialchars($absText) ?>
+            </button>
+          </div>
 
-                  </div>
+          <div class="tl-task task-slot"
+               data-click-tache
+               data-user-id="<?= $uid ?>"
+               data-date="<?= htmlspecialchars($dateIso) ?>"
+               data-tache-id="<?= htmlspecialchars((string)$tId) ?>"
+               data-heures="<?= $tHeures !== null ? htmlspecialchars((string)$tHeures) : '' ?>"
+               data-pt-chantier-id="<?= (int)($tacheMap[$uid][$dateIso]['cid'] ?? $currentChantierId) ?>">
+
+            <?php if ($tId): ?>
+              <span class="badge bg-primary"><?= htmlspecialchars($tLib) ?></span>
+              <?php if ($tHeures !== null && (float)$tHeures !== 8.25): ?>
+                <div class="small text-muted mt-1">
+                  <?= htmlspecialchars(number_format((float)$tHeures, 2, ',', '')) ?> h
+                </div>
+              <?php endif; ?>
+            <?php else: ?>
+              <button type="button" class="btn btn-sm btn-outline-secondary">+ Tâche</button>
+            <?php endif; ?>
+          </div>
+        <?php endif; ?>
+      </td>
+    <?php endforeach; ?>
+  </tr>
+<?php endforeach; ?>
+</tbody>
 
 
 
-
-                <?php endif; ?>
-
-              </td>
-            <?php endforeach; ?>
-
-          </tr>
-        <?php endforeach; ?>
-      </tbody>
     </table>
   </div>
 
