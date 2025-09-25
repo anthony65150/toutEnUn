@@ -105,3 +105,33 @@
   pointer-events: auto;   /* crucial */
   z-index: 2;
 }
+
+
+/* === Couleurs spécifiques aux absences === */
+
+/* Fond + texte adapté */
+.assign-chip[data-type="conges"] {
+  background: #fde68a; /* jaune clair */
+  color: #7a5c00;
+}
+
+.assign-chip[data-type="maladie"] {
+  background: #fecaca; /* rouge clair */
+  color: #7a0b0b;
+}
+
+.assign-chip[data-type="rtt"] {
+  background: #bfdbfe; /* bleu clair */
+  color: #0b4a7a;
+}
+
+/* Palette (drag source) = petits points à gauche */
+#palette-absences .chip[data-absence="conges"] .dot {
+  background: #f59e0b;
+}
+#palette-absences .chip[data-absence="maladie"] .dot {
+  background: #dc2626;
+}
+#palette-absences .chip[data-absence="rtt"] .dot {
+  background: #2563eb;
+}

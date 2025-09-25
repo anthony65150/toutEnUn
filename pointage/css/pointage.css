@@ -196,3 +196,27 @@ thead th .small.text-muted { cursor: pointer; }
     white-space: nowrap !important;  /* reste sur une ligne */
   }
 }
+
+
+/* Bandeau "absence" plein écran de cellule */
+.tl-absence-full{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  min-height:96px;        /* plus grand que la hauteur habituelle */
+  border-radius:.5rem;
+  font-weight:800;
+  letter-spacing:.2px;
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,.05);
+  text-transform: none;
+  font-size: 1.05rem;
+}
+
+/* Couleurs cohérentes avec le planning */
+.tl-absence-full.conges  { background:#fde68a; color:#7a5c00; }
+.tl-absence-full.maladie { background:#fecaca; color:#7a0b0b; }
+.tl-absence-full.rtt     { background:#bfdbfe; color:#0b4a7a; }
+
+
+.tl-absence-full { cursor:pointer; }
+.tl-absence-full:active { transform:scale(.995); }

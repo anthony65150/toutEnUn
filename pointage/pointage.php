@@ -61,6 +61,43 @@ $st = $pdo->prepare($sqlAg);
 $st->execute([':e' => $entrepriseId]);
 $agences = $st->fetchAll(PDO::FETCH_ASSOC);
 
+
+
+// Bornes de la semaine déjà calculées : $start, $end (Y-m-d)
+// $entrepriseId existe déjà, idem $pdo
+
+$planAbs = []; // $planAbs[$uid][$dateIso] = 'rtt' | 'conges' | 'maladie'
+
+$sql = "SELECT utilisateur_id, date_jour, type
+        FROM planning_affectations
+        WHERE entreprise_id = :e
+          AND date_jour >= :s
+          AND date_jour <  :f
+          AND type IN ('conges','maladie','rtt')";
+$st = $pdo->prepare($sql);
+$st->execute([
+  ':e' => $entrepriseId,
+  ':s' => $startIso,
+  ':f' => $endIso,
+]);
+while ($r = $st->fetch(PDO::FETCH_ASSOC)) {
+  $planAbs[(int)$r['utilisateur_id']][$r['date_jour']] = $r['type'];
+}
+
+
+function badgePlanningAbs(?string $t): string
+{
+  if (!$t) return '';
+  $map = [
+    'conges'  => ['label' => 'Congés',  'class' => 'badge bg-warning text-dark'],
+    'maladie' => ['label' => 'Maladie', 'class' => 'badge bg-danger'],
+    'rtt'     => ['label' => 'RTT',     'class' => 'badge bg-primary'],
+  ];
+  if (!isset($map[$t])) return '';
+  $m = $map[$t];
+  return '<span class="' . $m['class'] . ' me-2">' . htmlspecialchars($m['label']) . '</span>';
+}
+
 /* ==============================
    Employés (inclure dépôt) + agence
 ============================== */
@@ -437,6 +474,8 @@ if ($dates) {
             <?php foreach ($days as $d):
               $dateIso = $d['iso'];
               $dow     = (int)$d['dow'];
+              $planningType = $planAbs[$uid][$dateIso] ?? null; // 'rtt'|'conges'|'maladie'|null
+
 
               $plannedIdsForDay = isset($plannedDayMap[$uid][$dateIso])
                 ? implode(',', array_keys($plannedDayMap[$uid][$dateIso]))
@@ -453,9 +492,17 @@ if ($dates) {
               $absMotif  = $absData['motif']  ?? null;
               $absHeures = $absData['heures'] ?? null;
 
-              $absLabel = $absMotif === 'conges' ? 'Congés'
-                : ($absMotif === 'maladie' ? 'Maladie'
-                  : ($absMotif === 'injustifie' ? 'Injustifié' : ''));
+              $labelMap = [
+                'conges_payes'       => 'Congés payés',
+                'conges_intemperies' => 'Intempéries',
+                'maladie'            => 'Maladie',
+                'justifie'           => 'Justifié',
+                'injustifie'         => 'Injustifié',
+              ];
+
+              $absLabel = $isAbsent ? ($labelMap[strtolower((string)$absMotif)] ?? ucfirst((string)$absMotif)) : '';
+              $presentDisabledByPlan = in_array($planningType, ['conges', 'maladie', 'rtt'], true);
+
 
               $hasSavedState = ($hDone !== null) || $aDone || $rDone || $isAbsent;
 
@@ -465,10 +512,39 @@ if ($dates) {
 
               $absText  = 'Abs.';
               if ($isAbsent) {
-                $absText = $absLabel;
+                $absText = trim($absLabel);
                 if ($absHeures !== null) $absText .= ' ' . str_replace('.', ',', (string)$absHeures) . ' h';
+                if ($absText === '') $absText = 'Abs.'; // sécurité
+              } elseif ($planningType) {
+                // pas d'absence saisie : reprendre le planning
+                $absText = ['rtt' => 'RTT', 'conges' => 'Congés', 'maladie' => 'Maladie'][$planningType] ?? 'Abs.';
               }
+
+
               $absClass = $isAbsent ? 'btn-danger' : 'btn-outline-danger';
+
+              // Déterminer si on doit basculer en affichage "plein"
+              // Priorité à l'absence réellement pointée ; sinon, au planning
+              $fullType = null;   // 'maladie' | 'rtt' | 'conges' | null
+              if ($isAbsent) {
+                $motifLow = strtolower((string)$absMotif);
+                if (in_array($motifLow, ['maladie', 'rtt'], true)) {
+                  $fullType = $motifLow;               // 'maladie' ou 'rtt'
+                } elseif ($motifLow === 'conges_payes') {
+                  $fullType = 'conges';                // journée de CP -> plein
+                }
+              } elseif (in_array(($planningType ?? ''), ['conges', 'maladie', 'rtt'], true)) {
+                // planning générique : on garde 'conges' en plein uniquement si tu le souhaites
+                $fullType = ($planningType === 'conges') ? 'conges' : $planningType;
+              }
+
+              $fullLabel = $fullType ? [
+                'conges'  => 'Congés',
+                'maladie' => 'Maladie',
+                'rtt'     => 'RTT',
+              ][$fullType] : '';
+
+
 
               $tInfo   = $tacheMap[$uid][$dateIso] ?? null;
               $tId     = $tInfo['id']      ?? '';
@@ -478,24 +554,53 @@ if ($dates) {
               <td class="tl-cell text-center"
                 data-date="<?= htmlspecialchars($dateIso) ?>"
                 data-day-label="<?= htmlspecialchars($d['label']) ?>"
-                data-planned-chantiers-day="<?= htmlspecialchars($plannedIdsForDay) ?>">
+                data-planned-chantiers-day="<?= htmlspecialchars($plannedIdsForDay) ?>"
+                data-planning-type="<?= htmlspecialchars($planningType ?? '') ?>">
 
-                <!-- Dot de la timeline -->
-                <span class="tl-dot <?= $isAbsent ? 'absent' : ($presentIsActive ? 'present' : (!empty($plannedIdsForDay) ? 'plan' : '')) ?>"></span>
+                <?php if ($fullType): ?>
+                  <!-- Affichage plein : on masque tout le reste -->
+                  <?php
+                  $reasonForModal = $isAbsent
+                    ? strtolower((string)$absMotif) // garde 'conges_intemperies' ou 'conges_payes'
+                    : ($planningType === 'rtt' ? 'rtt' : ($planningType === 'maladie' ? 'maladie' : 'conges_payes'));
+                  $hoursForModal = $isAbsent
+                    ? ($absHeures !== null ? (float)$absHeures : 8.25)
+                    : 8.25;
+                  ?>
+                  <div class="tl-absence-full <?= htmlspecialchars($fullType) ?>"
+                    role="button"
+                    title="Modifier l'absence"
+                    data-click-absence
+                    data-reason="<?= htmlspecialchars($reasonForModal) ?>"
+                    data-hours="<?= htmlspecialchars(number_format((float)$hoursForModal, 2, '.', '')) ?>">
+                    <?= htmlspecialchars($fullLabel) ?>
+                  </div>
 
-                <?php if ($dow >= 6 && !$hasPlanning && !$hasSavedState): ?>
+
+
+                <?php elseif ($dow >= 6 && !$hasPlanning && !$hasSavedState): ?>
                   <div class="text-muted">×</div>
+
                 <?php else: ?>
+                  <!-- Affichage normal -->
+                  <span class="tl-dot <?= $isAbsent ? 'absent' : ($presentIsActive ? 'present' : (!empty($plannedIdsForDay) ? 'plan' : '')) ?>"></span>
+
+                  <?= badgePlanningAbs($planningType) ?>
+
                   <div class="tl-actions mb-2 d-flex flex-wrap gap-1 justify-content-center">
                     <button class="btn btn-sm present-btn <?= $presentIsActive ? 'btn-success' : 'btn-outline-success' ?>"
-                      data-hours="8.25" <?= $isAbsent ? 'disabled' : '' ?>>
+                      data-hours="8.25" <?= ($isAbsent || $presentDisabledByPlan) ? 'disabled' : '' ?>>
                       <?= htmlspecialchars($presentLabel) ?>
                     </button>
 
-                    <button class="btn btn-sm conduite-btn <?= $aDone ? 'btn-primary' : 'btn-outline-primary' ?>"
-                      data-type="A" <?= $isAbsent ? 'disabled' : '' ?>>A</button>
+                    <?php
+                    $motif = strtolower((string)$absMotif);
+                    $hideA = $isAbsent && $motif !== 'conges_intemperies';
+                    ?>
+                    <button class="btn btn-sm conduite-btn <?= $aDone ? 'btn-primary' : 'btn-outline-primary' ?><?= $hideA ? ' d-none' : '' ?>"
+                      data-type="A" <?= $hideA ? 'disabled' : '' ?>>A</button>
 
-                    <button class="btn btn-sm conduite-btn <?= $rDone ? 'btn-success' : 'btn-outline-success' ?>"
+                    <button class="btn btn-sm conduite-btn <?= $rDone ? 'btn-success' : 'btn-outline-success' ?><?= $isAbsent ? ' d-none' : '' ?>"
                       data-type="R" <?= $isAbsent ? 'disabled' : '' ?>>R</button>
 
                     <button type="button" class="btn btn-sm <?= $absClass ?> absence-btn">
@@ -524,6 +629,7 @@ if ($dates) {
                   </div>
                 <?php endif; ?>
               </td>
+
             <?php endforeach; ?>
           </tr>
         <?php endforeach; ?>
@@ -542,6 +648,7 @@ if ($dates) {
           <h6 class="modal-title">Déclarer une absence</h6>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
         </div>
+
         <div class="modal-body">
           <form id="absenceForm">
             <input type="hidden" name="utilisateur_id" id="absUserId">
@@ -551,12 +658,20 @@ if ($dates) {
               <label class="form-label">Motif</label>
               <div class="d-grid gap-2">
                 <label class="btn btn-outline-secondary btn-sm text-start">
-                  <input type="radio" class="form-check-input me-2" name="reason" value="conges" checked>
-                  Congés
+                  <input type="radio" class="form-check-input me-2" name="reason" value="conges_payes" checked>
+                  Congés payés
+                </label>
+                <label class="btn btn-outline-secondary btn-sm text-start">
+                  <input type="radio" class="form-check-input me-2" name="reason" value="conges_intemperies">
+                  Congés intempéries
                 </label>
                 <label class="btn btn-outline-secondary btn-sm text-start">
                   <input type="radio" class="form-check-input me-2" name="reason" value="maladie">
                   Maladie
+                </label>
+                <label class="btn btn-outline-secondary btn-sm text-start">
+                  <input type="radio" class="form-check-input me-2" name="reason" value="justifie">
+                  Justifié (décès…)
                 </label>
                 <label class="btn btn-outline-secondary btn-sm text-start">
                   <input type="radio" class="form-check-input me-2" name="reason" value="injustifie">
@@ -572,13 +687,20 @@ if ($dates) {
             </div>
           </form>
         </div>
+
         <div class="modal-footer py-2">
+          <!-- Bouton supprimer (affiché uniquement en mode édition) -->
+          <button type="button" class="btn btn-outline-danger btn-sm me-auto d-none" id="absenceDelete">
+            Supprimer l'absence
+          </button>
+
           <button type="button" class="btn btn-light btn-sm" data-bs-dismiss="modal">Annuler</button>
           <button type="button" class="btn btn-danger btn-sm" id="absenceSave">Enregistrer</button>
         </div>
       </div>
     </div>
   </div>
+
 
   <!-- Modal: Tâche du jour -->
   <div class="modal fade" id="tacheJourModal" tabindex="-1" aria-hidden="true">

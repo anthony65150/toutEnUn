@@ -89,7 +89,6 @@ $st = $pdo->prepare($sqlAg);
 $st->execute([':e' => $entrepriseId]);
 $agences = $st->fetchAll(PDO::FETCH_ASSOC);
 
-
 /* Maps rapides pour noms (affichage) */
 $chantierById = [];
 foreach ($chantiers as $c) $chantierById[(int)$c['id']] = $c['nom'];
@@ -97,7 +96,7 @@ $depotById = [];
 foreach ($depots as $d) $depotById[(int)$d['id']] = $d['nom'];
 
 /* Employés : tout le monde SAUF administrateur, avec agence */
-$employes = []; // ← évite le warning si la requête ne renvoie rien
+$employes = [];
 
 $sqlEmp = "SELECT u.id,
                   CONCAT(u.nom, ' ', u.prenom) AS nom,
@@ -116,11 +115,8 @@ $st = $pdo->prepare($sqlEmp);
 $st->execute([':e1' => $entrepriseId, ':e2' => $entrepriseId]);
 $employes = $st->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
-
-
-
 /* Détection schéma planning_affectations : type / depot_id existent ? */
-$hasTypeCol = false;
+$hasTypeCol  = false;
 $hasDepotCol = false;
 try {
   $rs = $pdo->query("SHOW COLUMNS FROM planning_affectations LIKE 'type'");
@@ -149,8 +145,8 @@ if ($hasTypeCol || $hasDepotCol) {
 }
 $st = $pdo->prepare($sqlAff);
 $st->execute([
-  ':s'  => $start->format('Y-m-d'),
-  ':e'  => $end->format('Y-m-d'),
+  ':s'   => $start->format('Y-m-d'),
+  ':e'   => $end->format('Y-m-d'),
   ':eid' => $entrepriseId
 ]);
 $affectRows = $st->fetchAll(PDO::FETCH_ASSOC);
@@ -164,13 +160,13 @@ foreach ($affectRows as $r) {
     $type = $r['type'] ?? 'chantier';
     $affects[$uid][$r['date_jour']] = [
       'type'        => $type,
-      'chantier_id' => isset($r['chantier_id']) && $r['chantier_id'] !== null ? (int)$r['chantier_id'] : null,
-      'depot_id'    => isset($r['depot_id']) && $r['depot_id'] !== null ? (int)$r['depot_id'] : null,
+      'chantier_id' => $r['chantier_id'] !== null ? (int)$r['chantier_id'] : null,
+      'depot_id'    => $r['depot_id'] !== null ? (int)$r['depot_id'] : null,
       'is_active'   => (int)($r['is_active'] ?? 0)
     ];
   } else {
     // Compat : on considère chantier_id=0 comme "dépôt"
-    $cid = isset($r['chantier_id']) ? (int)$r['chantier_id'] : null;
+    $cid  = isset($r['chantier_id']) ? (int)$r['chantier_id'] : null;
     $type = ($cid === 0 ? 'depot' : 'chantier');
     $affects[$uid][$r['date_jour']] = [
       'type'        => $type,
@@ -216,6 +212,7 @@ function badgeRole($role)
     <h1 class="m-0 text-center flex-grow-1">Planning</h1>
     <div style="width:120px"></div>
   </div>
+
   <?php if (!empty($agences)): ?>
     <div class="d-flex justify-content-center mb-3">
       <div id="agenceFilters" class="d-flex flex-wrap gap-2">
@@ -231,8 +228,6 @@ function badgeRole($role)
       </div>
     </div>
   <?php endif; ?>
-
-
 
   <input type="text" id="searchInput" class="form-control mb-3" placeholder="Rechercher un employé..." autocomplete="off" />
 
@@ -254,7 +249,7 @@ function badgeRole($role)
 
   <!-- Palette dépôts -->
   <?php if (!empty($depots)): ?>
-    <div class="mb-3 d-flex flex-wrap gap-2" id="palette-depots">
+    <div class="mb-2 d-flex flex-wrap gap-2" id="palette-depots">
       <div class="chip"
         draggable="true"
         data-type="depot"
@@ -264,6 +259,31 @@ function badgeRole($role)
       </div>
     </div>
   <?php endif; ?>
+
+  <!-- Palette absences -->
+  <div class="mb-3 d-flex flex-wrap gap-2" id="palette-absences">
+    <div class="chip"
+      draggable="true"
+      data-type="absence"
+      data-absence="conges"
+      style="background:#fde68a;color:#7a5c00;border:1px solid rgba(0,0,0,.08)">
+      <span class="dot" style="background:#f59e0b"></span>Congés
+    </div>
+    <div class="chip"
+      draggable="true"
+      data-type="absence"
+      data-absence="maladie"
+      style="background:#fecaca;color:#7a0b0b;border:1px solid rgba(0,0,0,.08)">
+      <span class="dot" style="background:#dc2626"></span>Maladie
+    </div>
+    <div class="chip"
+      draggable="true"
+      data-type="absence"
+      data-absence="rtt"
+      style="background:#bfdbfe;color:#0b4a7a;border:1px solid rgba(0,0,0,.08)">
+      <span class="dot" style="background:#2563eb"></span>RTT
+    </div>
+  </div>
 
   <!-- En-têtes mois & semaine + nav -->
   <div id="weekNav"
@@ -307,8 +327,8 @@ function badgeRole($role)
 
             <?php foreach ($days as $d):
               $isWeekend = ($d['dow'] >= 6);
-              $aff      = $affects[$emp['id']][$d['iso']] ?? null;
-              $isActive = (int)($aff['is_active'] ?? 0);
+              $aff       = $affects[$emp['id']][$d['iso']] ?? null;
+              $isActive  = (int)($aff['is_active'] ?? 0);
 
               /* Construire le chip si on a une affectation */
               $chip = null;
@@ -317,13 +337,21 @@ function badgeRole($role)
 
                 if ($type === 'depot') {
                   $did = $aff['depot_id'] ?? null;
-                  // avec colonnes -> nom précis ; sinon (compat) libellé générique
                   $nomDepot = ($did !== null && isset($depotById[$did])) ? ('Dépôt — ' . $depotById[$did]) : 'Dépôt';
                   $chip = [
                     'nom'   => $nomDepot,
                     'color' => '#cff4fc',
                     'id'    => $did ?? 0,
                     'type'  => 'depot'
+                  ];
+                } elseif (in_array($type, ['conges', 'maladie', 'rtt'], true)) {
+                  $labels = ['conges' => 'Congés', 'maladie' => 'Maladie', 'rtt' => 'RTT'];
+                  $colors = ['conges' => '#fde68a', 'maladie' => '#fecaca', 'rtt' => '#bfdbfe'];
+                  $chip = [
+                    'nom'   => $labels[$type],
+                    'color' => $colors[$type],
+                    'id'    => null,
+                    'type'  => $type
                   ];
                 } else {
                   $cid = $aff['chantier_id'] ?? null;
@@ -340,17 +368,27 @@ function badgeRole($role)
               }
             ?>
               <td>
+                <?php
+                // Prépare les data-* spécifiques selon le type
+                $extraData = '';
+                if ($chip && $chip['type'] === 'depot') {
+                  $extraData = 'data-depot-id="' . (int)$chip['id'] . '"';
+                } elseif ($chip && in_array($chip['type'], ['conges', 'maladie', 'rtt'], true)) {
+                  $extraData = 'data-absence="' . htmlspecialchars($chip['type']) . '"';
+                } elseif ($chip && $chip['type'] === 'chantier') {
+                  $extraData = 'data-chantier-id="' . (int)$chip['id'] . '"';
+                }
+                ?>
+
                 <?php if ($chip): ?>
                   <!-- Affecté -->
                   <div class="cell-drop has-chip"
                     data-date="<?= htmlspecialchars($d['iso']) ?>"
                     data-emp="<?= (int)$emp['id'] ?>">
-                    <span class="assign-chip<?= $chip['type'] === 'depot' ? ' assign-chip-depot' : '' ?>"
+                    <span class="assign-chip<?= ($chip['type'] === 'depot' ? ' assign-chip-depot' : '') ?>"
                       style="background: <?= htmlspecialchars($chip['color']) ?>;"
                       data-type="<?= htmlspecialchars($chip['type']) ?>"
-                      <?= $chip['type'] === 'depot'
-                        ? 'data-depot-id="' . (int)$chip['id'] . '"'
-                        : 'data-chantier-id="' . (int)$chip['id'] . '"' ?>>
+                      <?= $extraData ?>>
                       <?= htmlspecialchars($chip['nom']) ?>
                       <span class="x" title="Retirer">×</span>
                     </span>

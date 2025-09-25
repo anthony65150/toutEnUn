@@ -5,6 +5,11 @@
 //   window.API_DELETE
 let CURRENT_AGENCE = "all";
 
+/* ===== Utils ===== */
+function isAbsenceType(t) {
+  return ["conges", "maladie", "rtt"].includes(String(t));
+}
+
 /* ===== Toast ===== */
 function toast(msg) {
   let t = document.getElementById("plan-toast");
@@ -40,17 +45,18 @@ function toast(msg) {
   });
 }
 
-/* ===== Drag paint state ===== */
-// { type:'chantier'|'depot', id:Number, label:String, color:String, painted:Set }
+/* ===== Drag state ===== */
+// { type:'chantier'|'depot'|'conges'|'maladie'|'rtt', id:Number|null, label:String, color:String, painted:Set, mode:'drop'|'paint' }
 let dragPaint = null;
 
-function startDragPaint(type, id, color, label) {
+function startDragPaint(type, id, color, label, mode) {
   dragPaint = {
     type: type || "chantier",
-    id: Number(id),
+    id: isAbsenceType(type) ? null : Number(id || 0),
     color: color || "",
     label: label || (type === "depot" ? "Dépôt" : "Chantier"),
     painted: new Set(),
+    mode: mode === "paint" ? "paint" : "drop",
   };
 }
 function endDragPaint() { dragPaint = null; }
@@ -61,11 +67,15 @@ function makeAssign(label, color, type, id) {
   span.className = "assign-chip" + (type === "depot" ? " assign-chip-depot" : "");
   span.style.background = color || "#334155";
   span.dataset.type = type || "chantier";
+
   if (type === "depot") {
     span.dataset.depotId = id;
-  } else {
+  } else if (type === "chantier") {
     span.dataset.chantierId = id;
+  } else if (isAbsenceType(type)) {
+    span.dataset.absence = type; // pour re-drag
   }
+
   span.innerHTML = `${label} <span class="x" title="Retirer">×</span>`;
 
   // suppression
@@ -112,16 +122,25 @@ function makeAssign(label, color, type, id) {
   // re-drag
   span.addEventListener("dragstart", (e) => {
     const t = span.dataset.type || "chantier";
-    e.dataTransfer.setData("type", t);
+    let idForDnD = "";
     if (t === "depot") {
-      e.dataTransfer.setData("depot_id", span.dataset.depotId || "");
-    } else {
-      e.dataTransfer.setData("chantier_id", span.dataset.chantierId || "");
+      idForDnD = span.dataset.depotId || "";
+      e.dataTransfer.setData("depot_id", idForDnD);
+    } else if (t === "chantier") {
+      idForDnD = span.dataset.chantierId || "";
+      e.dataTransfer.setData("chantier_id", idForDnD);
+    } else if (isAbsenceType(t)) {
+      e.dataTransfer.setData("absence", t);
     }
+    e.dataTransfer.setData("type", t);
     e.dataTransfer.setData("color", span.style.background || "");
     e.dataTransfer.setData("label", label);
     e.dataTransfer.effectAllowed = "move";
-    startDragPaint(t, id, span.style.background, label);
+
+    const mode = e.shiftKey ? "paint" : "drop";
+    const idNum = isAbsenceType(t) ? null : Number(idForDnD || 0);
+    startDragPaint(t, idNum, span.style.background, label, mode);
+    if (mode === "paint") toast("Mode pinceau (Maj)");
   });
   span.setAttribute("draggable", "true");
 
@@ -130,25 +149,35 @@ function makeAssign(label, color, type, id) {
 
 /* ===== Drag sources (palettes & chips existants) ===== */
 function attachDragSources() {
-  // palettes chantiers + dépôts
-  document.querySelectorAll("#palette-chantiers .chip, #palette-depots .chip").forEach((chip) => {
+  // palettes chantiers + dépôts + absences
+  document.querySelectorAll("#palette-chantiers .chip, #palette-depots .chip, #palette-absences .chip").forEach((chip) => {
     chip.addEventListener("dragstart", (e) => {
-      const type  = chip.dataset.type || "chantier";
-      const color = chip.dataset.chipColor || chip.style.background || "";
-      const label = chip.innerText.trim();
+      const rawType = chip.dataset.type || "chantier"; // 'chantier' | 'depot' | 'absence'
+      const color   = chip.dataset.chipColor || chip.style.background || "";
+      const label   = chip.innerText.trim();
 
-      e.dataTransfer.setData("type", type);
-      if (type === "depot") {
-        e.dataTransfer.setData("depot_id", chip.dataset.depotId);
-      } else {
-        e.dataTransfer.setData("chantier_id", chip.dataset.chantierId);
+      let typeForPayload = rawType;
+      let idForPayload   = 0;
+
+      if (rawType === "depot") {
+        idForPayload = Number(chip.dataset.depotId || 0);
+        e.dataTransfer.setData("depot_id", String(idForPayload));
+      } else if (rawType === "chantier") {
+        idForPayload = Number(chip.dataset.chantierId || 0);
+        e.dataTransfer.setData("chantier_id", String(idForPayload));
+      } else if (rawType === "absence") {
+        typeForPayload = chip.dataset.absence || "conges"; // 'conges'|'maladie'|'rtt'
+        e.dataTransfer.setData("absence", typeForPayload);
       }
+
+      e.dataTransfer.setData("type", typeForPayload);
       e.dataTransfer.setData("color", color);
       e.dataTransfer.setData("label", label);
       e.dataTransfer.effectAllowed = "copy";
 
-      const id = type === "depot" ? chip.dataset.depotId : chip.dataset.chantierId;
-      startDragPaint(type, id, color, label);
+      const mode = e.shiftKey ? "paint" : "drop";
+      startDragPaint(typeForPayload, isAbsenceType(typeForPayload) ? null : idForPayload, color, label, mode);
+      if (mode === "paint") toast("Mode pinceau (Maj)");
     });
     chip.addEventListener("dragend", endDragPaint);
   });
@@ -157,42 +186,56 @@ function attachDragSources() {
   document.querySelectorAll(".assign-chip").forEach((ch) => {
     ch.addEventListener("dragstart", (e) => {
       const t = ch.dataset.type || "chantier";
-      e.dataTransfer.setData("type", t);
       if (t === "depot") {
         e.dataTransfer.setData("depot_id", ch.dataset.depotId || "");
-      } else {
+      } else if (t === "chantier") {
         e.dataTransfer.setData("chantier_id", ch.dataset.chantierId || "");
+      } else if (isAbsenceType(t)) {
+        e.dataTransfer.setData("absence", t);
       }
+      e.dataTransfer.setData("type", t);
       e.dataTransfer.setData("color", ch.style.background || "");
       e.dataTransfer.setData("label", (ch.childNodes[0]?.nodeValue || "").trim());
       e.dataTransfer.effectAllowed = "move";
 
-      const id = t === "depot" ? ch.dataset.depotId : ch.dataset.chantierId;
-      startDragPaint(t, id, ch.style.background, ch.innerText.trim());
+      const mode = e.shiftKey ? "paint" : "drop";
+      const id = t === "depot" ? ch.dataset.depotId : (t === "chantier" ? ch.dataset.chantierId : null);
+      startDragPaint(t, isAbsenceType(t) ? null : Number(id || 0), ch.style.background, ch.innerText.trim(), mode);
+      if (mode === "paint") toast("Mode pinceau (Maj)");
     });
     ch.setAttribute("draggable", "true");
   });
 }
 
-/* ===== Drop targets ===== */
+/* ===== API ===== */
 function persistMove(cell, type, id) {
   const body = new URLSearchParams({
     emp_id: cell.dataset.emp,
     date: cell.dataset.date,
+    type: type // 'chantier' | 'depot' | 'conges' | 'maladie' | 'rtt'
   });
+
   if (type === "depot") {
-    body.append("depot_id", String(id));
-  } else {
-    body.append("chantier_id", String(id));
-  }
+    body.append("depot_id", String(id || 0));
+  } else if (type === "chantier") {
+    body.append("chantier_id", String(id || 0));
+  } // absences: pas d'ID
+
   return fetch(window.API_MOVE, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     credentials: "same-origin",
     body,
-  }).then(r => r.json());
+  }).then(async (r) => {
+    const raw = await r.text();
+    let d;
+    try { d = JSON.parse(raw); } catch { throw new Error(`HTTP ${r.status} – ${raw.slice(0,200)}`); }
+    if (!r.ok || !d?.ok) throw new Error(d?.message || `HTTP ${r.status}`);
+    return d;
+  });
 }
 
+/* ===== Drop targets ===== */
 function attachDropTargets() {
   document.querySelectorAll(".cell-drop").forEach((cell) => {
     cell.addEventListener("dragover", (e) => {
@@ -201,9 +244,9 @@ function attachDropTargets() {
     });
     cell.addEventListener("dragleave", () => cell.classList.remove("dragover"));
 
-    // Hover paint = assigner à l'entrée
+    // Hover paint : seulement si mode "paint"
     cell.addEventListener("dragenter", (e) => {
-      if (!dragPaint) return;
+      if (!dragPaint || dragPaint.mode !== "paint") return;
       e.preventDefault();
       const key = cell.dataset.emp + "|" + cell.dataset.date;
       if (dragPaint.painted.has(key)) return;
@@ -217,9 +260,6 @@ function attachDropTargets() {
 
       // API
       persistMove(cell, dragPaint.type, dragPaint.id)
-        .then(d => {
-          if (!d.ok) throw new Error(d.message || "Erreur API");
-        })
         .catch(err => {
           console.error(err);
           chip.remove();
@@ -228,34 +268,47 @@ function attachDropTargets() {
         });
     });
 
-    // Drop classique si pas de paint en cours
+    // Drop classique si mode "drop" (par défaut)
     cell.addEventListener("drop", (e) => {
       e.preventDefault();
       cell.classList.remove("dragover");
-      if (!dragPaint) {
-        const type  = e.dataTransfer.getData("type") || "chantier";
-        const id    = type === "depot"
-          ? Number(e.dataTransfer.getData("depot_id") || 0)
-          : Number(e.dataTransfer.getData("chantier_id") || 0);
-        const color = e.dataTransfer.getData("color") || "";
-        const label = e.dataTransfer.getData("label") || (type === "depot" ? "Dépôt" : "Chantier");
-        if (!id) return;
 
-        cell.querySelector(".assign-chip")?.remove();
-        const chip = makeAssign(label, color, type, id);
-        cell.appendChild(chip);
-        cell.classList.add("has-chip");
+      // En mode paint, dragenter a déjà fait le boulot → on ignore drop
+      if (dragPaint && dragPaint.mode === "paint") return;
 
-        persistMove(cell, type, id).catch(console.error);
+      const type  = (dragPaint?.type) || e.dataTransfer.getData("type") || "chantier";
+      let id = 0;
+      if (type === "depot") {
+        id = dragPaint?.id ?? Number(e.dataTransfer.getData("depot_id") || 0);
+      } else if (type === "chantier") {
+        id = dragPaint?.id ?? Number(e.dataTransfer.getData("chantier_id") || 0);
+      } else if (isAbsenceType(type)) {
+        id = null;
       }
+      const color = (dragPaint?.color) || e.dataTransfer.getData("color") || "";
+      const label = (dragPaint?.label) || e.dataTransfer.getData("label") || (type === "depot" ? "Dépôt" : (isAbsenceType(type) ? type.toUpperCase() : "Chantier"));
+      if (type === "chantier" && !id) return;
+
+      cell.querySelector(".assign-chip")?.remove();
+      const chip = makeAssign(label, color, type, id);
+      cell.appendChild(chip);
+      cell.classList.add("has-chip");
+
+      persistMove(cell, type, id).catch(console.error);
     });
   });
 }
 
 /* ===== Paint pour cell-off (weekend, jours off) ===== */
 function attachPaintToOffCell(off) {
+  // Autoriser le dragover pour afficher le curseur de drop
+  off.addEventListener("dragover", (e) => {
+    e.preventDefault();
+  });
+
+  // 1) MODE PINCEAU (Maj) : déjà géré au dragenter
   off.addEventListener("dragenter", (e) => {
-    if (!dragPaint) return;
+    if (!dragPaint || dragPaint.mode !== "paint") return;
     e.preventDefault();
 
     // OFF -> actif
@@ -264,7 +317,7 @@ function attachPaintToOffCell(off) {
     active.dataset.date = off.dataset.date;
     active.dataset.emp  = off.dataset.emp;
     off.replaceWith(active);
-    attachDropTargets();
+    attachDropTargets(); // attache les handlers .cell-drop
 
     const key = active.dataset.emp + "|" + active.dataset.date;
     if (!dragPaint.painted.has(key)) {
@@ -275,27 +328,75 @@ function attachPaintToOffCell(off) {
       active.appendChild(chip);
       active.classList.add("has-chip");
 
-      // API (MOVE active aussi le jour côté back)
-      persistMove(active, dragPaint.type, dragPaint.id)
-        .then(d => {
-          if (!d.ok) throw new Error(d.message || "Erreur API");
-        })
-        .catch(err => {
-          console.error(err);
-          chip.remove();
-          active.classList.remove("has-chip");
-          const back = document.createElement('div');
-          back.className = 'cell-off';
-          back.dataset.date = active.dataset.date;
-          back.dataset.emp  = active.dataset.emp;
-          back.innerHTML = '<button type="button" class="wkx" title="Jour non travaillé — activer exceptionnellement">×</button>';
-          active.replaceWith(back);
-          attachPaintToOffCell(back);
-          toast('Échec enregistrement');
-        });
+      // API
+      persistMove(active, dragPaint.type, dragPaint.id).catch(err => {
+        console.error(err);
+        chip.remove();
+        active.classList.remove("has-chip");
+        const back = document.createElement('div');
+        back.className = 'cell-off';
+        back.dataset.date = active.dataset.date;
+        back.dataset.emp  = active.dataset.emp;
+        back.innerHTML = '<button type="button" class="wkx" title="Jour non travaillé — activer exceptionnellement">×</button>';
+        active.replaceWith(back);
+        attachPaintToOffCell(back);
+        toast('Échec enregistrement');
+      });
     }
   });
+
+  // 2) MODE DROP (par défaut) : activer au moment du drop
+  off.addEventListener("drop", (e) => {
+    if (!dragPaint || dragPaint.mode !== "drop") return; // si pinceau, dragenter a déjà fait le travail
+    e.preventDefault();
+
+    // OFF -> actif
+    const active = document.createElement("div");
+    active.className = "cell-drop";
+    active.dataset.date = off.dataset.date;
+    active.dataset.emp  = off.dataset.emp;
+    off.replaceWith(active);
+    attachDropTargets();
+
+    // Récup des données de la pastille
+    const type  = (dragPaint?.type) || e.dataTransfer.getData("type") || "chantier";
+    let id = 0;
+    if (type === "depot") {
+      id = dragPaint?.id ?? Number(e.dataTransfer.getData("depot_id") || 0);
+    } else if (type === "chantier") {
+      id = dragPaint?.id ?? Number(e.dataTransfer.getData("chantier_id") || 0);
+    } else if (isAbsenceType(type)) {
+      id = null;
+    }
+    const color = (dragPaint?.color) || e.dataTransfer.getData("color") || "";
+    const label = (dragPaint?.label) || e.dataTransfer.getData("label") ||
+                  (type === "depot" ? "Dépôt" : (isAbsenceType(type) ? type.toUpperCase() : "Chantier"));
+
+    // IMPORTANT : ne bloquer que les chantiers sans id, pas les dépôts (id=0 ok)
+    if (type === "chantier" && !id) return;
+
+    // UI
+    const chip = makeAssign(label, color, type, id);
+    active.appendChild(chip);
+    active.classList.add("has-chip");
+
+    // API
+    persistMove(active, type, id).catch(err => {
+      console.error(err);
+      chip.remove();
+      active.classList.remove("has-chip");
+      const back = document.createElement('div');
+      back.className = 'cell-off';
+      back.dataset.date = active.dataset.date;
+      back.dataset.emp  = active.dataset.emp;
+      back.innerHTML = '<button type="button" class="wkx" title="Jour non travaillé — activer exceptionnellement">×</button>';
+      active.replaceWith(back);
+      attachPaintToOffCell(back);
+      toast('Échec enregistrement');
+    });
+  });
 }
+
 
 /* ===== Filtre employé ===== */
 function filterRows(q) {
@@ -309,7 +410,6 @@ function filterRows(q) {
     tr.style.display = (matchName && matchAgence) ? "" : "none";
   });
 }
-
 
 /* ===== Navigation semaines ===== */
 document.addEventListener("click", (e) => {
@@ -374,7 +474,7 @@ document.addEventListener("DOMContentLoaded", () => {
       t = setTimeout(() => filterRows(v), 120);
     });
   }
-    // Filtres agence
+  // Filtres agence
   const agBar = document.getElementById("agenceFilters");
   if (agBar) {
     agBar.addEventListener("click", (e) => {
@@ -393,7 +493,6 @@ document.addEventListener("DOMContentLoaded", () => {
       filterRows(q);
     });
   }
-
 });
 
 /* ===== Suppression via croix (sélecteur délégué de secours) ===== */

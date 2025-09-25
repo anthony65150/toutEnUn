@@ -72,8 +72,7 @@ document.addEventListener('DOMContentLoaded', () => {
    * ------------------------------ */
   const DEBUG = true; // passe à false en prod
 
-  const labelForReason = (r) => (r === 'conges' ? 'Congés' : (r === 'maladie' ? 'Maladie' : 'Injustifié'));
-
+ 
   const showError = (msg, ctx) => {
     alert(msg || 'Erreur serveur');
     if (DEBUG && ctx) console.error('[POINTAGE]', msg, ctx);
@@ -122,6 +121,21 @@ document.addEventListener('DOMContentLoaded', () => {
     return `${h}h${String(m).padStart(2,'0')}`;
   }
   const FULL_DAY = 8.25; // 8h15
+
+  function labelForReason(r) {
+  const map = {
+    conges_payes: 'Congés payés',
+    conges_intemperies: 'Congés intempéries',
+    maladie: 'Maladie',
+    justifie: 'Justifié',
+    injustifie: 'Injustifié'
+  };
+  return map[r] || r;
+}
+
+function formatHours(h) {
+  return Number(h).toLocaleString('fr-FR', { maximumFractionDigits: 2, useGrouping: false });
+}
 
 
   /* ------------------------------
@@ -370,7 +384,10 @@ document.addEventListener('DOMContentLoaded', () => {
         absBtn.textContent = 'Abs.';
       }
       td.querySelector('.absence-pill')?.remove();
-      td.querySelectorAll('.conduite-btn').forEach(b => b.disabled = false);
+      td.querySelectorAll('.conduite-btn').forEach(b => {
+  b.disabled = false;
+  b.classList.remove('d-none');
+});
 
       // poser présence
       const payload = { utilisateur_id: userId, date: dateIso, hours };
@@ -407,7 +424,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (fUser)  fUser.value = uid;
     if (fDate)  fDate.value = d;
-    if (absForm?.reason) absForm.reason.value = 'conges';
+    if (absForm?.reason) absForm.reason.value = 'conges_payes';
     if (fHours) fHours.value = '8.25';
 
     absenceModal?.show();
@@ -438,7 +455,8 @@ document.addEventListener('DOMContentLoaded', () => {
       if (absBtn) {
         absBtn.classList.remove('btn-outline-danger');
         absBtn.classList.add('btn-danger');
-        absBtn.textContent = `${labelForReason(reason)} ${hours.toString().replace('.', ',')} h`;
+        absBtn.textContent = `${labelForReason(reason)} ${formatHours(hours)} h`;
+
       }
       td.querySelector('.absence-pill')?.remove();
 
@@ -464,8 +482,23 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       }
 
-      // 4) Conduite désactivée si absence
-      td.querySelectorAll('.conduite-btn').forEach(b => b.disabled = true);
+    // 4) Conduite et absence : cas particulier "congés intempéries"
+const isIntemp = (reason === 'conges_intemperies');
+const btnA = td.querySelector('.conduite-btn[data-type="A"]');
+const btnR = td.querySelector('.conduite-btn[data-type="R"]');
+
+// A : autorisé uniquement pour "congés intempéries"
+if (btnA) {
+  btnA.disabled = !isIntemp;
+  btnA.classList.toggle('d-none', !isIntemp);
+}
+
+// R : toujours interdit quand il y a une absence
+if (btnR) {
+  btnR.disabled = true;
+  btnR.classList.add('d-none');
+}
+
 
       absenceModal?.hide();
     } catch (err) {
@@ -495,7 +528,10 @@ document.addEventListener('DOMContentLoaded', () => {
       btn.classList.add('btn-outline-danger');
       btn.textContent = 'Abs.';
       td.querySelector('.absence-pill')?.remove();
-      td.querySelectorAll('.conduite-btn').forEach(b => b.disabled = false);
+      td.querySelectorAll('.conduite-btn').forEach(b => {
+  b.disabled = false;
+  b.classList.remove('d-none');
+});
     } catch (err) {
       showError(err.message, err.debug);
     }
@@ -682,7 +718,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const hidUid     = document.getElementById('tj_utilisateur_id');
   const hidDate    = document.getElementById('tj_date_jour');
   const form       = document.getElementById('tacheJourForm');
-
+const searchTache = document.getElementById('searchTache') || modalEl.querySelector('#searchTache');
   // rendu de la liste
   function renderTacheList(taches, selectedId = '') {
     listTache.innerHTML = '';
@@ -750,42 +786,45 @@ root.addEventListener('click', async (e) => {
   const cid = preferCid || resolveCellChantierId(td);
   if (!cid) { alert("Sélectionne un chantier (bouton de filtre) ou affecte clairement la cellule."); return; }
 
+  // 🔥 Pose le cid immédiatement (avant show et avant fetch)
+  modalEl.dataset.cid = String(cid);
+
   // pré-remplis
   hidUid.value  = utilisateurId;
   hidDate.value = dateJour;
   hidTacheId.value = cell.dataset.tacheId || '';
 
-    // ouvre la modale
-    try { modal.show(); } catch {}
- 
-    // charge la liste
-    try {
-      const res = await fetch('/pointage/api/taches_list.php', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ csrf_token: csrf, chantier_id: cid })
-      });
-      const j = await res.json();
-      if (!j?.success) throw new Error(j?.message || 'Erreur de chargement des tâches');
+  // ouvre la modale
+  try { modal.show(); } catch {}
 
-      TACHES_CACHE = j.taches || [];
-      renderTacheList(TACHES_CACHE, hidTacheId.value);
+  // charge la liste (inchangé)
+  try {
+    const res = await fetch('/pointage/api/taches_list.php', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ csrf_token: csrf, chantier_id: cid })
+    });
+    const j = await res.json();
+    if (!j?.success) throw new Error(j?.message || 'Erreur de chargement des tâches');
 
-      // garde le cid pour le submit
-      modalEl.dataset.cid = String(cid);
+    TACHES_CACHE = j.taches || [];
+    renderTacheList(TACHES_CACHE, hidTacheId.value);
 
-    } catch (err) {
-      listTache.innerHTML = '<div class="text-muted p-2">(Liste indisponible)</div>';
-      console.error(err);
-    }
-  });
+  } catch (err) {
+    listTache.innerHTML = '<div class="text-muted p-2">(Liste indisponible)</div>';
+    console.error(err);
+  }
+});
+
 
   // filtre live
-  searchTache?.addEventListener('input', () => {
+ if (searchTache) {
+  searchTache.addEventListener('input', () => {
     const q = (searchTache.value || '').toLowerCase();
     const filtered = TACHES_CACHE.filter(t => (t.libelle || '').toLowerCase().includes(q));
     renderTacheList(filtered, hidTacheId.value);
   });
+}
 
   // calcule les heures pour la cellule (Présent OU 8.25 − Absence, sinon 8.25)
   function getCellHours(td){
@@ -816,16 +855,23 @@ root.addEventListener('click', async (e) => {
 form?.addEventListener('submit', async (e) => {
   e.preventDefault();
 
+  // 🔒 Sécurise cid au cas où (clic très rapide)
+  let cid = parseInt(modalEl.dataset.cid || '0', 10);
+  if (!cid) {
+    const cell = modalEl._td?.querySelector('[data-click-tache]') || modalEl._td;
+    cid = parseInt(cell?.dataset?.ptChantierId || '0', 10) || resolveCellChantierId(modalEl._td) || 0;
+    if (cid) modalEl.dataset.cid = String(cid);
+  }
+
   const payload = {
     csrf_token: csrf,
-    chantier_id: parseInt(modalEl.dataset.cid || '0', 10),
+    chantier_id: cid,
     utilisateur_id: parseInt(hidUid.value || '0', 10),
     date_jour: hidDate.value || '',
     tache_id: Number(String(hidTacheId.value || '0').trim()),
     heures: 0
   };
 
-  // on n'exige PAS tache_id (déselection = 0)
   if (!payload.utilisateur_id || !payload.date_jour || !payload.chantier_id) return;
 
   payload.heures = getCellHours(modalEl._td);
@@ -894,3 +940,52 @@ form?.addEventListener('submit', async (e) => {
 });
 
 })();
+
+
+document.addEventListener('click', (e) => {
+  const box = e.target.closest('[data-click-absence]');
+  if (!box) return;
+
+  const cell = box.closest('.tl-cell');
+  const row  = box.closest('tr');
+  const uid  = row?.dataset.userId;
+  const date = cell?.dataset.date;
+  if (!uid || !date) return;
+
+  document.getElementById('absUserId').value = uid;
+  document.getElementById('absDate').value   = date;
+
+  const reason = (box.getAttribute('data-reason') || 'injustifie').toLowerCase();
+  const hours  = parseFloat(box.getAttribute('data-hours') || '8.25') || 8.25;
+
+  // motif
+  document.querySelectorAll('#absenceForm input[name="reason"]').forEach(r => {
+    r.checked = (r.value.toLowerCase() === reason);
+  });
+  // heures
+  const hoursInput = document.getElementById('absHours');
+  if (hoursInput) hoursInput.value = hours.toFixed(2);
+
+  // afficher bouton supprimer
+  document.getElementById('absenceDelete')?.classList.remove('d-none');
+
+  new bootstrap.Modal(document.getElementById('absenceModal')).show();
+});
+
+document.getElementById('absenceDelete')?.addEventListener('click', async () => {
+  const uid  = document.getElementById('absUserId').value;
+  const date = document.getElementById('absDate').value;
+  try {
+    const resp = await fetch('/pointage/pointage_absence.php', {
+      method: 'POST',
+      headers: {'Content-Type':'application/x-www-form-urlencoded'},
+      body: new URLSearchParams({ utilisateur_id: uid, date, remove: '1' })
+    });
+    const data = await resp.json();
+    if (!resp.ok || !data.success) throw new Error(data.message || 'Erreur');
+    location.reload();
+  } catch (err) {
+    alert(err.message || 'Erreur réseau');
+  }
+});
+
