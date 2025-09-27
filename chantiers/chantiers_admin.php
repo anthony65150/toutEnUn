@@ -39,19 +39,42 @@ $today = (new DateTime('today'))->format('Y-m-d');
 if (isset($_GET['date']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $_GET['date'])) {
   $today = $_GET['date'];
 }
+$agenceFilter = $_GET['agence_id'] ?? null; // peut être "none" ou un ID
+$whereAgence = '';
+$paramsAgence = [];
+
+if ($agenceFilter === 'none') {
+  $whereAgence = " AND COALESCE(c.agence_id, d.agence_id) IS NULL ";
+} elseif (ctype_digit((string)$agenceFilter) && (int)$agenceFilter > 0) {
+  $whereAgence = " AND COALESCE(c.agence_id, d.agence_id) = :agf ";
+  $paramsAgence[':agf'] = (int)$agenceFilter;
+}
+
+
 
 $sql = "
 SELECT
   c.id,
   c.nom,
+  c.adresse,
+  c.depot_id,
+  d.nom AS depot_nom,
   c.description,
   c.date_debut,
   c.date_fin,
+  c.trajet_distance_m,
+  c.trajet_duree_s,
+  c.trajet_last_calc,
+  c.etat,
+
+
+  /* Agence effective : chantier.agence_id sinon depot.agence_id */
+  COALESCE(c.agence_id, d.agence_id) AS agence_id,
+  a.nom AS agence_nom,
 
   ur.id AS resp_id,
-  CONCAT(COALESCE(ur.prenom,''), ' ', COALESCE(ur.nom,'')) AS resp_nom,
+  CONCAT(COALESCE(ur.prenom, ''), ' ', COALESCE(ur.nom, '')) AS resp_nom,
 
-  /* Équipe du jour (hors chefs) : employés + intérims + autres + dépôt */
   GROUP_CONCAT(DISTINCT
     CASE WHEN u_all.fonction IN ('employe','interim','autre','depot')
          THEN CONCAT(u_all.prenom, ' ', u_all.nom)
@@ -59,7 +82,6 @@ SELECT
     ORDER BY u_all.nom, u_all.prenom SEPARATOR ', '
   ) AS equipe_du_jour,
 
-  /* Autres chefs (que le responsable) */
   GROUP_CONCAT(DISTINCT
     CASE WHEN u_chef.id IS NOT NULL AND u_chef.id <> c.responsable_id
          THEN CONCAT(u_chef.prenom, ' ', u_chef.nom)
@@ -69,28 +91,23 @@ SELECT
 
   GROUP_CONCAT(DISTINCT u_chef.id) AS chef_ids_all,
 
-  /* ===== Compteurs ===== */
-  /* Employés + intérims + autres + dépôt affectés aujourd'hui (distinct) */
   COUNT(DISTINCT CASE
       WHEN u_all.id IS NOT NULL AND u_all.fonction IN ('employe','interim','autre','depot')
       THEN u_all.id END
   ) AS nb_ouvriers_today,
 
-  /* Tous les chefs : responsable (si présent) + autres chefs distincts */
   (CASE WHEN ur.id IS NULL THEN 0 ELSE 1 END)
   + COUNT(DISTINCT CASE
       WHEN u_chef.id IS NOT NULL AND u_chef.id <> c.responsable_id
       THEN u_chef.id END
     ) AS nb_chefs_total,
 
-  /* total pour l’affichage à côté du nom */
   (
     COUNT(DISTINCT CASE
       WHEN u_all.id IS NOT NULL AND u_all.fonction IN ('employe','interim','autre','depot')
       THEN u_all.id END
     )
-    +
-    (CASE WHEN ur.id IS NULL THEN 0 ELSE 1 END)
+    + (CASE WHEN ur.id IS NULL THEN 0 ELSE 1 END)
     + COUNT(DISTINCT CASE
         WHEN u_chef.id IS NOT NULL AND u_chef.id <> c.responsable_id
         THEN u_chef.id END
@@ -98,42 +115,189 @@ SELECT
   ) AS total_personnes
 
 FROM chantiers c
+
+LEFT JOIN depots d
+       ON d.id = c.depot_id
+      AND d.entreprise_id = :eid_dep
+
+/* JOIN agences sur l’agence effective (chantier OU dépôt) */
+LEFT JOIN agences a
+       ON a.id = COALESCE(c.agence_id, d.agence_id)
+      AND a.entreprise_id = :eid_ag
+
 LEFT JOIN utilisateurs ur
        ON ur.id = c.responsable_id
       AND ur.fonction = 'chef'
-      AND ur.entreprise_id = :eid1
+      AND ur.entreprise_id = :eid2
+
 LEFT JOIN planning_affectations pa
        ON pa.chantier_id   = c.id
       AND pa.date_jour     = :d
-      AND pa.entreprise_id = :eid2
+      AND pa.entreprise_id = :eid3
+
 LEFT JOIN utilisateurs u_all
        ON u_all.id            = pa.utilisateur_id
-      AND u_all.entreprise_id = :eid3
+      AND u_all.entreprise_id = :eid4
+
 LEFT JOIN utilisateur_chantiers uc
        ON uc.chantier_id   = c.id
-      AND uc.entreprise_id = :eid4
+      AND uc.entreprise_id = :eid5
+
 LEFT JOIN utilisateurs u_chef
        ON u_chef.id            = uc.utilisateur_id
       AND u_chef.fonction      = 'chef'
-      AND u_chef.entreprise_id = :eid5
-WHERE c.entreprise_id = :eid6
+      AND u_chef.entreprise_id = :eid6
+
+WHERE c.entreprise_id = :eid7
+{$whereAgence}
+
 GROUP BY c.id
 ORDER BY c.nom
 ";
 
 
 
-$st = $pdo->prepare($sql);
-$st->execute([
+
+$params = [
   ':d'    => $today,
-  ':eid1' => $entrepriseId,
-  ':eid2' => $entrepriseId,
+  ':eid_dep' => $entrepriseId,
+  ':eid_ag'  => $entrepriseId,
+  ':eid2'    => $entrepriseId,
   ':eid3' => $entrepriseId,
   ':eid4' => $entrepriseId,
   ':eid5' => $entrepriseId,
   ':eid6' => $entrepriseId,
-]);
+  ':eid7' => $entrepriseId,
+];
+if (isset($paramsAgence[':agf'])) {
+  $params[':agf'] = $paramsAgence[':agf'];
+}
+
+$st = $pdo->prepare($sql);
+
+$st->bindValue(':d',        $today);                    // date jour
+$st->bindValue(':eid_dep',  $entrepriseId, PDO::PARAM_INT); // depots d
+$st->bindValue(':eid_ag',   $entrepriseId, PDO::PARAM_INT); // agences a
+$st->bindValue(':eid2',     $entrepriseId, PDO::PARAM_INT); // utilisateurs ur
+$st->bindValue(':eid3',     $entrepriseId, PDO::PARAM_INT); // planning_affectations pa
+$st->bindValue(':eid4',     $entrepriseId, PDO::PARAM_INT); // utilisateurs u_all
+$st->bindValue(':eid5',     $entrepriseId, PDO::PARAM_INT); // utilisateur_chantiers uc
+$st->bindValue(':eid6',     $entrepriseId, PDO::PARAM_INT); // utilisateurs u_chef
+$st->bindValue(':eid7',     $entrepriseId, PDO::PARAM_INT); // WHERE c.entreprise_id
+
+// Liaison conditionnelle si le WHERE inséré par {$whereAgence} contient :agf
+if (strpos($whereAgence, ':agf') !== false) {
+  $st->bindValue(':agf', (int)$agenceFilter, PDO::PARAM_INT);
+}
+
+$st->execute();
+
+
 $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+
+$stDep = $pdo->prepare("SELECT id, nom, adresse FROM depots WHERE entreprise_id = :eid ORDER BY nom");
+$stDep->execute([':eid' => $entrepriseId]);
+$depots = $stDep->fetchAll(PDO::FETCH_ASSOC);
+
+/* ====== Agences (pour filtres) ====== */
+$stAgences = $pdo->prepare("
+  SELECT
+    a.id,
+    a.nom,
+    SUM(
+      CASE
+        WHEN NULLIF(COALESCE(c.agence_id, d.agence_id), 0) = a.id THEN 1
+        ELSE 0
+      END
+    ) AS nb
+  FROM agences a
+  LEFT JOIN chantiers c
+         ON c.entreprise_id = :eid_c1
+  LEFT JOIN depots d
+         ON d.id = c.depot_id
+        AND d.entreprise_id = :eid_c2
+  WHERE a.entreprise_id = :eid_a
+  GROUP BY a.id, a.nom
+  ORDER BY a.nom
+");
+$stAgences->execute([
+  ':eid_c1' => $entrepriseId,
+  ':eid_c2' => $entrepriseId,
+  ':eid_a'  => $entrepriseId,
+]);
+$agences = $stAgences->fetchAll(PDO::FETCH_ASSOC);
+
+
+
+$stSansAgence = $pdo->prepare("
+  SELECT
+    SUM(
+      CASE
+        WHEN NULLIF(COALESCE(c.agence_id, d.agence_id), 0) IS NULL THEN 1
+        ELSE 0
+      END
+    ) AS nb_sans
+  FROM chantiers c
+  LEFT JOIN depots d
+         ON d.id = c.depot_id
+        AND d.entreprise_id = :eid_d
+  WHERE c.entreprise_id = :eid_c
+");
+$stSansAgence->execute([
+  ':eid_d' => $entrepriseId,   // pour depots
+  ':eid_c' => $entrepriseId,   // pour chantiers
+]);
+$sansAgenceCount = (int)$stSansAgence->fetchColumn();
+
+
+
+
+
+
+
+
+// -------- Compteurs En cours / Fini *alignés* sur la logique d'affichage --------
+$agf = $_GET['agence_id'] ?? null;
+
+$whereAgenceCount = '';
+$paramsCount = [
+  ':eid_c' => $entrepriseId, // pour WHERE c.entreprise_id
+  ':eid_d' => $entrepriseId, // pour JOIN d.entreprise_id
+];
+
+if ($agf === 'none') {
+  $whereAgenceCount = " AND COALESCE(c.agence_id, d.agence_id) IS NULL ";
+} elseif (ctype_digit((string)$agf) && (int)$agf > 0) {
+  $whereAgenceCount = " AND COALESCE(c.agence_id, d.agence_id) = :agf ";
+  $paramsCount[':agf'] = (int)$agf;
+}
+
+$sqlCount = "
+  SELECT
+    SUM(
+      CASE
+        WHEN (c.etat = 'fini') OR (c.date_fin IS NOT NULL AND c.date_fin < CURDATE())
+        THEN 1 ELSE 0
+      END
+    ) AS nb_fini,
+    SUM(
+      CASE
+        WHEN NOT ( (c.etat = 'fini') OR (c.date_fin IS NOT NULL AND c.date_fin < CURDATE()) )
+        THEN 1 ELSE 0
+      END
+    ) AS nb_en_cours
+  FROM chantiers c
+  LEFT JOIN depots d
+         ON d.id = c.depot_id
+        AND d.entreprise_id = :eid_d   -- nom distinct
+  WHERE c.entreprise_id = :eid_c       -- nom distinct
+  $whereAgenceCount
+";
+
+$stCnt = $pdo->prepare($sqlCount);
+$stCnt->execute($paramsCount);
+
+list($nbFini, $nbEnCours) = array_map('intval', $stCnt->fetch(PDO::FETCH_NUM));
 
 
 
@@ -151,73 +315,161 @@ require_once __DIR__ . '/../templates/navigation/navigation.php';
     </button>
   </div>
 
-  <input type="text" id="chantierSearchInput" class="form-control mb-4" placeholder="Rechercher un chantier..." autocomplete="off" />
+  <?php
+  $agenceIdFromQS = $_GET['agence_id'] ?? '0';
+  $showEtat = ($agenceIdFromQS !== '0'); // visible seulement si une agence est sélectionnée (y compris "none")
+  ?>
+
+  <!-- Toolbar CENTRÉE sous le bouton -->
+  <div class="d-flex justify-content-center">
+    <div class="btn-toolbar flex-column align-items-center gap-2" id="filtersToolbar">
+
+      <!-- 1) Filtres AGENCE (rangée du haut) -->
+      <div id="agenceFilters" class="btn-group" role="group" aria-label="Filtre agence">
+        <button type="button" class="btn btn-outline-primary" data-agence="0">Tous</button>
+        <button type="button" class="btn btn-outline-primary" data-agence="none">
+          Sans agence<?= $sansAgenceCount ? " ($sansAgenceCount)" : "" ?>
+        </button>
+        <?php foreach ($agences as $a): ?>
+          <button type="button" class="btn btn-outline-primary" data-agence="<?= (int)$a['id'] ?>">
+            <?= htmlspecialchars($a['nom']) ?><?= $a['nb'] ? " (" . (int)$a['nb'] . ")" : "" ?>
+          </button>
+        <?php endforeach; ?>
+      </div>
+
+      <!-- 2) Sous-catégories ÉTAT (rangée du bas, sans "Tous") -->
+      <div id="etatFilters" class="btn-group d-block mb-3 <?= $showEtat ? '' : 'd-none' ?>" role="group">
+        <button type="button" class="btn btn-outline-secondary" data-etat="en_cours">
+          En cours (<span class="etat-count" data-for="en_cours"><?= (int)($nbEnCours ?? 0) ?></span>)
+        </button>
+        <button type="button" class="btn btn-outline-secondary" data-etat="fini">
+          Fini (<span class="etat-count" data-for="fini"><?= (int)($nbFini ?? 0) ?></span>)
+        </button>
+      </div>
+
+
+    </div>
+  </div>
+
+  <!-- 3) Champ de RECHERCHE (plein largeur, sous la toolbar) -->
+  <input type="text"
+    id="chantierSearchInput"
+    class="form-control my-3"
+    placeholder="Rechercher un chantier..."
+    autocomplete="off" />
 
   <table class="table table-striped table-hover table-bordered text-center">
-  <thead class="table-dark">
-    <tr>
-      <th>Nom</th>
-      <th>Chef</th>
-      <th>Équipe (aujourd’hui)</th>
-      <th>Date début</th>
-      <th>Date fin</th>
-      <th>Actions</th>
-    </tr>
-  </thead>
-  <tbody id="chantiersTableBody">
-    <?php foreach ($rows as $c): ?>
-      <tr class="align-middle" data-row-id="<?= (int)$c['id'] ?>">
-        <td>
-          <a href="chantier_menu.php?id=<?= (int)$c['id'] ?>">
-            <?= htmlspecialchars($c['nom']) ?> (<?= (int)($c['total_personnes'] ?? 0) ?>)
-          </a>
-        </td>
+    <thead class="table-dark">
+      <tr>
+        <th>Nom</th>
+        <th>Adresse</th>
+        <th>Dépôt</th>
+        <th>Chef</th>
+        <th>Équipe (aujourd’hui)</th>
+        <th>Date début</th>
+        <th>Date fin</th>
+        <th>Kilomètres</th>
+        <th>Durée</th>
 
-        <td class="text-center">
-          <?php if (!empty($c['resp_nom'])): ?>
-            <?= htmlspecialchars($c['resp_nom']) ?>
-            <?php if (!empty($c['autres_chefs'])): ?>
-              <div class="small text-muted">+ <?= htmlspecialchars($c['autres_chefs']) ?></div>
-            <?php endif; ?>
-          <?php else: ?>
-            <span class="text-muted">—</span>
-          <?php endif; ?>
-        </td>
-
-        <td class="text-start">
-          <?= !empty($c['equipe_du_jour']) ? htmlspecialchars($c['equipe_du_jour']) : '—' ?>
-        </td>
-
-        <td><?= htmlspecialchars($c['date_debut'] ?? '') ?></td>
-        <td><?= htmlspecialchars($c['date_fin'] ?? '') ?></td>
-
-        <td>
-          <button class="btn btn-sm btn-warning edit-btn"
-            data-bs-toggle="modal" data-bs-target="#chantierEditModal"
-            data-id="<?= (int)$c['id'] ?>"
-            data-nom="<?= htmlspecialchars($c['nom']) ?>"
-            data-description="<?= htmlspecialchars($c['description'] ?? '') ?>"
-            data-debut="<?= htmlspecialchars($c['date_debut'] ?? '') ?>"
-            data-fin="<?= htmlspecialchars($c['date_fin'] ?? '') ?>"
-            data-chef-ids="<?= htmlspecialchars($c['chef_ids_all'] ?? '') ?>"
-            title="Modifier">
-            <i class="bi bi-pencil-fill"></i>
-          </button>
-
-          <button class="btn btn-sm btn-danger delete-btn"
-            data-bs-toggle="modal" data-bs-target="#deleteModal"
-            data-id="<?= (int)$c['id'] ?>" title="Supprimer">
-            <i class="bi bi-trash-fill"></i>
-          </button>
-        </td>
+        <th>Actions</th>
       </tr>
-    <?php endforeach; ?>
-  </tbody>
-</table>
+    </thead>
+    <tbody id="chantiersTableBody">
+      <?php foreach ($rows as $c): ?>
+        <tr class="align-middle"
+          data-row-id="<?= (int)($c['id'] ?? 0) ?>"
+          data-agence-id="<?= (int)($c['agence_id'] ?? 0) ?>"
+          data-etat="<?= htmlspecialchars($c['etat'] ?? 'en_cours') ?>">
+          <td>
+            <a href="chantier_menu.php?id=<?= (int)$c['id'] ?>">
+              <?= htmlspecialchars($c['nom']) ?> (<?= (int)($c['total_personnes'] ?? 0) ?>)
+            </a>
+          </td>
+          <td><?= htmlspecialchars($c['adresse'] ?? '—') ?></td>
+          <td><?= htmlspecialchars($c['depot_nom'] ?? '—') ?></td>
+
+          <td class="text-center">
+            <?php if (!empty($c['resp_nom'])): ?>
+              <?= htmlspecialchars($c['resp_nom']) ?>
+              <?php if (!empty($c['autres_chefs'])): ?>
+                <div class="small text-muted">+ <?= htmlspecialchars($c['autres_chefs']) ?></div>
+              <?php endif; ?>
+            <?php else: ?>
+              <span class="text-muted">—</span>
+            <?php endif; ?>
+          </td>
+
+          <td class="text-start">
+            <?= !empty($c['equipe_du_jour']) ? htmlspecialchars($c['equipe_du_jour']) : '—' ?>
+          </td>
+
+          <td><?= htmlspecialchars($c['date_debut'] ?? '') ?></td>
+          <td><?= htmlspecialchars($c['date_fin'] ?? '') ?></td>
+          <?php
+          $km  = isset($c['trajet_distance_m']) ? round(((int)$c['trajet_distance_m']) / 1000, 1) : null;
+          $min = isset($c['trajet_duree_s']) ? (int)round(((int)$c['trajet_duree_s']) / 60) : null;
+          ?>
+          <td class="trajet-km">
+            <?= $km !== null ? htmlspecialchars(number_format($km, 1, ',', '')) : '—' ?>
+          </td>
+          <td class="trajet-min">
+            <?= $min !== null ? htmlspecialchars($min) . ' min' : '—' ?>
+          </td>
+
+
+          <td>
+            <button class="btn btn-sm btn-warning edit-btn"
+              data-bs-toggle="modal" data-bs-target="#chantierEditModal"
+              data-id="<?= (int)$c['id'] ?>"
+              data-nom="<?= htmlspecialchars($c['nom']) ?>"
+              data-adresse="<?= htmlspecialchars($c['adresse'] ?? '', ENT_QUOTES) ?>"
+              data-depot-id="<?= (int)($c['depot_id'] ?? 0) ?>"
+              data-description="<?= htmlspecialchars($c['description'] ?? '') ?>"
+              data-debut="<?= htmlspecialchars($c['date_debut'] ?? '') ?>"
+              data-fin="<?= htmlspecialchars($c['date_fin'] ?? '') ?>"
+              data-chef-ids="<?= htmlspecialchars($c['chef_ids_all'] ?? '') ?>"
+              data-agence-id="<?= (int)($c['agence_id'] ?? 0) ?>"
+              title="Modifier">
+              <i class="bi bi-pencil-fill"></i>
+            </button>
+
+            <button class="btn btn-sm btn-danger delete-btn"
+              data-bs-toggle="modal" data-bs-target="#deleteModal"
+              data-id="<?= (int)$c['id'] ?>" title="Supprimer">
+              <i class="bi bi-trash-fill"></i>
+            </button>
+            <button class="btn btn-sm btn-outline-primary calc-trajet-btn"
+              data-id="<?= (int)$c['id'] ?>"
+              data-depot-id="<?= (int)($c['depot_id'] ?? 0) ?>"
+              title="Recalculer distance et durée">
+              <i class="bi bi-geo-alt"></i>
+            </button>
+            <?php
+  $isFini = ($c['etat'] ?? 'en_cours') === 'fini';
+  $toggleTitle = $isFini ? 'Repasser en cours' : 'Marquer comme fini';
+  $toggleIcon  = $isFini ? 'bi-arrow-counterclockwise' : 'bi-check2-circle';
+  $toggleClass = $isFini ? 'btn-outline-warning' : 'btn-outline-success';
+?>
+<button
+  class="btn btn-sm <?= $toggleClass ?> toggle-etat-btn"
+  data-id="<?= (int)$c['id'] ?>"
+  data-etat="<?= htmlspecialchars($c['etat'] ?? 'en_cours') ?>"
+  title="<?= $toggleTitle ?>"
+>
+  <i class="bi <?= $toggleIcon ?>"></i>
+</button>
+
+
+          </td>
+        </tr>
+      <?php endforeach; ?>
+    </tbody>
+  </table>
 
 </div>
 
 <!-- Modal création -->
+
 <div class="modal fade" id="chantierModal" tabindex="-1" aria-labelledby="chantierModalLabel" aria-hidden="true">
   <div class="modal-dialog">
     <form method="post" action="ajouterChantier.php" id="chantierForm">
@@ -234,6 +486,36 @@ require_once __DIR__ . '/../templates/navigation/navigation.php';
             <label for="chantierNom" class="form-label">Nom du chantier</label>
             <input type="text" class="form-control" id="chantierNom" name="nom" required>
           </div>
+          <div class="mb-3">
+            <label for="chantierAdresse" class="form-label">Adresse du chantier</label>
+            <input type="text" class="form-control" id="chantierAdresse" name="adresse"
+              placeholder="rue Exemple, 65150 Saint-Paul" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Dépôt (origine du trajet)</label>
+            <select class="form-select" id="chantierDepot" name="depot_id" required>
+              <option value="">— Sélectionner —</option>
+              <?php foreach ($depots as $d): ?>
+                <option value="<?= (int)$d['id'] ?>">
+                  <?= htmlspecialchars($d['nom'] . ' — ' . $d['adresse']) ?>
+                </option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Agence</label>
+            <select class="form-select" id="chantierAgence" name="agence_id">
+              <option value="0">— Sans agence —</option>
+              <?php foreach ($agences as $a): ?>
+                <option value="<?= (int)$a['id'] ?>">
+                  <?= htmlspecialchars($a['nom']) ?>
+                </option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+
+
+
           <div class="mb-3">
             <label for="chantierDesc" class="form-label">Description</label>
             <textarea class="form-control" id="chantierDesc" name="description"></textarea>
@@ -283,6 +565,36 @@ require_once __DIR__ . '/../templates/navigation/navigation.php';
             <label for="chantierNomEdit" class="form-label">Nom du chantier</label>
             <input type="text" class="form-control" id="chantierNomEdit" name="nom" required>
           </div>
+          <div class="mb-3">
+            <label for="chantierAdresseEdit" class="form-label">Adresse du chantier</label>
+            <input type="text" class="form-control" id="chantierAdresseEdit" name="adresse"
+              placeholder="rue Exemple, 65150 Saint-Paul" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Dépôt (origine du trajet)</label>
+            <select class="form-select" id="chantierDepotEdit" name="depot_id" required>
+              <option value="">— Sélectionner —</option>
+              <?php foreach ($depots as $d): ?>
+                <option value="<?= (int)$d['id'] ?>">
+                  <?= htmlspecialchars($d['nom'] . ' — ' . $d['adresse']) ?>
+                </option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label">Agence</label>
+            <select class="form-select" id="chantierAgenceEdit" name="agence_id">
+              <option value="0">— Sans agence —</option>
+              <?php foreach ($agences as $a): ?>
+                <option value="<?= (int)$a['id'] ?>">
+                  <?= htmlspecialchars($a['nom']) ?>
+                </option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+
+
           <div class="mb-3">
             <label for="chantierDescEdit" class="form-label">Description</label>
             <textarea class="form-control" id="chantierDescEdit" name="description"></textarea>
@@ -358,12 +670,15 @@ require_once __DIR__ . '/../templates/navigation/navigation.php';
   </script>
 <?php endif; ?>
 
-<script src="./js/chantiers_admin.js"></script>
+<script src="./js/chantiers_admin.js" defer></script>
 <script>
   document.addEventListener('DOMContentLoaded', () => {
     const highlightedRow = document.querySelector('tr.table-success');
     if (highlightedRow) setTimeout(() => highlightedRow.classList.remove('table-success'), 3000);
   });
+</script>
+<script>
+  window.CSRF_TOKEN = '<?= htmlspecialchars($_SESSION['csrf_token'] ?? '') ?>';
 </script>
 
 <?php require_once __DIR__ . '/../templates/footer.php'; ?>

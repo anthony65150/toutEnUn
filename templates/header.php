@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/../config/init.php';
 
+
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
@@ -152,7 +153,10 @@ $drapeau = $drapeaux[$langue] ?? $drapeaux['Français'];
 
         </div>
     </nav>
+<script>
+  window.GMAPS_KEY = "<?= htmlspecialchars(GOOGLE_MAPS_API_KEY, ENT_QUOTES) ?>";
+</script>
+<script src="https://maps.googleapis.com/maps/api/js?key=<?= urlencode(GOOGLE_MAPS_API_KEY) ?>&libraries=places" defer></script>
 
 
     <main class="flex-grow-1">
-        <!-- Le reste de ta page -->

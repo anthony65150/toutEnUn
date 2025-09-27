@@ -1,11 +1,8 @@
 <?php
 require_once __DIR__ . '/../config/init.php';
-require_once __DIR__ . '/../templates/header.php';
-require_once __DIR__ . '/../templates/navigation/navigation.php';
-setlocale(LC_TIME, 'fr_FR.UTF-8', 'fr_FR', 'French_France.1252');
 
 if (!isset($_SESSION['utilisateurs'])) {
-  header("Location: ../connexion.php");
+  header('Location: ../connexion.php');
   exit;
 }
 
@@ -13,6 +10,52 @@ $user         = $_SESSION['utilisateurs'];
 $role         = $user['fonction'] ?? null;
 $userId       = (int)($user['id'] ?? 0);
 $entrepriseId = (int)($user['entreprise_id'] ?? 0);
+
+/* ==============================
+   Fallback chantier AVANT TOUT OUTPUT
+============================== */
+$weekStartParam = (isset($_GET['start']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $_GET['start']))
+  ? '&start=' . $_GET['start']
+  : '';
+$chantierId = isset($_GET['chantier_id']) ? (int)$_GET['chantier_id'] : 0;
+
+if ($chantierId <= 0) {
+  if ($role === 'administrateur') {
+    $q = $pdo->prepare("SELECT id FROM chantiers WHERE entreprise_id = :eid ORDER BY nom LIMIT 1");
+    $q->execute([':eid' => $entrepriseId]);
+    $cid = (int)$q->fetchColumn();
+  } else {
+    $q = $pdo->prepare("
+      SELECT c.id
+      FROM utilisateur_chantiers uc
+      JOIN chantiers c ON c.id = uc.chantier_id AND c.entreprise_id = :eid
+      WHERE uc.utilisateur_id = :uid
+      ORDER BY c.nom
+      LIMIT 1
+    ");
+    $q->execute([':eid' => $entrepriseId, ':uid' => $userId]);
+    $cid = (int)$q->fetchColumn();
+  }
+
+  if ($cid > 0) {
+    header("Location: pointage.php?chantier_id={$cid}{$weekStartParam}");
+    exit;
+  }
+
+  // Aucun chantier disponible
+  echo '<!doctype html><meta charset="utf-8"><div style="padding:2rem;font-family:sans-serif">
+          <h3>Aucun chantier disponible</h3>
+          <p>Crée un chantier ou rattache-toi à un chantier pour continuer.</p>
+        </div>';
+  exit;
+}
+
+/* ==============================
+   À PARTIR D'ICI : on peut envoyer du HTML
+============================== */
+setlocale(LC_TIME, 'fr_FR.UTF-8', 'fr_FR', 'French_France.1252');
+require_once __DIR__ . '/../templates/header.php';
+require_once __DIR__ . '/../templates/navigation/navigation.php';
 
 /* ==============================
    Semaine affichée (lundi)
@@ -29,26 +72,55 @@ $endIso      = (clone $weekStart)->modify('+7 days')->format('Y-m-d'); // exclus
 /* ==============================
    Filtre chantier actif (depuis l'URL)
 ============================== */
-$currentChantierId = isset($_GET['chantier_id']) ? max(0, (int)$_GET['chantier_id']) : 0;
+$currentChantierId = $chantierId;
 
 /* ==============================
    Chantiers visibles pour filtres
 ============================== */
 if ($role === 'administrateur') {
-  $stmt = $pdo->prepare("SELECT id, nom FROM chantiers WHERE entreprise_id=? ORDER BY nom");
+  $stmt = $pdo->prepare("
+    SELECT c.id, c.nom, c.depot_id, d.nom AS depot_nom
+    FROM chantiers c
+    LEFT JOIN depots d
+      ON d.id = c.depot_id AND d.entreprise_id = c.entreprise_id
+    WHERE c.entreprise_id = ?
+    ORDER BY c.nom
+  ");
   $stmt->execute([$entrepriseId]);
   $visibleChantiers = $stmt->fetchAll(PDO::FETCH_ASSOC);
 } else {
   $stmt = $pdo->prepare("
-    SELECT DISTINCT c.id, c.nom
+    SELECT DISTINCT c.id, c.nom, c.depot_id, d.nom AS depot_nom
     FROM utilisateur_chantiers uc
     JOIN chantiers c ON c.id = uc.chantier_id
+    LEFT JOIN depots d
+      ON d.id = c.depot_id AND d.entreprise_id = c.entreprise_id
     WHERE uc.utilisateur_id = ? AND c.entreprise_id = ?
     ORDER BY c.nom
   ");
   $stmt->execute([$userId, $entrepriseId]);
   $visibleChantiers = $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
+
+// Charger le chantier courant (pour km/min et depot)
+$st = $pdo->prepare("
+  SELECT c.id, c.nom, c.adresse, c.depot_id,
+         c.trajet_distance_m, c.trajet_duree_s, c.trajet_last_calc,
+         d.nom AS depot_nom
+  FROM chantiers c
+  LEFT JOIN depots d
+    ON d.id = c.depot_id AND d.entreprise_id = c.entreprise_id
+  WHERE c.id = :cid AND c.entreprise_id = :eid
+  LIMIT 1
+");
+$st->execute([':cid' => $currentChantierId, ':eid' => $entrepriseId]);
+$chantier = $st->fetch(PDO::FETCH_ASSOC);
+
+$km  = isset($chantier['trajet_distance_m']) && $chantier['trajet_distance_m'] !== null
+  ? round(((float)$chantier['trajet_distance_m']) / 1000, 1) : null;
+$min = isset($chantier['trajet_duree_s']) && $chantier['trajet_duree_s'] !== null
+  ? (int)round(((float)$chantier['trajet_duree_s']) / 60) : null;
+
 
 /* ==============================
    Agences (pour filtre)
@@ -61,13 +133,10 @@ $st = $pdo->prepare($sqlAg);
 $st->execute([':e' => $entrepriseId]);
 $agences = $st->fetchAll(PDO::FETCH_ASSOC);
 
-
-
-// Bornes de la semaine déjà calculées : $start, $end (Y-m-d)
-// $entrepriseId existe déjà, idem $pdo
-
+/* ==============================
+   Absences planifiées de la semaine
+============================== */
 $planAbs = []; // $planAbs[$uid][$dateIso] = 'rtt' | 'conges' | 'maladie'
-
 $sql = "SELECT utilisateur_id, date_jour, type
         FROM planning_affectations
         WHERE entreprise_id = :e
@@ -75,15 +144,10 @@ $sql = "SELECT utilisateur_id, date_jour, type
           AND date_jour <  :f
           AND type IN ('conges','maladie','rtt')";
 $st = $pdo->prepare($sql);
-$st->execute([
-  ':e' => $entrepriseId,
-  ':s' => $startIso,
-  ':f' => $endIso,
-]);
+$st->execute([':e' => $entrepriseId, ':s' => $startIso, ':f' => $endIso]);
 while ($r = $st->fetch(PDO::FETCH_ASSOC)) {
   $planAbs[(int)$r['utilisateur_id']][$r['date_jour']] = $r['type'];
 }
-
 
 function badgePlanningAbs(?string $t): string
 {
@@ -150,24 +214,16 @@ function hasPlanningForDate(array $map, string $iso): bool
   return false;
 }
 $days = [];
-for ($i = 0; $i < 5; $i++) { // Lun -> Ven
+for ($i = 0; $i < 5; $i++) {
   $d = (clone $weekStart)->modify("+$i day");
-  $days[] = [
-    'iso'   => $d->format('Y-m-d'),
-    'label' => ucfirst(strftime('%A %e %B', $d->getTimestamp())),
-    'dow'   => (int)$d->format('N'),
-  ];
+  $days[] = ['iso' => $d->format('Y-m-d'), 'label' => ucfirst(strftime('%A %e %B', $d->getTimestamp())), 'dow' => (int)$d->format('N')];
 }
 $sat = (clone $weekStart)->modify('+5 day');
 $sun = (clone $weekStart)->modify('+6 day');
 $satIso = $sat->format('Y-m-d');
 $sunIso = $sun->format('Y-m-d');
-if (hasPlanningForDate($plannedDayMap, $satIso)) {
-  $days[] = ['iso' => $satIso, 'label' => ucfirst(strftime('%A %e %B', $sat->getTimestamp())), 'dow' => 6];
-}
-if (hasPlanningForDate($plannedDayMap, $sunIso)) {
-  $days[] = ['iso' => $sunIso, 'label' => ucfirst(strftime('%A %e %B', $sun->getTimestamp())), 'dow' => 7];
-}
+if (hasPlanningForDate($plannedDayMap, $satIso)) $days[] = ['iso' => $satIso, 'label' => ucfirst(strftime('%A %e %B', $sat->getTimestamp())), 'dow' => 6];
+if (hasPlanningForDate($plannedDayMap, $sunIso)) $days[] = ['iso' => $sunIso, 'label' => ucfirst(strftime('%A %e %B', $sun->getTimestamp())), 'dow' => 7];
 
 /* ==============================
    Heures pointées
@@ -198,10 +254,7 @@ $stmt->execute([':eid' => $entrepriseId, ':d1' => $startIso, ':d2' => $endIso]);
 while ($r = $stmt->fetch(PDO::FETCH_ASSOC)) {
   $uidR = (int)$r['utilisateur_id'];
   $dj   = $r['date_jour'];
-  $absMap[$uidR][$dj] = [
-    'motif'  => $r['motif'],
-    'heures' => ($r['heures'] === null ? null : (float)$r['heures']),
-  ];
+  $absMap[$uidR][$dj] = ['motif' => $r['motif'], 'heures' => ($r['heures'] === null ? null : (float)$r['heures'])];
 }
 
 /* ==============================
@@ -237,25 +290,46 @@ function badgeRole($role)
       return '<span class="badge bg-secondary">Autre</span>';
   }
 }
-
 function fmtHM(float $dec): string
 {
   $h = (int)floor($dec);
   $m = (int)round(($dec - $h) * 60);
   return $h . 'h' . str_pad((string)$m, 2, '0', STR_PAD_LEFT);
 }
-?>
 
-<?php
-/* ==== Tâche du jour (pour préafficher dans la cellule) ==== */
+/* ==============================
+   ZONING conduite (modifiable)
+   - ici on zone par durée aller simple (minutes)
+   - ex: Z1 ≤ 10, Z2 ≤ 20, Z3 ≤ 30, Z4 au-delà
+============================== */
+$ZONES = [
+  ['label' => 'Z1', 'max_min' => 10, 'class' => 'badge text-bg-success'],
+  ['label' => 'Z2', 'max_min' => 20, 'class' => 'badge text-bg-primary'],
+  ['label' => 'Z3', 'max_min' => 30, 'class' => 'badge text-bg-warning text-dark'],
+  ['label' => 'Z4', 'max_min' => PHP_INT_MAX, 'class' => 'badge text-bg-danger'],
+];
+
+function computeZone(?int $minutes, array $ZONES): array
+{
+  if ($minutes === null) return ['label' => 'Z?', 'class' => 'badge text-bg-secondary'];
+  foreach ($ZONES as $z) {
+    if ($minutes <= (int)$z['max_min']) return ['label' => $z['label'], 'class' => $z['class']];
+  }
+  return ['label' => 'Z?', 'class' => 'badge text-bg-secondary'];
+}
+
+$zone = computeZone($min, $ZONES);
+
+
+/* ==============================
+   Tâche du jour (préaffichage)
+============================== */
 $dates = array_column($days, 'iso');
 $tacheMap = [];
-
 if ($dates) {
   $minD = min($dates);
   $maxD = max($dates);
 
-  // Détection libellé (shortcut prioritaire)
   $cols = $pdo->query("SHOW COLUMNS FROM chantier_taches")->fetchAll(PDO::FETCH_COLUMN, 0);
   $hasShortcut = in_array('shortcut', $cols, true);
   $labelCol = null;
@@ -265,13 +339,8 @@ if ($dates) {
       break;
     }
   }
-  $libExpr = "COALESCE(
-    NULLIF(ct.`shortcut`, ''),
-    " . ($labelCol ? "NULLIF(ct.`$labelCol`, '')," : "") . "
-    CAST(ct.`id` AS CHAR)
-  )";
+  $libExpr = "COALESCE(NULLIF(ct.`shortcut`, '')," . ($labelCol ? "NULLIF(ct.`$labelCol`, '')," : "") . "CAST(ct.`id` AS CHAR))";
 
-  // La colonne updated_at existe ?
   $ptCols = $pdo->query("SHOW COLUMNS FROM pointages_taches")->fetchAll(PDO::FETCH_COLUMN, 0);
   $hasUpdated = in_array('updated_at', $ptCols, true);
 
@@ -280,20 +349,15 @@ if ($dates) {
       SELECT pt.utilisateur_id, pt.date_jour, pt.tache_id, pt.chantier_id, pt.heures,
              $libExpr AS libelle
       FROM pointages_taches pt
-      LEFT JOIN chantier_taches ct
-        ON ct.id = pt.tache_id AND ct.entreprise_id = ?
+      LEFT JOIN chantier_taches ct ON ct.id = pt.tache_id AND ct.entreprise_id = ?
       WHERE pt.entreprise_id = ?
         AND pt.date_jour BETWEEN ? AND ?
         AND NOT EXISTS (
-          SELECT 1
-          FROM pointages_taches x
+          SELECT 1 FROM pointages_taches x
           WHERE x.entreprise_id = pt.entreprise_id
             AND x.utilisateur_id = pt.utilisateur_id
             AND x.date_jour      = pt.date_jour
-            AND (
-                 (x.updated_at > pt.updated_at)
-              OR (x.updated_at = pt.updated_at AND x.id > pt.id)
-            )
+            AND ((x.updated_at > pt.updated_at) OR (x.updated_at = pt.updated_at AND x.id > pt.id))
         )
     ";
     $params = [$entrepriseId, $entrepriseId, $minD, $maxD];
@@ -310,8 +374,7 @@ if ($dates) {
       ) last ON last.utilisateur_id = pt.utilisateur_id
            AND last.date_jour      = pt.date_jour
            AND last.mid            = pt.id
-      LEFT JOIN chantier_taches ct
-        ON ct.id = pt.tache_id AND ct.entreprise_id = ?
+      LEFT JOIN chantier_taches ct ON ct.id = pt.tache_id AND ct.entreprise_id = ?
       WHERE pt.entreprise_id = ?
     ";
     $params = [$entrepriseId, $minD, $maxD, $entrepriseId, $entrepriseId];
@@ -319,7 +382,6 @@ if ($dates) {
 
   $stT = $pdo->prepare($sqlT);
   $stT->execute($params);
-
   while ($r = $stT->fetch(PDO::FETCH_ASSOC)) {
     $u = (int)$r['utilisateur_id'];
     $d = $r['date_jour'];
@@ -331,10 +393,8 @@ if ($dates) {
     ];
   }
 }
-
-
-
 ?>
+
 
 <div class="container my-4" id="pointageApp"
   data-week-start="<?= htmlspecialchars($weekStart->format('Y-m-d')) ?>"
@@ -397,11 +457,15 @@ if ($dates) {
     <?php endif; ?>
 
     <?php foreach ($visibleChantiers as $ch): $cid = (int)$ch['id']; ?>
-      <button class="btn btn-sm btn-outline-secondary <?= ($cid === (int)$currentChantierId ? 'active' : '') ?>"
-        data-chantier="<?= $cid ?>">
-        <?= htmlspecialchars($ch['nom']) ?>
-      </button>
-    <?php endforeach; ?>
+  <button
+    class="btn btn-sm btn-outline-secondary <?= ($cid === (int)$currentChantierId ? 'active' : '') ?>"
+    data-chantier="<?= $cid ?>"
+    data-depot-id="<?= (int)($ch['depot_id'] ?? 0) ?>"
+    data-depot-name="<?= htmlspecialchars($ch['depot_nom'] ?? '') ?>">
+    <?= htmlspecialchars($ch['nom']) ?>
+  </button>
+<?php endforeach; ?>
+
   </div>
 
   <div id="camionControls" class="mb-2 d-flex align-items-center gap-2">
@@ -413,6 +477,39 @@ if ($dates) {
       <button class="btn btn-outline-secondary" type="button" data-action="incr" aria-label="Augmenter">+</button>
     </div>
   </div>
+  <?php
+  $depotNom = trim((string)($chantier['depot_nom'] ?? ''));
+  ?>
+  <div class="d-flex align-items-center gap-2 my-3" id="conduiteWrap"
+    data-chantier="<?= (int)$currentChantierId ?>"
+    data-depot-id="<?= (int)($chantier['depot_id'] ?? 0) ?>"
+    data-depot-name="<?= htmlspecialchars($depotNom) ?>"
+    data-last="<?= htmlspecialchars((string)($chantier['trajet_last_calc'] ?? '')) ?>">
+
+    <strong>Conduite :</strong>
+
+    <?php if ($km !== null && $min !== null): ?>
+      <!-- Zone d'abord -->
+      <span id="trajetZone" class="<?= htmlspecialchars($zone['class']) ?>"><?= htmlspecialchars($zone['label']) ?></span>
+      <!-- Distance + durée -->
+      <span id="trajetKm" class="badge text-bg-primary"><?= htmlspecialchars(number_format($km, 1, ',', '')) ?> km</span>
+      <span id="trajetMin" class="badge text-bg-secondary"><?= htmlspecialchars($min) ?> min</span>
+      <!-- Phrase dépôt -->
+      <?php if ($depotNom !== ''): ?>
+        <span id="trajetDepotPhrase" class="text-muted">du dépôt de <?= htmlspecialchars($depotNom) ?></span>
+      <?php endif; ?>
+    <?php else: ?>
+      <span id="trajetWarn" class="badge text-bg-warning">Adresse/dépôt manquants ou non calculés</span>
+      <span id="trajetZone" class="badge text-bg-secondary d-none">Z?</span>
+      <span id="trajetKm" class="badge text-bg-primary d-none"></span>
+      <span id="trajetMin" class="badge text-bg-secondary d-none"></span>
+      <span id="trajetDepotPhrase" class="text-muted d-none"></span>
+    <?php endif; ?>
+  </div>
+
+
+
+
 
 
   <!-- Nav semaine -->
@@ -520,52 +617,66 @@ if ($dates) {
                 $absText = ['rtt' => 'RTT', 'conges' => 'Congés', 'maladie' => 'Maladie'][$planningType] ?? 'Abs.';
               }
 
-
+              // --- Classe visuelle du bouton ---
               $absClass = $isAbsent ? 'btn-danger' : 'btn-outline-danger';
 
-              // Déterminer si on doit basculer en affichage "plein"
+              // --- Mode plein ? (masque Présent/Conduite/Tâche) ---
               // Priorité à l'absence réellement pointée ; sinon, au planning
-              $fullType = null;   // 'maladie' | 'rtt' | 'conges' | null
+              $fullType = null; // 'maladie' | 'rtt' | 'conges' | null
               if ($isAbsent) {
                 $motifLow = strtolower((string)$absMotif);
                 if (in_array($motifLow, ['maladie', 'rtt'], true)) {
-                  $fullType = $motifLow;               // 'maladie' ou 'rtt'
+                  $fullType = $motifLow;      // plein
                 } elseif ($motifLow === 'conges_payes') {
-                  $fullType = 'conges';                // journée de CP -> plein
+                  $fullType = 'conges';       // plein
                 }
-              } elseif (in_array(($planningType ?? ''), ['conges', 'maladie', 'rtt'], true)) {
-                // planning générique : on garde 'conges' en plein uniquement si tu le souhaites
-                $fullType = ($planningType === 'conges') ? 'conges' : $planningType;
+                // ⚠️ PAS de plein pour 'conges_intemperies'
               }
+
 
               $fullLabel = $fullType ? [
                 'conges'  => 'Congés',
                 'maladie' => 'Maladie',
                 'rtt'     => 'RTT',
               ][$fullType] : '';
-
-
-
-              $tInfo   = $tacheMap[$uid][$dateIso] ?? null;
-              $tId     = $tInfo['id']      ?? '';
-              $tLib    = $tInfo['libelle'] ?? '';
-              $tHeures = isset($tInfo['heures']) ? (float)$tInfo['heures'] : ($hDone ?? null);
             ?>
+
               <td class="tl-cell text-center"
                 data-date="<?= htmlspecialchars($dateIso) ?>"
                 data-day-label="<?= htmlspecialchars($d['label']) ?>"
                 data-planned-chantiers-day="<?= htmlspecialchars($plannedIdsForDay) ?>"
                 data-planning-type="<?= htmlspecialchars($planningType ?? '') ?>">
 
+                <?php
+                // ---- Données "tâche" DÉFINIES AVANT TOUT ----
+                $tInfo   = $tacheMap[$uid][$dateIso] ?? null;
+                $tId     = (int)($tInfo['id'] ?? 0);
+                $tLib    = (string)($tInfo['libelle'] ?? '');
+                $tHeures = isset($tInfo['heures']) ? (float)$tInfo['heures'] : ($hDone ?? null);
+
+                // ---- Détermination du plein-écran ----
+                $fullType = null; // 'maladie' | 'rtt' | 'conges' | null
+                if ($isAbsent) {
+                  $motifLow = strtolower((string)$absMotif);
+                  if (in_array($motifLow, ['maladie', 'rtt'], true)) {
+                    $fullType = $motifLow;
+                  } elseif ($motifLow === 'conges_payes') {
+                    $fullType = 'conges';
+                  }
+                  // conges_intemperies => JAMAIS plein-écran
+                } elseif (in_array(($planningType ?? ''), ['conges', 'maladie', 'rtt'], true)) {
+                  $fullType = $planningType;
+                }
+
+                $fullLabel = $fullType ? ['conges' => 'Congés', 'maladie' => 'Maladie', 'rtt' => 'RTT'][$fullType] : '';
+                ?>
+
                 <?php if ($fullType): ?>
-                  <!-- Affichage plein : on masque tout le reste -->
                   <?php
                   $reasonForModal = $isAbsent
-                    ? strtolower((string)$absMotif) // garde 'conges_intemperies' ou 'conges_payes'
-                    : ($planningType === 'rtt' ? 'rtt' : ($planningType === 'maladie' ? 'maladie' : 'conges_payes'));
-                  $hoursForModal = $isAbsent
-                    ? ($absHeures !== null ? (float)$absHeures : 8.25)
-                    : 8.25;
+                    ? strtolower((string)$absMotif)
+                    : ($fullType === 'rtt' ? 'rtt' : ($fullType === 'maladie' ? 'maladie' : 'conges_payes'));
+                  $hoursForModal = $isAbsent ? ($absHeures !== null ? (float)$absHeures : 8.25) : 8.25;
                   ?>
                   <div class="tl-absence-full <?= htmlspecialchars($fullType) ?>"
                     role="button"
@@ -576,38 +687,54 @@ if ($dates) {
                     <?= htmlspecialchars($fullLabel) ?>
                   </div>
 
-
-
                 <?php elseif ($dow >= 6 && !$hasPlanning && !$hasSavedState): ?>
                   <div class="text-muted">×</div>
 
                 <?php else: ?>
-                  <!-- Affichage normal -->
+                  <!-- Mode normal -->
                   <span class="tl-dot <?= $isAbsent ? 'absent' : ($presentIsActive ? 'present' : (!empty($plannedIdsForDay) ? 'plan' : '')) ?>"></span>
 
                   <?= badgePlanningAbs($planningType) ?>
 
                   <div class="tl-actions mb-2 d-flex flex-wrap gap-1 justify-content-center">
                     <button class="btn btn-sm present-btn <?= $presentIsActive ? 'btn-success' : 'btn-outline-success' ?>"
-                      data-hours="8.25" <?= ($isAbsent || $presentDisabledByPlan) ? 'disabled' : '' ?>>
+                      data-hours="8.25" <?= ($isAbsent || in_array($planningType, ['conges', 'maladie', 'rtt'], true)) ? 'disabled' : '' ?>>
                       <?= htmlspecialchars($presentLabel) ?>
                     </button>
 
                     <?php
-                    $motif = strtolower((string)$absMotif);
-                    $hideA = $isAbsent && $motif !== 'conges_intemperies';
+                    $motif   = strtolower((string)$absMotif);
+                    $hideA   = $isAbsent && $motif !== 'conges_intemperies';
+                    $absText = 'Abs.';
+                    if ($isAbsent) {
+                      $absText = trim($absLabel);
+                      if ($absHeures !== null) $absText .= ' ' . str_replace('.', ',', (string)$absHeures) . ' h';
+                      if ($absText === '') $absText = 'Abs.';
+                    } elseif ($planningType) {
+                      $absText = ['rtt' => 'RTT', 'conges' => 'Congés', 'maladie' => 'Maladie'][$planningType] ?? 'Abs.';
+                    }
+                    $absClass = $isAbsent ? 'btn-danger' : 'btn-outline-danger';
+                    $absReasonForModal = $isAbsent
+                      ? strtolower((string)$absMotif)
+                      : ($planningType === 'rtt' ? 'rtt' : ($planningType === 'maladie' ? 'maladie' : ($planningType === 'conges' ? 'conges_payes' : 'injustifie')));
+                    $absHoursForModal  = $isAbsent ? ($absHeures !== null ? (float)$absHeures : 8.25) : 8.25;
                     ?>
+
                     <button class="btn btn-sm conduite-btn <?= $aDone ? 'btn-primary' : 'btn-outline-primary' ?><?= $hideA ? ' d-none' : '' ?>"
                       data-type="A" <?= $hideA ? 'disabled' : '' ?>>A</button>
-
                     <button class="btn btn-sm conduite-btn <?= $rDone ? 'btn-success' : 'btn-outline-success' ?><?= $isAbsent ? ' d-none' : '' ?>"
                       data-type="R" <?= $isAbsent ? 'disabled' : '' ?>>R</button>
 
-                    <button type="button" class="btn btn-sm <?= $absClass ?> absence-btn">
+                    <button type="button"
+                      class="btn btn-sm <?= $absClass ?> absence-btn"
+                      data-reason="<?= htmlspecialchars($absReasonForModal) ?>"
+                      data-hours="<?= htmlspecialchars(number_format((float)$absHoursForModal, 2, '.', '')) ?>"
+                      data-has-absence="<?= $isAbsent ? '1' : '0' ?>">
                       <?= htmlspecialchars($absText) ?>
                     </button>
                   </div>
 
+                  <!-- Slot Tâche -->
                   <div class="tl-task task-slot"
                     data-click-tache
                     data-user-id="<?= $uid ?>"
@@ -615,13 +742,10 @@ if ($dates) {
                     data-tache-id="<?= htmlspecialchars((string)$tId) ?>"
                     data-heures="<?= $tHeures !== null ? htmlspecialchars((string)$tHeures) : '' ?>"
                     data-pt-chantier-id="<?= (int)($tacheMap[$uid][$dateIso]['cid'] ?? $currentChantierId) ?>">
-
                     <?php if ($tId): ?>
                       <span class="badge bg-primary"><?= htmlspecialchars($tLib) ?></span>
                       <?php if ($tHeures !== null && (float)$tHeures !== 8.25): ?>
-                        <div class="small text-muted mt-1">
-                          <?= htmlspecialchars(number_format((float)$tHeures, 2, ',', '')) ?> h
-                        </div>
+                        <div class="small text-muted mt-1"><?= htmlspecialchars(number_format((float)$tHeures, 2, ',', '')) ?> h</div>
                       <?php endif; ?>
                     <?php else: ?>
                       <button type="button" class="btn btn-sm btn-outline-secondary">+ Tâche</button>
@@ -629,6 +753,8 @@ if ($dates) {
                   </div>
                 <?php endif; ?>
               </td>
+
+
 
             <?php endforeach; ?>
           </tr>
@@ -741,6 +867,10 @@ if ($dates) {
     window.POINTAGE_DAYS = <?= json_encode(array_column($days, 'iso')) ?>;
     window.API_CAMIONS_CFG = "/pointage/api/camions_config.php";
   </script>
+  
+  
+
+
 
 
 

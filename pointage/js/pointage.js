@@ -138,6 +138,100 @@ function formatHours(h) {
 }
 
 
+// === Conduite: rendu des badges + phrase dépôt
+function renderTrajet({ km, min, depotName }) {
+  const kmEl   = document.getElementById('trajetKm');
+  const minEl  = document.getElementById('trajetMin');
+  const zoneEl = document.getElementById('trajetZone');
+  const warnEl = document.getElementById('trajetWarn');
+  const depotPhraseEl = document.getElementById('trajetDepotPhrase');
+
+  if (warnEl) warnEl.classList.add('d-none');
+
+  if (typeof km === 'number' && kmEl) {
+    kmEl.textContent = km.toLocaleString('fr-FR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + ' km';
+    kmEl.classList.remove('d-none');
+  }
+  if (typeof min === 'number' && minEl) {
+    minEl.textContent = `${min} min`;
+    minEl.classList.remove('d-none');
+  }
+
+  // Zoning (mêmes seuils que PHP)
+  if (zoneEl && typeof min === 'number') {
+    let z = { label: 'Z1', cls: 'badge text-bg-success' };
+    if (min > 10 && min <= 20)      z = { label: 'Z2', cls: 'badge text-bg-primary' };
+    else if (min > 20 && min <= 30) z = { label: 'Z3', cls: 'badge text-bg-warning text-dark' };
+    else if (min > 30)              z = { label: 'Z4', cls: 'badge text-bg-danger' };
+    zoneEl.className = z.cls;
+    zoneEl.textContent = z.label;
+    zoneEl.classList.remove('d-none');
+  }
+
+  if (depotPhraseEl) {
+    if (depotName && depotName.trim() !== '') {
+      depotPhraseEl.textContent = `du dépôt de ${depotName}`;
+      depotPhraseEl.classList.remove('d-none');
+    } else {
+      depotPhraseEl.classList.add('d-none');
+    }
+  }
+}
+
+// Supporte duree_s (FR) ou duration_s (EN)
+function getDurationSeconds(obj){
+  if (!obj || typeof obj !== 'object') return null;
+  const v = (obj.duree_s ?? obj.duration_s);
+  return (v == null ? null : Number(v));
+}
+
+
+// === Conduite: compute côté serveur puis mise à jour UI
+async function updateConduiteFromFilter() {
+  // accepte data-chantier *ou* data-chantier-id
+  const btn = document.querySelector('#chantierFilters .active[data-chantier], #chantierFilters .active[data-chantier-id]');
+  if (!btn) return;
+
+  const chantierId = parseInt(btn.dataset.chantier || btn.dataset.chantierId || '0', 10);
+
+  // depot depuis le bouton si dispo, sinon fallback depuis le wrap
+  const wrap = document.getElementById('conduiteWrap');
+  const depotId   = parseInt(btn.dataset.depotId || wrap?.dataset.depotId || '0', 10);
+  const depotName = (btn.dataset.depotName || wrap?.dataset.depotName || '').trim();
+  if (!chantierId) return;
+
+  if (wrap) wrap.classList.add('opacity-50');
+  try {
+    const API = '/chantiers/services/trajet_api.php';
+    const fd  = new FormData();
+    fd.set('action', 'compute');
+    fd.set('chantier_id', String(chantierId));
+    if (depotId) fd.set('depot_id', String(depotId));
+    // ✅ forcer un vrai calcul pour obtenir distance/durée (sinon "skipped")
+    fd.set('force', '1');
+
+    const res = await fetch(API, { method: 'POST', body: fd, credentials: 'same-origin' });
+    const ct  = res.headers.get('content-type') || '';
+    const txt = await res.text();
+    if (!ct.includes('application/json')) throw new Error(txt.slice(0, 200));
+    const json = JSON.parse(txt);
+    if (!res.ok || !json.ok) throw new Error(json.error || 'Erreur trajet');
+
+    const duree = getDurationSeconds(json);
+    if (json.distance_m != null && duree != null) {
+      const km  = Math.round(json.distance_m / 100) / 10;
+      const min = Math.round(duree / 60);
+      renderTrajet({ km, min, depotName });
+    }
+  } catch (e) {
+    console.error(e);
+  } finally {
+    if (wrap) wrap.classList.remove('opacity-50');
+  }
+}
+
+
+
   /* ------------------------------
    *   ENTÊTE / JOURS VISIBLES
    * ------------------------------ */
@@ -247,6 +341,7 @@ function formatHours(h) {
     }
 
     applyFilter();
+    updateConduiteFromFilter();
   });
 
   /* ------------------------------
@@ -404,138 +499,170 @@ function formatHours(h) {
   });
 
 
-  /* ------------------------------
-   *   ABSENCE (modal)
-   * ------------------------------ */
-  table?.addEventListener('click', (e) => {
-    const trigger = e.target.closest('.absence-btn');
-    if (!trigger) return;
-    const td = trigger.closest('td');
-    const tr = trigger.closest('tr');
-    if (!td || !tr) return;
+ /* ------------------------------
+ *   ABSENCE (modal)
+ * ------------------------------ */
 
-    if (absenceModalEl) (absenceModalEl)._targetCell = td;
+// Ouvrir la modale au clic (bouton Abs. OU plein écran data-click-absence)
+table?.addEventListener('click', (e) => {
+  const trigger = e.target.closest('.absence-btn, [data-click-absence]');
+  if (!trigger) return;
 
-    const uid = tr.dataset.userId || '';
-    const d   = td.dataset.date || '';
-    const fUser = document.getElementById('absUserId');
-    const fDate = document.getElementById('absDate');
-    const fHours= document.getElementById('absHours');
+  const td = trigger.closest('td');
+  const tr = trigger.closest('tr');
+  if (!td || !tr) return;
 
-    if (fUser)  fUser.value = uid;
-    if (fDate)  fDate.value = d;
-    if (absForm?.reason) absForm.reason.value = 'conges_payes';
-    if (fHours) fHours.value = '8.25';
+  if (absenceModalEl) absenceModalEl._targetCell = td;
 
-    absenceModal?.show();
-  });
+  // User & date
+  document.getElementById('absUserId').value = tr.dataset.userId || '';
+  document.getElementById('absDate').value   = td.dataset.date   || '';
 
-  absSaveBtn?.addEventListener('click', async () => {
-    if (!absenceModalEl?._targetCell) return;
+  // Préremplissage : d’abord depuis data-* du trigger, sinon fallback planning
+  let reason = (trigger.getAttribute('data-reason') || '').toLowerCase();
+  let hours  = parseFloat(trigger.getAttribute('data-hours') || '0');
 
-    const td      = absenceModalEl._targetCell;
-    const userId  = document.getElementById('absUserId')?.value || '';
-    const dateIso = document.getElementById('absDate')?.value  || '';
-    const hours   = parseFloat(document.getElementById('absHours')?.value || '0');
-    const reason  = absForm?.reason?.value || 'injustifie';
+  if (!reason) {
+    const plan = (td.dataset.planningType || '').toLowerCase(); // rtt|maladie|conges
+    if (plan === 'maladie')      reason = 'maladie';
+    else if (plan === 'conges')  reason = 'conges_payes';
+    else                         reason = 'injustifie';
+  }
+  if (!hours || Number.isNaN(hours)) hours = 8.25;
 
-    if (!userId || !dateIso) return;
-    if (!hours || hours < 0.25 || hours > 8.25) { showError('Saisis un nombre d’heures valide (0.25 à 8.25).'); return; }
+  // Coche le radio
+  document
+    .querySelectorAll('#absenceForm input[name="reason"]')
+    .forEach(r => r.checked = (r.value.toLowerCase() === reason));
 
-    const chantierId = resolveCellChantierId(td);
+  // Heures
+  const fHours = document.getElementById('absHours');
+  if (fHours) fHours.value = hours.toFixed(2);
 
-    try {
-      // 1) Enregistrer l'absence
-      const payloadAbs = { utilisateur_id: userId, date: dateIso, reason, hours: String(hours) };
-      if (chantierId) payloadAbs.chantier_id = chantierId;
-      await postForm('/pointage/pointage_absence.php', payloadAbs);
+  // Bouton supprimer visible seulement si absence posée
+  const delBtn  = document.getElementById('absenceDelete');
+  const hasAbs  = (trigger.getAttribute('data-has-absence') === '1') ||
+                  trigger.classList.contains('btn-danger');
+  if (delBtn) delBtn.classList.toggle('d-none', !hasAbs);
 
-      // 2) Mettre à jour le SEUL bouton rouge
+  absenceModal?.show();
+});
+
+
+// Enregistrer l'absence depuis la modale
+absSaveBtn?.addEventListener('click', async () => {
+  if (!absenceModalEl?._targetCell) return;
+
+  const td      = absenceModalEl._targetCell;
+  const userId  = document.getElementById('absUserId')?.value || '';
+  const dateIso = document.getElementById('absDate')?.value  || '';
+  const hours   = parseFloat(document.getElementById('absHours')?.value || '0');
+  const reason  = (absForm?.querySelector('input[name="reason"]:checked')?.value || 'injustifie');
+
+  if (!userId || !dateIso) return;
+  if (!hours || hours < 0.25 || hours > 8.25) {
+    showError('Saisis un nombre d’heures valide (0.25 à 8.25).');
+    return;
+  }
+
+  const chantierId = resolveCellChantierId(td);
+
+  try {
+    // 1) Enregistrer l'absence
+    const payloadAbs = { utilisateur_id: userId, date: dateIso, reason, hours: String(hours) };
+    if (chantierId) payloadAbs.chantier_id = chantierId;
+    await postForm('/pointage/pointage_absence.php', payloadAbs);
+
+    // 2) Mettre à jour le bouton rouge + ses data-* (pour réédition)
+    const absBtn = td.querySelector('.absence-btn');
+    if (absBtn) {
+      absBtn.classList.remove('btn-outline-danger');
+      absBtn.classList.add('btn-danger');
+      absBtn.textContent          = `${labelForReason(reason)} ${formatHours(hours)} h`;
+      absBtn.dataset.reason       = reason;
+      absBtn.dataset.hours        = hours.toFixed(2);
+      absBtn.dataset.hasAbsence   = '1';
+    }
+    td.querySelector('.absence-pill')?.remove();
+
+    // 3) Complément de présence : Présent = 8.25 − absence
+    const remaining  = Math.max(0, FULL_DAY - hours);
+    const presentBtn = td.querySelector('.present-btn');
+
+    const payloadPres = { utilisateur_id: userId, date: dateIso, hours: String(remaining) };
+    if (chantierId) payloadPres.chantier_id = chantierId;
+    await postForm('/pointage/pointage_present.php', payloadPres);
+
+    if (presentBtn) {
+      if (remaining > 0) {
+        presentBtn.classList.remove('btn-outline-success');
+        presentBtn.classList.add('btn-success');
+        presentBtn.dataset.hours = String(remaining);
+        presentBtn.textContent   = 'Présent ' + formatHM(remaining);
+      } else {
+        presentBtn.classList.remove('btn-success');
+        presentBtn.classList.add('btn-outline-success');
+        presentBtn.dataset.hours = String(FULL_DAY);
+        presentBtn.textContent   = 'Présent 8h15';
+      }
+    }
+
+    // 4) Conduite : A autorisé uniquement pour "congés intempéries", R masqué dès qu’il y a absence
+    const isIntemp = (reason === 'conges_intemperies');
+    const btnA = td.querySelector('.conduite-btn[data-type="A"]');
+    const btnR = td.querySelector('.conduite-btn[data-type="R"]');
+    if (btnA) { btnA.disabled = !isIntemp; btnA.classList.toggle('d-none', !isIntemp); }
+    if (btnR) { btnR.disabled = true;      btnR.classList.add('d-none'); }
+
+    absenceModal?.hide();
+  } catch (err) {
+    showError(err.message, err.debug);
+  }
+});
+
+/* ⚠️ Ne plus supprimer l’absence au simple clic sur le bouton "Abs."
+   (on supprime uniquement via le bouton de la modale). */
+
+// Suppression via le bouton "Supprimer l'absence" de la modale
+document.getElementById('absenceDelete')?.addEventListener('click', async () => {
+  const uid  = document.getElementById('absUserId').value;
+  const date = document.getElementById('absDate').value;
+
+  // Retrouve la cellule liée à la modale si possible
+  const td = (document.getElementById('absenceModal')._targetCell) || null;
+
+  try {
+    const resp = await fetch('/pointage/pointage_absence.php', {
+      method: 'POST',
+      headers: {'Content-Type':'application/x-www-form-urlencoded'},
+      body: new URLSearchParams({ utilisateur_id: uid, date, remove: '1' })
+    });
+    const data = await resp.json();
+    if (!resp.ok || !data.success) throw new Error(data.message || 'Erreur');
+
+    // Mise à jour UI sans rechargement
+    if (td) {
       const absBtn = td.querySelector('.absence-btn');
       if (absBtn) {
-        absBtn.classList.remove('btn-outline-danger');
-        absBtn.classList.add('btn-danger');
-        absBtn.textContent = `${labelForReason(reason)} ${formatHours(hours)} h`;
-
+        absBtn.classList.remove('btn-danger');
+        absBtn.classList.add('btn-outline-danger');
+        absBtn.textContent = 'Abs.';
+        absBtn.removeAttribute('data-reason');
+        absBtn.removeAttribute('data-hours');
+        absBtn.dataset.hasAbsence = '0';
       }
-      td.querySelector('.absence-pill')?.remove();
-
-      // 3) Complément de présence
-      const remaining = Math.max(0, FULL_DAY - hours);
-      const presentBtn = td.querySelector('.present-btn');
-
-      const payloadPres = { utilisateur_id: userId, date: dateIso, hours: String(remaining) };
-      if (chantierId) payloadPres.chantier_id = chantierId;
-      await postForm('/pointage/pointage_present.php', payloadPres);
-
-      if (presentBtn) {
-        if (remaining > 0) {
-          presentBtn.classList.remove('btn-outline-success');
-          presentBtn.classList.add('btn-success');
-          presentBtn.dataset.hours = String(remaining);
-          presentBtn.textContent = 'Présent ' + formatHM(remaining);
-        } else {
-          presentBtn.classList.remove('btn-success');
-          presentBtn.classList.add('btn-outline-success');
-          presentBtn.dataset.hours = String(FULL_DAY);
-          presentBtn.textContent = 'Présent ' + formatHM(FULL_DAY);
-        }
-      }
-
-    // 4) Conduite et absence : cas particulier "congés intempéries"
-const isIntemp = (reason === 'conges_intemperies');
-const btnA = td.querySelector('.conduite-btn[data-type="A"]');
-const btnR = td.querySelector('.conduite-btn[data-type="R"]');
-
-// A : autorisé uniquement pour "congés intempéries"
-if (btnA) {
-  btnA.disabled = !isIntemp;
-  btnA.classList.toggle('d-none', !isIntemp);
-}
-
-// R : toujours interdit quand il y a une absence
-if (btnR) {
-  btnR.disabled = true;
-  btnR.classList.add('d-none');
-}
-
-
-      absenceModal?.hide();
-    } catch (err) {
-      showError(err.message, err.debug);
-    }
-  });
-
-  // retirer une absence existante
-  table?.addEventListener('click', async (e) => {
-    const btn = e.target.closest('.absence-btn');
-    if (!btn || !btn.classList.contains('btn-danger')) return;
-
-    const td      = btn.closest('td');
-    const tr      = btn.closest('tr');
-    const userId  = tr?.dataset.userId;
-    const dateIso = td?.dataset.date;
-    if (!userId || !dateIso) return;
-
-    const chantierId = resolveCellChantierId(td);
-
-    try {
-      const payloadDel = { utilisateur_id: userId, date: dateIso, remove: '1' };
-      if (chantierId) payloadDel.chantier_id = chantierId;
-      await postForm('/pointage/pointage_absence.php', payloadDel);
-
-      btn.classList.remove('btn-danger');
-      btn.classList.add('btn-outline-danger');
-      btn.textContent = 'Abs.';
-      td.querySelector('.absence-pill')?.remove();
+      // Réactiver les boutons A/R
       td.querySelectorAll('.conduite-btn').forEach(b => {
-  b.disabled = false;
-  b.classList.remove('d-none');
-});
-    } catch (err) {
-      showError(err.message, err.debug);
+        b.disabled = false;
+        b.classList.remove('d-none');
+      });
     }
-  });
+
+    bootstrap.Modal.getInstance(document.getElementById('absenceModal'))?.hide();
+  } catch (err) {
+    alert(err.message || 'Erreur réseau');
+  }
+});
 
 
   /* ------------------------------
@@ -657,6 +784,7 @@ if (btnR) {
 
   prefillChefChantierFromPlanning();
   applyFilter();
+  updateConduiteFromFilter();
 });
 
 

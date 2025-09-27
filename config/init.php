@@ -49,6 +49,16 @@ if (!empty($_ENV['APP_ENV']) && $_ENV['APP_ENV'] === 'dev') {
     error_reporting(E_ALL);
 }
 
+/**
+ * ===== 2bis) Définir la clé APRÈS avoir chargé .env
+ * Utilise TOUJOURS le même nom: GOOGLE_MAPS_API_KEY
+ */
+define('GOOGLE_MAPS_API_KEY',
+    $_ENV['GOOGLE_MAPS_API_KEY']
+    ?? getenv('GOOGLE_MAPS_API_KEY')
+    ?? '' // pas de fallback en dur ici; mets la vraie clé dans .env
+);
+
 // ===== 3) Connexion PDO =====
 try {
     $pdo = new PDO(

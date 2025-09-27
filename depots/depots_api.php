@@ -1,145 +1,214 @@
 <?php
 declare(strict_types=1);
 
+/**
+ * /depots/depots_api.php
+ * API JSON pour créer / modifier / supprimer un dépôt
+ * - Auth: administrateur
+ * - Contexte: multi-entreprise (entreprise_id en session)
+ * - Geocoding: Google (GOOGLE_MAPS_API_KEY) puis fallback Nominatim (OSM)
+ */
+
 require_once __DIR__ . '/../config/init.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
-/* =========================
-   Garde-fous
-   ========================= */
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-  http_response_code(405);
-  echo json_encode(['ok' => false, 'error' => 'Méthode non autorisée'], JSON_UNESCAPED_UNICODE);
-  exit;
-}
-
+// ---------- Guards ----------
 if (!isset($_SESSION['utilisateurs']) || (($_SESSION['utilisateurs']['fonction'] ?? '') !== 'administrateur')) {
   http_response_code(401);
-  echo json_encode(['ok' => false, 'error' => 'Non autorisé'], JSON_UNESCAPED_UNICODE);
+  echo json_encode(['ok' => false, 'error' => 'Non autorisé']);
   exit;
 }
-
 $entrepriseId = (int)($_SESSION['entreprise_id'] ?? 0);
 if ($entrepriseId <= 0) {
   http_response_code(403);
-  echo json_encode(['ok' => false, 'error' => 'Entreprise non sélectionnée'], JSON_UNESCAPED_UNICODE);
+  echo json_encode(['ok' => false, 'error' => 'Entreprise non sélectionnée']);
   exit;
 }
 
-/* Helper erreur JSON */
-$fail = function (int $code, string $msg): never {
-  http_response_code($code);
-  echo json_encode(['ok' => false, 'error' => $msg], JSON_UNESCAPED_UNICODE);
-  exit;
-};
+$action = (string)($_POST['action'] ?? '');
 
-$action = strtolower(trim((string)($_POST['action'] ?? '')));
+// ---------- Geocoding ----------
+function geocodeAddress(string $address): ?array {
+  if ($address === '') return null;
 
+  // 1) Google si la clé est dispo
+  $apiKey = defined('GOOGLE_MAPS_API_KEY') ? GOOGLE_MAPS_API_KEY : '';
+  if ($apiKey !== '') {
+    $url = 'https://maps.googleapis.com/maps/api/geocode/json?address=' . urlencode($address) . '&key=' . $apiKey;
+    $ch  = curl_init($url);
+    curl_setopt_array($ch, [
+      CURLOPT_RETURNTRANSFER => true,
+      CURLOPT_TIMEOUT        => 10,
+    ]);
+    $raw = curl_exec($ch);
+    $err = curl_error($ch);
+    curl_close($ch);
+
+    if ($raw && !$err) {
+      $data = json_decode($raw, true);
+      if (($data['status'] ?? '') === 'OK') {
+        $loc = $data['results'][0]['geometry']['location'] ?? null;
+        if ($loc && isset($loc['lat'], $loc['lng'])) {
+          return ['lat' => (float)$loc['lat'], 'lng' => (float)$loc['lng']];
+        }
+      }
+    }
+  }
+
+  // 2) Fallback OSM (Nominatim)
+  $url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' . urlencode($address);
+  $ch  = curl_init($url);
+  curl_setopt_array($ch, [
+    CURLOPT_RETURNTRANSFER => true,
+    CURLOPT_TIMEOUT        => 10,
+    CURLOPT_HTTPHEADER     => ['User-Agent: Simpliz/1.0 (contact: admin@example.com)'],
+  ]);
+  $raw = curl_exec($ch);
+  $err = curl_error($ch);
+  curl_close($ch);
+
+  if ($raw && !$err) {
+    $arr = json_decode($raw, true);
+    if (is_array($arr) && !empty($arr[0]['lat']) && !empty($arr[0]['lon'])) {
+      return ['lat' => (float)$arr[0]['lat'], 'lng' => (float)$arr[0]['lon']];
+    }
+  }
+
+  return null;
+}
+
+// ---------- Helpers ----------
+function checkResponsable(PDO $pdo, int $entrepriseId, ?int $responsableId): bool {
+  if ($responsableId === null) return true;
+  $st = $pdo->prepare("SELECT id FROM utilisateurs WHERE id = :uid AND entreprise_id = :eid");
+  $st->execute([':uid' => $responsableId, ':eid' => $entrepriseId]);
+  return (bool)$st->fetch();
+}
+
+// ---------- Actions ----------
 try {
-  /* =========================
-     CREATE
-     ========================= */
   if ($action === 'create') {
     $nom  = trim((string)($_POST['nom'] ?? ''));
-    $resp = ($_POST['responsable_id'] ?? '') === '' ? null : (int)$_POST['responsable_id'];
+    $addr = trim((string)($_POST['adresse'] ?? ''));
+    $resp = ($_POST['responsable_id'] ?? '') !== '' ? (int)$_POST['responsable_id'] : null;
 
-    if ($nom === '') $fail(422, 'Nom obligatoire');
-
-    // Responsable doit appartenir à la même entreprise
-    if ($resp !== null) {
-      $chk = $pdo->prepare("SELECT id FROM utilisateurs WHERE id = :uid AND entreprise_id = :eid");
-      $chk->execute([':uid' => $resp, ':eid' => $entrepriseId]);
-      if (!$chk->fetch()) $fail(422, "Responsable hors de l'entreprise");
+    if ($nom === '' || $addr === '') {
+      echo json_encode(['ok' => false, 'error' => 'Champs manquants (nom/adresse)']);
+      exit;
+    }
+    if (!checkResponsable($pdo, $entrepriseId, $resp)) {
+      echo json_encode(['ok' => false, 'error' => 'Responsable hors entreprise']);
+      exit;
     }
 
-    $st = $pdo->prepare("
-      INSERT INTO depots (nom, responsable_id, entreprise_id, created_at)
-      VALUES (:nom, :resp, :eid, NOW())
-    ");
-    $st->bindValue(':nom', $nom, PDO::PARAM_STR);
-    $st->bindValue(':resp', $resp, $resp === null ? PDO::PARAM_NULL : PDO::PARAM_INT);
-    $st->bindValue(':eid', $entrepriseId, PDO::PARAM_INT);
-    $st->execute();
+    $coords = geocodeAddress($addr);
+    $lat = $coords['lat'] ?? null;
+    $lng = $coords['lng'] ?? null;
 
-    echo json_encode(['ok' => true, 'id' => (int)$pdo->lastInsertId()], JSON_UNESCAPED_UNICODE);
+    $st = $pdo->prepare("
+      INSERT INTO depots (nom, adresse, adresse_lat, adresse_lng, responsable_id, entreprise_id)
+      VALUES (:nom, :adresse, :lat, :lng, :resp, :eid)
+    ");
+    $st->execute([
+      ':nom'     => $nom,
+      ':adresse' => $addr,
+      ':lat'     => $lat,
+      ':lng'     => $lng,
+      ':resp'    => $resp,
+      ':eid'     => $entrepriseId,
+    ]);
+
+    echo json_encode(['ok' => true, 'id' => (int)$pdo->lastInsertId()]);
     exit;
   }
 
-  /* =========================
-     UPDATE
-     ========================= */
   if ($action === 'update') {
     $id   = (int)($_POST['id'] ?? 0);
     $nom  = trim((string)($_POST['nom'] ?? ''));
-    $resp = ($_POST['responsable_id'] ?? '') === '' ? null : (int)$_POST['responsable_id'];
+    $addr = trim((string)($_POST['adresse'] ?? ''));
+    $resp = ($_POST['responsable_id'] ?? '') !== '' ? (int)$_POST['responsable_id'] : null;
 
-    if ($id <= 0)    $fail(422, 'ID invalide');
-    if ($nom === '') $fail(422, 'Nom obligatoire');
-
-    // Ownership du dépôt
-    $own = $pdo->prepare("SELECT id FROM depots WHERE id = :id AND entreprise_id = :eid");
-    $own->execute([':id' => $id, ':eid' => $entrepriseId]);
-    if (!$own->fetch()) $fail(404, 'Dépôt introuvable');
-
-    // Responsable doit appartenir à la même entreprise
-    if ($resp !== null) {
-      $chk = $pdo->prepare("SELECT id FROM utilisateurs WHERE id = :uid AND entreprise_id = :eid");
-      $chk->execute([':uid' => $resp, ':eid' => $entrepriseId]);
-      if (!$chk->fetch()) $fail(422, "Responsable hors de l'entreprise");
+    if ($id <= 0 || $nom === '') {
+      echo json_encode(['ok' => false, 'error' => 'Champs manquants (id/nom)']);
+      exit;
+    }
+    if (!checkResponsable($pdo, $entrepriseId, $resp)) {
+      echo json_encode(['ok' => false, 'error' => 'Responsable hors entreprise']);
+      exit;
     }
 
-    $st = $pdo->prepare("
-      UPDATE depots
-         SET nom = :nom,
-             responsable_id = :resp
-       WHERE id = :id
-         AND entreprise_id = :eid
-    ");
-    $st->bindValue(':nom', $nom, PDO::PARAM_STR);
-    $st->bindValue(':resp', $resp, $resp === null ? PDO::PARAM_NULL : PDO::PARAM_INT);
-    $st->bindValue(':id', $id, PDO::PARAM_INT);
-    $st->bindValue(':eid', $entrepriseId, PDO::PARAM_INT);
-    $st->execute();
+    // Vérifie ownership + récupère ancienne adresse
+    $own = $pdo->prepare("SELECT adresse FROM depots WHERE id = :id AND entreprise_id = :eid");
+    $own->execute([':id' => $id, ':eid' => $entrepriseId]);
+    $row = $own->fetch();
+    if (!$row) {
+      echo json_encode(['ok' => false, 'error' => 'Dépôt introuvable']);
+      exit;
+    }
 
-    echo json_encode(['ok' => true, 'id' => $id, 'rows' => $st->rowCount()], JSON_UNESCAPED_UNICODE);
+    $needGeocode = ($addr !== '' && trim((string)$row['adresse']) !== $addr);
+
+    if ($needGeocode) {
+      $coords = geocodeAddress($addr);
+      $lat = $coords['lat'] ?? null;
+      $lng = $coords['lng'] ?? null;
+
+      $st = $pdo->prepare("
+        UPDATE depots
+           SET nom = :nom,
+               adresse = :adresse,
+               adresse_lat = :lat,
+               adresse_lng = :lng,
+               responsable_id = :resp
+         WHERE id = :id AND entreprise_id = :eid
+      ");
+      $st->execute([
+        ':nom'     => $nom,
+        ':adresse' => $addr,
+        ':lat'     => $lat,
+        ':lng'     => $lng,
+        ':resp'    => $resp,
+        ':id'      => $id,
+        ':eid'     => $entrepriseId,
+      ]);
+    } else {
+      // Pas de changement d’adresse → on préserve lat/lng
+      $st = $pdo->prepare("
+        UPDATE depots
+           SET nom = :nom,
+               adresse = :adresse,
+               responsable_id = :resp
+         WHERE id = :id AND entreprise_id = :eid
+      ");
+      $st->execute([
+        ':nom'     => $nom,
+        ':adresse' => $addr,
+        ':resp'    => $resp,
+        ':id'      => $id,
+        ':eid'     => $entrepriseId,
+      ]);
+    }
+
+    echo json_encode(['ok' => true, 'id' => $id]);
     exit;
   }
 
-  /* =========================
-     DELETE
-     ========================= */
   if ($action === 'delete') {
     $id = (int)($_POST['id'] ?? 0);
-    if ($id <= 0) $fail(422, 'ID invalide');
-
-    // Ownership du dépôt
-    $own = $pdo->prepare("SELECT id FROM depots WHERE id = :id AND entreprise_id = :eid");
-    $own->execute([':id' => $id, ':eid' => $entrepriseId]);
-    if (!$own->fetch()) $fail(404, 'Dépôt introuvable');
-
-    // Empêcher suppression si dépôt non vide
-    $chk = $pdo->prepare("SELECT COUNT(*) FROM stock_depots WHERE depot_id = :id");
-    $chk->execute([':id' => $id]);
-    if ((int)$chk->fetchColumn() > 0) $fail(409, 'Impossible de supprimer un dépôt non vide');
-
+    if ($id <= 0) {
+      echo json_encode(['ok' => false, 'error' => 'ID manquant']);
+      exit;
+    }
     $st = $pdo->prepare("DELETE FROM depots WHERE id = :id AND entreprise_id = :eid");
     $st->execute([':id' => $id, ':eid' => $entrepriseId]);
-
-    if ($st->rowCount() === 0) $fail(500, 'Suppression non effectuée');
-
-    echo json_encode(['ok' => true], JSON_UNESCAPED_UNICODE);
+    echo json_encode(['ok' => true]);
     exit;
   }
 
-  $fail(400, 'Action inconnue');
-
-} catch (PDOException $e) {
-  // Doublon si vous avez un index UNIQUE (entreprise_id, nom)
-  if (($e->errorInfo[1] ?? 0) == 1062) {
-    $fail(409, "Un dépôt avec ce nom existe déjà dans cette entreprise");
-  }
-  $fail(500, 'Erreur serveur');
+  echo json_encode(['ok' => false, 'error' => 'Action inconnue']);
 } catch (Throwable $e) {
-  $fail(500, $e->getMessage());
+  error_log('[depots_api] ' . $e->getMessage());
+  http_response_code(500);
+  echo json_encode(['ok' => false, 'error' => 'Erreur serveur']);
 }

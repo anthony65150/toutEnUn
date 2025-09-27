@@ -75,6 +75,7 @@ SELECT
   COALESCE(t.quantite,0)         AS quantite,
   COALESCE(t.tu_heures,0)        AS tu_heures,
   COALESCE(t.avancement_pct,0)   AS avancement_pct,
+  t.updated_at,
   (
     SELECT COALESCE(SUM(pj.heures), 0)
     FROM pointages_jour pj
@@ -183,6 +184,9 @@ require_once __DIR__ . '/../templates/navigation/navigation.php';
 
               <td class="mono tt-cell"><?= h2($ttH) ?></td>
 
+              <?php
+              $updatedText = !empty($t['updated_at']) ? date('d-m-Y', strtotime($t['updated_at'])) : '';
+              ?>
               <td>
                 <div class="input-group input-group-sm">
                   <input type="number" step="1" min="0" max="100"
@@ -191,7 +195,14 @@ require_once __DIR__ . '/../templates/navigation/navigation.php';
                     <?= $role === 'administrateur' ? '' : 'readonly' ?>>
                   <span class="input-group-text">%</span>
                 </div>
+
+                <div class="small text-muted last-update" <?= $updatedText ? '' : 'style="display:none"' ?>>
+                  Dernière mise à jour le <span class="date"><?= htmlspecialchars($updatedText) ?></span>
+                </div>
               </td>
+
+
+
 
               <td class="mono ts-cell" data-h="<?= h2($tsH) ?>"><?= h2($tsH) ?></td>
               <td class="mono hp-cell" data-h="<?= h2($hpH) ?>"><?= h2($hpH) ?></td>

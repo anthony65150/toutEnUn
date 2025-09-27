@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 require_once __DIR__ . '/../config/init.php';
@@ -36,6 +37,7 @@ $utilisateurs = $stUsers->fetchAll(PDO::FETCH_ASSOC);
 $stDepots = $pdo->prepare("
     SELECT d.id,
            d.nom,
+           d.adresse,        
            d.created_at,
            d.responsable_id,
            u.prenom  AS resp_prenom,
@@ -45,6 +47,7 @@ $stDepots = $pdo->prepare("
     WHERE d.entreprise_id = :eid
     ORDER BY d.nom ASC
 ");
+
 $stDepots->execute([':eid' => $entrepriseId]);
 $depots = $stDepots->fetchAll(PDO::FETCH_ASSOC);
 ?>
@@ -71,6 +74,7 @@ $depots = $stDepots->fetchAll(PDO::FETCH_ASSOC);
         <thead class="table-dark">
             <tr>
                 <th>Nom</th>
+                <th>Adresse</th> <!-- NEW -->
                 <th>Responsable</th>
                 <th>Date de création</th>
                 <th>Actions</th>
@@ -79,52 +83,50 @@ $depots = $stDepots->fetchAll(PDO::FETCH_ASSOC);
         <tbody id="depotsTbody">
             <?php foreach ($depots as $depot): ?>
                 <?php
-                    $respText = (!empty($depot['responsable_id']) && $depot['resp_prenom'] !== null)
-                        ? htmlspecialchars($depot['resp_prenom'] . ' ' . $depot['resp_nom'])
-                        : '—';
-
-                    $createdAt = !empty($depot['created_at'])
-                        ? htmlspecialchars(date('d/m/Y', strtotime($depot['created_at'])))
-                        : '—';
-
-                    $highlight = (isset($_GET['highlight']) && (int)$_GET['highlight'] === (int)$depot['id'])
-                        ? 'table-success'
-                        : '';
+                $respText = (!empty($depot['responsable_id']) && $depot['resp_prenom'] !== null)
+                    ? htmlspecialchars($depot['resp_prenom'] . ' ' . $depot['resp_nom'])
+                    : '—';
+                $createdAt = !empty($depot['created_at'])
+                    ? htmlspecialchars(date('d/m/Y', strtotime($depot['created_at'])))
+                    : '—';
+                $highlight = (isset($_GET['highlight']) && (int)$_GET['highlight'] === (int)$depot['id']) ? 'table-success' : '';
                 ?>
                 <tr class="align-middle <?= $highlight ?>">
                     <td>
-                        <!-- Lien vers /depots/depot_contenu.php -->
                         <a class="link-primary fw-semibold text-decoration-none"
-                           href="./depot_contenu.php?depot_id=<?= (int)$depot['id'] ?>">
+                            href="./depot_contenu.php?depot_id=<?= (int)$depot['id'] ?>">
                             <?= htmlspecialchars($depot['nom']) ?>
                         </a>
                     </td>
+                    <td><?= htmlspecialchars($depot['adresse'] ?? '—') ?></td> <!-- NEW -->
                     <td><?= $respText ?></td>
                     <td><?= $createdAt ?></td>
                     <td>
                         <button class="btn btn-sm btn-warning edit-depot-btn"
-                                data-bs-toggle="modal"
-                                data-bs-target="#modalDepotEdit"
-                                data-id="<?= (int)$depot['id'] ?>"
-                                data-nom="<?= htmlspecialchars($depot['nom'], ENT_QUOTES) ?>"
-                                data-resp="<?= (int)($depot['responsable_id'] ?? 0) ?>"
-                                title="Modifier">
+                            data-bs-toggle="modal"
+                            data-bs-target="#modalDepotEdit"
+                            data-id="<?= (int)$depot['id'] ?>"
+                            data-nom="<?= htmlspecialchars($depot['nom'], ENT_QUOTES) ?>"
+                            data-adresse="<?= htmlspecialchars($depot['adresse'] ?? '', ENT_QUOTES) ?>"
+                            data-resp="<?= (int)($depot['responsable_id'] ?? 0) ?>"
+                            title="Modifier">
                             <i class="bi bi-pencil-fill"></i>
                         </button>
                         <button class="btn btn-sm btn-danger delete-depot-btn"
-                                data-bs-toggle="modal"
-                                data-bs-target="#modalDepotDelete"
-                                data-id="<?= (int)$depot['id'] ?>"
-                                title="Supprimer">
+                            data-bs-toggle="modal"
+                            data-bs-target="#modalDepotDelete"
+                            data-id="<?= (int)$depot['id'] ?>"
+                            title="Supprimer">
                             <i class="bi bi-trash-fill"></i>
                         </button>
                     </td>
                 </tr>
             <?php endforeach; ?>
 
+
             <!-- ligne "aucun résultat" (affichée par JS si besoin) -->
             <tr id="noResultsRow" class="d-none">
-                <td colspan="4" class="text-muted text-center py-4">Aucun dépôt trouvé</td>
+                <td colspan="5" class="text-muted text-center py-4">Aucun dépôt trouvé</td>
             </tr>
         </tbody>
     </table>
@@ -145,6 +147,15 @@ $depots = $stDepots->fetchAll(PDO::FETCH_ASSOC);
                         <label class="form-label">Nom du dépôt</label>
                         <input type="text" class="form-control" name="nom" required>
                     </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Adresse du dépôt</label>
+                        <input id="createAdresse" name="adresse" class="form-control" required autocomplete="off">
+                        <input type="hidden" id="createLat" name="adresse_lat">
+                        <input type="hidden" id="createLng" name="adresse_lng">
+
+                    </div>
+
                     <div class="mb-3">
                         <label class="form-label">Responsable</label>
                         <select class="form-select" name="responsable_id">
@@ -157,6 +168,7 @@ $depots = $stDepots->fetchAll(PDO::FETCH_ASSOC);
                         </select>
                     </div>
                 </div>
+
                 <div class="modal-footer">
                     <button class="btn btn-success" type="submit">Enregistrer</button>
                     <button class="btn btn-secondary" data-bs-dismiss="modal" type="button">Annuler</button>
@@ -175,12 +187,23 @@ $depots = $stDepots->fetchAll(PDO::FETCH_ASSOC);
                     <h5 class="modal-title">Modifier un dépôt</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
+
                 <div class="modal-body">
                     <input type="hidden" id="editDepotId" name="id">
+
                     <div class="mb-3">
                         <label class="form-label">Nom du dépôt</label>
                         <input type="text" class="form-control" id="editNom" name="nom" required>
                     </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Adresse du dépôt</label>
+                        <input id="editAdresse" name="adresse" class="form-control" required autocomplete="off">
+                        <input type="hidden" id="editLat" name="adresse_lat">
+                        <input type="hidden" id="editLng" name="adresse_lng">
+
+                    </div>
+
                     <div class="mb-3">
                         <label class="form-label">Responsable</label>
                         <select class="form-select" id="editResp" name="responsable_id">
@@ -193,6 +216,7 @@ $depots = $stDepots->fetchAll(PDO::FETCH_ASSOC);
                         </select>
                     </div>
                 </div>
+
                 <div class="modal-footer">
                     <button class="btn btn-success" type="submit">Enregistrer</button>
                     <button class="btn btn-secondary" data-bs-dismiss="modal" type="button">Annuler</button>
@@ -235,32 +259,32 @@ $depots = $stDepots->fetchAll(PDO::FETCH_ASSOC);
 </div>
 
 <?php if (isset($_GET['success'])): ?>
-<script>
-document.addEventListener('DOMContentLoaded', () => {
-  const msgType = "<?= htmlspecialchars($_GET['success'] ?? '', ENT_QUOTES) ?>";
-  let message = "Dépôt enregistré avec succès.";
-  if (msgType === "create") message = "Dépôt créé avec succès.";
-  else if (msgType === "update") message = "Dépôt modifié avec succès.";
-  else if (msgType === "delete") message = "Dépôt supprimé avec succès.";
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const msgType = "<?= htmlspecialchars($_GET['success'] ?? '', ENT_QUOTES) ?>";
+            let message = "Dépôt enregistré avec succès.";
+            if (msgType === "create") message = "Dépôt créé avec succès.";
+            else if (msgType === "update") message = "Dépôt modifié avec succès.";
+            else if (msgType === "delete") message = "Dépôt supprimé avec succès.";
 
-  const toastEl = document.getElementById('depotToast');
-  const toastMsg = document.getElementById('depotToastMsg');
-  toastMsg.textContent = message;
-  new bootstrap.Toast(toastEl).show();
-});
-</script>
+            const toastEl = document.getElementById('depotToast');
+            const toastMsg = document.getElementById('depotToastMsg');
+            toastMsg.textContent = message;
+            new bootstrap.Toast(toastEl).show();
+        });
+    </script>
 <?php endif; ?>
 
 <!-- JS admin dépôts : chemin relatif depuis /depots -->
 <script src="./js/depotsGestion_admin.js?v=7"></script>
 
 <script>
-document.addEventListener('DOMContentLoaded', () => {
-  const highlightedRow = document.querySelector('tr.table-success');
-  if (highlightedRow) {
-    setTimeout(() => highlightedRow.classList.remove('table-success'), 3000);
-  }
-});
+    document.addEventListener('DOMContentLoaded', () => {
+        const highlightedRow = document.querySelector('tr.table-success');
+        if (highlightedRow) {
+            setTimeout(() => highlightedRow.classList.remove('table-success'), 3000);
+        }
+    });
 </script>
 
 <?php require_once __DIR__ . '/../templates/footer.php'; ?>

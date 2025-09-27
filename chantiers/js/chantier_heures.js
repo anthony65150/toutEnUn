@@ -395,3 +395,89 @@ form.addEventListener('submit', async (e) => {
   setTimeout(() => currentTr.classList.remove('table-success'), 1200);
   modal.hide();
 });})();
+
+document.addEventListener('DOMContentLoaded', () => {
+  const root = document.getElementById('heuresPage');
+  if (!root) return;
+  const csrf = root.dataset.csrfToken;
+  const chantierId = root.dataset.chantierId;
+  const tbody = document.getElementById('heuresTbody');
+
+  async function savePct(input) {
+  const tr = input.closest('tr');
+  const tacheId = tr.dataset.id;
+  let pct = parseFloat(String(input.value).replace(',', '.')) || 0;
+  if (pct < 0) pct = 0; if (pct > 100) pct = 100;
+  input.value = pct;
+
+  const fd = new FormData();
+  fd.append('csrf_token', csrf);
+  fd.append('chantier_id', chantierId);
+  fd.append('tache_id', tacheId);
+  fd.append('avancement_pct', pct);
+
+  try {
+    const r = await fetch('/chantiers/ajax/chantier_heures_avancement.php', { method:'POST', body:fd });
+
+    // lecture robuste (au cas où le PHP émet un warning)
+    const raw = await r.text();
+    let j; try { j = JSON.parse(raw); } catch { throw new Error('Réponse non-JSON: ' + raw.slice(0, 500)); }
+    if (!r.ok || !j.ok) throw new Error(j.msg || 'Erreur serveur');
+
+    // --- MAJ cellules + data-* cohérentes avec recalcRow() ---
+    const ts = parseFloat(j.ts) || 0;
+    const hp = parseFloat(j.hp) || 0;
+    const ec = parseFloat(j.ec) || 0;
+    const nt = parseFloat(j.new_tu) || 0;
+
+    const tsCell = tr.querySelector('.ts-cell');
+    if (tsCell) { tsCell.textContent = j.ts; tsCell.dataset.h = ts.toFixed(2); }
+
+    const hpCell = tr.querySelector('.hp-cell');
+    if (hpCell) { hpCell.textContent = j.hp; hpCell.dataset.h = hp.toFixed(2); }
+
+    const ecCell = tr.querySelector('.ecart-cell');
+    if (ecCell) {
+      ecCell.textContent = j.ec;
+      ecCell.dataset.h = ec.toFixed(2);
+      ecCell.classList.remove('cell-good', 'cell-bad');
+      ecCell.classList.add(ec < 0 ? 'cell-bad' : 'cell-good');
+    }
+
+    const ntCell = tr.querySelector('.newtu-cell');
+    if (ntCell) {
+      ntCell.textContent = j.new_tu;
+      ntCell.dataset.h = nt.toFixed(2);
+      ntCell.classList.remove('cell-good', 'cell-bad');
+      const tuHours = parseFloat(tr.dataset.tuHours || '0') || 0;
+      if (nt > 0) ntCell.classList.add(nt > tuHours + 1e-9 ? 'cell-bad' : 'cell-good');
+    }
+
+    // --- MAJ "Dernière mise à jour" ---
+    let luWrap = tr.querySelector('.last-update');
+    let luDate = tr.querySelector('.last-update .date');
+    if (!luWrap) {
+      luWrap = document.createElement('div');
+      luWrap.className = 'small text-muted last-update';
+      luWrap.innerHTML = 'Dernière mise à jour le <span class="date"></span>';
+      input.closest('td')?.appendChild(luWrap);
+      luDate = luWrap.querySelector('.date');
+    }
+    if (luDate) luDate.textContent = j.updated_on || '';
+    luWrap.style.display = '';
+
+    tr.classList.add('table-success');
+    setTimeout(()=>tr.classList.remove('table-success'), 700);
+  } catch(e) {
+    console.error(e);
+    tr.classList.add('table-danger');
+    setTimeout(()=>tr.classList.remove('table-danger'), 700);
+    alert(e.message || 'Erreur lors de la mise à jour du pourcentage.');
+  }
+}
+
+
+  tbody.addEventListener('change', e => {
+    if (e.target.classList.contains('avc-input')) savePct(e.target);
+  });
+});
