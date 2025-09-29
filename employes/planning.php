@@ -95,6 +95,23 @@ foreach ($chantiers as $c) $chantierById[(int)$c['id']] = $c['nom'];
 $depotById = [];
 foreach ($depots as $d) $depotById[(int)$d['id']] = $d['nom'];
 
+/* Rattachements employés ↔ chantiers (pour les filtres) */
+$empChantiersMap = []; // [utilisateur_id] => "1,5,9"
+$st = $pdo->prepare("
+  SELECT uc.utilisateur_id,
+         GROUP_CONCAT(DISTINCT uc.chantier_id ORDER BY uc.chantier_id SEPARATOR ',') AS chs
+  FROM utilisateur_chantiers uc
+  JOIN chantiers c
+    ON c.id = uc.chantier_id
+   AND c.entreprise_id = :eid
+  GROUP BY uc.utilisateur_id
+");
+$st->execute([':eid' => $entrepriseId]);
+foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+  $empChantiersMap[(int)$r['utilisateur_id']] = (string)($r['chs'] ?? '');
+}
+
+
 /* Employés : tout le monde SAUF administrateur, avec agence */
 $employes = [];
 
@@ -114,6 +131,8 @@ $sqlEmp = "SELECT u.id,
 $st = $pdo->prepare($sqlEmp);
 $st->execute([':e1' => $entrepriseId, ':e2' => $entrepriseId]);
 $employes = $st->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+
 
 /* Détection schéma planning_affectations : type / depot_id existent ? */
 $hasTypeCol  = false;
@@ -217,7 +236,6 @@ function badgeRole($role)
     <div class="d-flex justify-content-center mb-3">
       <div id="agenceFilters" class="d-flex flex-wrap gap-2">
         <button type="button" class="btn btn-primary" data-agence="all">Tous</button>
-        <button type="button" class="btn btn-outline-secondary" data-agence="0">Sans agence</button>
         <?php foreach ($agences as $ag): ?>
           <button type="button"
             class="btn btn-outline-secondary"
@@ -226,6 +244,7 @@ function badgeRole($role)
           </button>
         <?php endforeach; ?>
       </div>
+
     </div>
   <?php endif; ?>
 
@@ -318,7 +337,9 @@ function badgeRole($role)
       <tbody id="gridBody">
         <?php foreach ($employes as $emp): ?>
           <tr data-emp-id="<?= (int)$emp['id'] ?>"
-            data-agence-id="<?= (int)($emp['agence_id'] ?? 0) ?>">
+    data-agence-id="<?= (int)($emp['agence_id'] ?? 0) ?>"
+    data-chantiers="<?= htmlspecialchars($empChantiersMap[(int)$emp['id']] ?? '') ?>">
+
 
             <td class="fw-semibold">
               <?= htmlspecialchars($emp['nom']) ?>

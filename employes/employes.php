@@ -74,8 +74,32 @@ function badgeRole($role)
         </button>
         <a href="planning.php" class="btn btn-success">📅 Planning</a>
     </div>
+    <?php
+    // Agences pour la barre de filtres (même entreprise)
+    $agStmt = $pdo->prepare("
+  SELECT id, nom
+  FROM agences
+  " . ($entrepriseId !== null ? "WHERE entreprise_id = :e" : "") . "
+  ORDER BY nom
+");
+    $params = [];
+    if ($entrepriseId !== null) $params[':e'] = $entrepriseId;
+    $agStmt->execute($params);
+    $AG_LIST = $agStmt->fetchAll(PDO::FETCH_ASSOC);
+    ?>
 
-    <div id="agenceFilters" class="mb-3 d-flex flex-wrap gap-2 justify-content-center"></div>
+
+    <div id="agenceFilters" class="mb-3 d-flex flex-wrap gap-2 justify-content-center">
+  <button type="button" class="btn btn-primary" data-agence="all">Tous</button>
+  <?php foreach ($AG_LIST as $ag): ?>
+    <button type="button"
+            class="btn btn-outline-secondary"
+            data-agence="<?= (int)$ag['id'] ?>">
+      <?= htmlspecialchars($ag['nom']) ?>
+    </button>
+  <?php endforeach; ?>
+</div>
+
 
     <input
         type="text"
@@ -221,23 +245,23 @@ function badgeRole($role)
 
 <!-- Modal Suppression -->
 <div class="modal fade" id="confirmDeleteModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog">
-    <form class="modal-content" id="deleteForm">
-      <div class="modal-header">
-        <h5 class="modal-title">Supprimer l’employé</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
-      </div>
-      <div class="modal-body">
-        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf) ?>">
-        <input type="hidden" name="id" id="delete_id">
-        <p class="mb-0">Confirmer la suppression ? Cette action est irréversible.</p>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-secondary" data-bs-dismiss="modal" type="button">Annuler</button>
-        <button class="btn btn-danger" type="submit">Supprimer</button>
-      </div>
-    </form>
-  </div>
+    <div class="modal-dialog">
+        <form class="modal-content" id="deleteForm">
+            <div class="modal-header">
+                <h5 class="modal-title">Supprimer l’employé</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf) ?>">
+                <input type="hidden" name="id" id="delete_id">
+                <p class="mb-0">Confirmer la suppression ? Cette action est irréversible.</p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" data-bs-dismiss="modal" type="button">Annuler</button>
+                <button class="btn btn-danger" type="submit">Supprimer</button>
+            </div>
+        </form>
+    </div>
 </div>
 
 
@@ -298,6 +322,57 @@ function badgeRole($role)
         });
     });
 </script>
+<script>
+  (function () {
+    let CURRENT_AGENCE = 'all';
+
+    function applyFilter() {
+      const q = (document.getElementById('employeSearchInput')?.value || '').toLowerCase();
+      document.querySelectorAll('#employesTableBody tr').forEach(tr => {
+        const agId  = String(tr.dataset.agenceId || '0');
+        const name  = ((tr.dataset.nom || '') + ' ' + (tr.dataset.prenom || '') + ' ' + (tr.dataset.email || '') + ' ' + (tr.dataset.fonction || '')).toLowerCase();
+
+        const matchAgence = (CURRENT_AGENCE === 'all') ? true : (agId === String(CURRENT_AGENCE));
+        const matchSearch = name.includes(q);
+
+        tr.style.display = (matchAgence && matchSearch) ? '' : 'none';
+      });
+    }
+
+    // Clic sur la barre agence
+    const agBar = document.getElementById('agenceFilters');
+    if (agBar) {
+      agBar.addEventListener('click', (e) => {
+        const btn = e.target.closest('button[data-agence]');
+        if (!btn) return;
+
+        agBar.querySelectorAll('button').forEach(b => {
+          b.classList.remove('btn-primary');
+          b.classList.add('btn-outline-secondary');
+        });
+        btn.classList.remove('btn-outline-secondary');
+        btn.classList.add('btn-primary');
+
+        CURRENT_AGENCE = btn.dataset.agence || 'all';
+        applyFilter();
+      });
+    }
+
+    // Recherche
+    const input = document.getElementById('employeSearchInput');
+    if (input) {
+      let t;
+      input.addEventListener('input', () => {
+        clearTimeout(t);
+        t = setTimeout(applyFilter, 120);
+      });
+    }
+
+    // 1er rendu
+    applyFilter();
+  })();
+</script>
+
 <script src="/employes/js/employesGestion_admin.js"></script>
 
 <?php require_once __DIR__ . '/../templates/footer.php'; ?>

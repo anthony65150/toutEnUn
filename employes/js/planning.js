@@ -3,7 +3,10 @@
 //   window.PLANNING_DATE_START
 //   window.API_MOVE
 //   window.API_DELETE
-let CURRENT_AGENCE = "all";
+
+/* ========== ÉTAT DES FILTRES ========== */
+let CURRENT_AGENCE   = "all";   // "all" | <agence_id>
+let CURRENT_CHANTIER = "all";   // "all" | <chantier_id>
 
 /* ===== Utils ===== */
 function isAbsenceType(t) {
@@ -205,6 +208,26 @@ function attachDragSources() {
     });
     ch.setAttribute("draggable", "true");
   });
+
+  /* --- CLIC pour filtrer par chantier --- */
+  document.querySelectorAll("#palette-chantiers .chip").forEach((chip) => {
+    chip.addEventListener("click", (e) => {
+      // Empêche un click fantôme juste après un drag
+      if (dragPaint) return;
+
+      const cid = String(chip.dataset.chantierId || "");
+      // toggle : cliquer la même pastille annule le filtre
+      CURRENT_CHANTIER = (CURRENT_CHANTIER === cid ? "all" : cid);
+
+      // Visuel : souligne la pastille active
+      document.querySelectorAll("#palette-chantiers .chip").forEach(c => c.classList.remove("chip-active"));
+      if (CURRENT_CHANTIER !== "all") chip.classList.add("chip-active");
+
+      // En mode "chantier précis", on ignore l'agence — pas besoin de modifier CURRENT_AGENCE
+      const q = document.getElementById("searchInput")?.value || "";
+      filterRows(q);
+    });
+  });
 }
 
 /* ===== API ===== */
@@ -397,17 +420,30 @@ function attachPaintToOffCell(off) {
   });
 }
 
-
-/* ===== Filtre employé ===== */
+/* ===== Filtre employé (nom + agence/chantier) ===== */
 function filterRows(q) {
   q = (q || "").toLowerCase();
   document.querySelectorAll("#gridBody tr").forEach((tr) => {
     const name = (tr.querySelector("td:first-child")?.innerText || "").toLowerCase();
     const agId = tr.dataset.agenceId || "0";
+    const chs  = (tr.dataset.chantiers || "")
+      .split(",").map(s => s.trim()).filter(Boolean);
+
     const matchName = name.includes(q);
-    const matchAgence =
-      CURRENT_AGENCE === "all" ? true : String(agId) === String(CURRENT_AGENCE);
-    tr.style.display = (matchName && matchAgence) ? "" : "none";
+
+    // Règle : chantier > agence
+    let matchChantier = true;
+    let matchAgence   = true;
+
+    if (CURRENT_CHANTIER !== "all") {
+      matchChantier = chs.includes(String(CURRENT_CHANTIER));
+      matchAgence   = true; // on ignore l'agence quand un chantier est fixé
+    } else {
+      matchChantier = true;
+      matchAgence   = (CURRENT_AGENCE === "all") ? true : String(agId) === String(CURRENT_AGENCE);
+    }
+
+    tr.style.display = (matchName && matchAgence && matchChantier) ? "" : "none";
   });
 }
 
@@ -474,12 +510,14 @@ document.addEventListener("DOMContentLoaded", () => {
       t = setTimeout(() => filterRows(v), 120);
     });
   }
+
   // Filtres agence
   const agBar = document.getElementById("agenceFilters");
   if (agBar) {
     agBar.addEventListener("click", (e) => {
       const btn = e.target.closest("[data-agence]");
       if (!btn) return;
+
       // style actif
       agBar.querySelectorAll("button").forEach(b=>{
         b.classList.remove("btn-primary");
@@ -488,11 +526,19 @@ document.addEventListener("DOMContentLoaded", () => {
       btn.classList.remove("btn-outline-secondary");
       btn.classList.add("btn-primary");
 
-      CURRENT_AGENCE = btn.dataset.agence || "all";
+      // appliquer filtre agence et remettre le filtre chantier à 'all'
+      CURRENT_AGENCE   = btn.dataset.agence || "all";
+      CURRENT_CHANTIER = "all";
+      // reset style des pastilles chantier actives
+      document.querySelectorAll("#palette-chantiers .chip").forEach(c => c.classList.remove("chip-active"));
+
       const q = document.getElementById("searchInput")?.value || "";
       filterRows(q);
     });
   }
+
+  // application initiale (au cas où)
+  filterRows(document.getElementById("searchInput")?.value || "");
 });
 
 /* ===== Suppression via croix (sélecteur délégué de secours) ===== */

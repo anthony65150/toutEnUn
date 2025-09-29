@@ -11,73 +11,18 @@ $role         = $user['fonction'] ?? null;
 $userId       = (int)($user['id'] ?? 0);
 $entrepriseId = (int)($user['entreprise_id'] ?? 0);
 
-/* ==============================
-   Fallback chantier AVANT TOUT OUTPUT
-============================== */
 $weekStartParam = (isset($_GET['start']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $_GET['start']))
   ? '&start=' . $_GET['start']
   : '';
+
+$isAdmin = ($role === 'administrateur');
 $chantierId = isset($_GET['chantier_id']) ? (int)$_GET['chantier_id'] : 0;
 
-if ($chantierId <= 0) {
-  if ($role === 'administrateur') {
-    $q = $pdo->prepare("SELECT id FROM chantiers WHERE entreprise_id = :eid ORDER BY nom LIMIT 1");
-    $q->execute([':eid' => $entrepriseId]);
-    $cid = (int)$q->fetchColumn();
-  } else {
-    $q = $pdo->prepare("
-      SELECT c.id
-      FROM utilisateur_chantiers uc
-      JOIN chantiers c ON c.id = uc.chantier_id AND c.entreprise_id = :eid
-      WHERE uc.utilisateur_id = :uid
-      ORDER BY c.nom
-      LIMIT 1
-    ");
-    $q->execute([':eid' => $entrepriseId, ':uid' => $userId]);
-    $cid = (int)$q->fetchColumn();
-  }
-
-  if ($cid > 0) {
-    header("Location: pointage.php?chantier_id={$cid}{$weekStartParam}");
-    exit;
-  }
-
-  // Aucun chantier disponible
-  echo '<!doctype html><meta charset="utf-8"><div style="padding:2rem;font-family:sans-serif">
-          <h3>Aucun chantier disponible</h3>
-          <p>Crée un chantier ou rattache-toi à un chantier pour continuer.</p>
-        </div>';
-  exit;
-}
-
 /* ==============================
-   À PARTIR D'ICI : on peut envoyer du HTML
+   Chantiers visibles / autorisés
 ============================== */
-setlocale(LC_TIME, 'fr_FR.UTF-8', 'fr_FR', 'French_France.1252');
-require_once __DIR__ . '/../templates/header.php';
-require_once __DIR__ . '/../templates/navigation/navigation.php';
-
-/* ==============================
-   Semaine affichée (lundi)
-============================== */
-$weekStart = isset($_GET['start']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $_GET['start'])
-  ? new DateTime($_GET['start'])
-  : new DateTime('monday this week');
-
-$weekNum     = (int)$weekStart->format('W');
-$monthTitle  = ucfirst(strftime('%B %Y', $weekStart->getTimestamp()));
-$startIso    = $weekStart->format('Y-m-d');
-$endIso      = (clone $weekStart)->modify('+7 days')->format('Y-m-d'); // exclusif
-
-/* ==============================
-   Filtre chantier actif (depuis l'URL)
-============================== */
-$currentChantierId = $chantierId;
-
-/* ==============================
-   Chantiers visibles pour filtres
-============================== */
-if ($role === 'administrateur') {
+if ($isAdmin) {
+  // Admin : liste complète
   $stmt = $pdo->prepare("
     SELECT c.id, c.nom, c.depot_id, d.nom AS depot_nom
     FROM chantiers c
@@ -89,42 +34,154 @@ if ($role === 'administrateur') {
   $stmt->execute([$entrepriseId]);
   $visibleChantiers = $stmt->fetchAll(PDO::FETCH_ASSOC);
 } else {
+  // Chef : uniquement ses chantiers
   $stmt = $pdo->prepare("
     SELECT DISTINCT c.id, c.nom, c.depot_id, d.nom AS depot_nom
     FROM utilisateur_chantiers uc
-    JOIN chantiers c ON c.id = uc.chantier_id
+    JOIN chantiers c ON c.id = uc.chantier_id AND c.entreprise_id = :eid
     LEFT JOIN depots d
       ON d.id = c.depot_id AND d.entreprise_id = c.entreprise_id
-    WHERE uc.utilisateur_id = ? AND c.entreprise_id = ?
+    WHERE uc.utilisateur_id = :uid
     ORDER BY c.nom
   ");
-  $stmt->execute([$userId, $entrepriseId]);
+  $stmt->execute([':uid' => $userId, ':eid' => $entrepriseId]);
   $visibleChantiers = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+  // liste blanche des IDs autorisés
+  $allowedIds = array_map(fn($r) => (int)$r['id'], $visibleChantiers);
+
+  if (!$allowedIds) {
+    // aucun chantier rattaché
+    echo '<!doctype html><meta charset="utf-8"><div style="padding:2rem;font-family:sans-serif">
+            <h3>Aucun chantier rattaché</h3>
+            <p>Demande à un administrateur de te rattacher à un chantier.</p>
+          </div>';
+    exit;
+  }
+
+  // 1) s’il n’y a pas d’id dans l’URL → forcer le 1er autorisé
+  if ($chantierId <= 0) {
+    $first = $allowedIds[0];
+    header("Location: pointage.php?chantier_id={$first}{$weekStartParam}");
+    exit;
+  }
+
+  // 2) s’il y a un id mais qu’il n’est PAS autorisé → rediriger vers le 1er autorisé
+  if (!in_array($chantierId, $allowedIds, true)) {
+    $first = $allowedIds[0];
+    header("Location: pointage.php?chantier_id={$first}{$weekStartParam}");
+    exit;
+  }
 }
 
-// Charger le chantier courant (pour km/min et depot)
-$st = $pdo->prepare("
-  SELECT c.id, c.nom, c.adresse, c.depot_id,
-         c.trajet_distance_m, c.trajet_duree_s, c.trajet_last_calc,
-         d.nom AS depot_nom
-  FROM chantiers c
-  LEFT JOIN depots d
-    ON d.id = c.depot_id AND d.entreprise_id = c.entreprise_id
-  WHERE c.id = :cid AND c.entreprise_id = :eid
-  LIMIT 1
-");
-$st->execute([':cid' => $currentChantierId, ':eid' => $entrepriseId]);
-$chantier = $st->fetch(PDO::FETCH_ASSOC);
+// Admin : pas de redirection ; $chantierId peut rester 0 (aucun filtre chantier)
 
-$km  = isset($chantier['trajet_distance_m']) && $chantier['trajet_distance_m'] !== null
-  ? round(((float)$chantier['trajet_distance_m']) / 1000, 1) : null;
-$min = isset($chantier['trajet_duree_s']) && $chantier['trajet_duree_s'] !== null
-  ? (int)round(((float)$chantier['trajet_duree_s']) / 60) : null;
+/* ==============================
+   À PARTIR D'ICI : on peut envoyer du HTML
+   ============================== */
+setlocale(LC_TIME, 'fr_FR.UTF-8', 'fr_FR', 'French_France.1252');
+require_once __DIR__ . '/../templates/header.php';
+require_once __DIR__ . '/../templates/navigation/navigation.php';
 
+/* ==============================
+   Semaine affichée (lundi)
+   ============================== */
+$weekStart = isset($_GET['start']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $_GET['start'])
+  ? new DateTime($_GET['start'])
+  : new DateTime('monday this week');
+
+$weekNum     = (int)$weekStart->format('W');
+$monthTitle  = ucfirst(strftime('%B %Y', $weekStart->getTimestamp()));
+$startIso    = $weekStart->format('Y-m-d');
+$endIso      = (clone $weekStart)->modify('+7 days')->format('Y-m-d'); // exclusif
+
+/* ==============================
+   Filtre chantier actif (depuis l'URL)
+   ============================== */
+$currentChantierId = $chantierId;
+
+/* ==========================================
+   Chantiers pour le filtre SOUS "Agence"
+   (Admin: tous ; Chef: seulement autorisés)
+========================================== */
+if ($isAdmin) {
+  $stAll = $pdo->prepare("
+    SELECT 
+      c.id,
+      c.nom,
+      COALESCE(d.agence_id, NULL) AS agence_effective
+    FROM chantiers c
+    LEFT JOIN depots d
+      ON d.id = c.depot_id
+     AND d.entreprise_id = c.entreprise_id
+    WHERE c.entreprise_id = :eid
+    ORDER BY c.nom
+  ");
+  $stAll->execute([':eid' => $entrepriseId]);
+} else {
+  $stAll = $pdo->prepare("
+    SELECT 
+      c.id,
+      c.nom,
+      COALESCE(d.agence_id, NULL) AS agence_effective
+    FROM utilisateur_chantiers uc
+    JOIN chantiers c
+      ON c.id = uc.chantier_id AND c.entreprise_id = :eid
+    LEFT JOIN depots d
+      ON d.id = c.depot_id AND d.entreprise_id = c.entreprise_id
+    WHERE uc.utilisateur_id = :uid
+    ORDER BY c.nom
+  ");
+  $stAll->execute([':eid' => $entrepriseId, ':uid' => $userId]);
+}
+
+$chantiersForJs = array_map(fn($r) => [
+  'id'        => (int)$r['id'],
+  'nom'       => (string)$r['nom'],
+  'agence_id' => $r['agence_effective'] !== null ? (int)$r['agence_effective'] : null,
+], $stAll->fetchAll(PDO::FETCH_ASSOC));
+?>
+<script>
+  window.CHANTIERS_LIST = <?= json_encode($chantiersForJs, JSON_UNESCAPED_UNICODE) ?>;
+</script>
+<?php
+
+
+/* ======================================================
+   Infos chantier sélectionné (inclut les champs trajet_*)
+   ====================================================== */
+$info = null;
+if ($currentChantierId > 0) {
+  $st = $pdo->prepare("
+    SELECT
+      c.id                AS chantier_id,
+      c.nom               AS chantier_nom,
+      c.depot_id,
+      c.trajet_distance_m,
+      c.trajet_duree_s,
+      c.trajet_last_calc,
+      d.nom               AS depot_nom
+    FROM chantiers c
+    JOIN depots d
+      ON d.id = c.depot_id AND d.entreprise_id = c.entreprise_id
+    WHERE c.id = :cid AND c.entreprise_id = :eid
+  ");
+  $st->execute([':cid' => $currentChantierId, ':eid' => $entrepriseId]);
+  $info = $st->fetch(PDO::FETCH_ASSOC) ?: null;
+}
+
+// km / min pré-connus en base (sinon ce sera refresh via API)
+$km  = ($info && $info['trajet_distance_m'] !== null)
+  ? round(((float)$info['trajet_distance_m']) / 1000, 1) : null;
+
+$min = ($info && $info['trajet_duree_s'] !== null)
+  ? (int)round(((float)$info['trajet_duree_s']) / 60) : null;
+
+$depotNom = trim((string)($info['depot_nom'] ?? ''));
 
 /* ==============================
    Agences (pour filtre)
-============================== */
+   ============================== */
 $sqlAg = "SELECT id, nom
           FROM agences
           WHERE entreprise_id = :e
@@ -133,9 +190,11 @@ $st = $pdo->prepare($sqlAg);
 $st->execute([':e' => $entrepriseId]);
 $agences = $st->fetchAll(PDO::FETCH_ASSOC);
 
+
+
 /* ==============================
    Absences planifiées de la semaine
-============================== */
+   ============================== */
 $planAbs = []; // $planAbs[$uid][$dateIso] = 'rtt' | 'conges' | 'maladie'
 $sql = "SELECT utilisateur_id, date_jour, type
         FROM planning_affectations
@@ -164,7 +223,7 @@ function badgePlanningAbs(?string $t): string
 
 /* ==============================
    Employés (inclure dépôt) + agence
-============================== */
+   ============================== */
 $stmt = $pdo->prepare("
   SELECT u.id, u.prenom, u.nom, u.fonction,
          u.agence_id, a.nom AS agence_nom,
@@ -184,28 +243,62 @@ $employees = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 /* ==============================
    Planning de la semaine (affectations)
-============================== */
-$plannedDayMap = [];
-if ($pdo->query("SHOW TABLES LIKE 'planning_affectations'")->rowCount()) {
+   ============================== */
+$plannedDayMap = [];                 // [$uid][$date][$chantier_id] = true
+$depotMap      = [];                 // [$uid][$date] = true
+$depotIdMap    = [];                 // [$uid][$date] = depot_id (si dispo)
+
+$cols = $pdo->query("SHOW COLUMNS FROM planning_affectations")->fetchAll(PDO::FETCH_COLUMN, 0);
+$hasTypeCol  = in_array('type', $cols, true);
+$hasDepotCol = in_array('depot_id', $cols, true);
+
+if ($hasTypeCol || $hasDepotCol) {
+  $stmt = $pdo->prepare("
+    SELECT utilisateur_id, chantier_id, depot_id, type, date_jour
+    FROM planning_affectations
+    WHERE entreprise_id = :eid
+      AND date_jour >= :d1 AND date_jour < :d2
+  ");
+} else {
+  // compat : ancien schéma sans type/depot_id (chantier_id=0 signifie dépôt)
   $stmt = $pdo->prepare("
     SELECT utilisateur_id, chantier_id, date_jour
     FROM planning_affectations
     WHERE entreprise_id = :eid
       AND date_jour >= :d1 AND date_jour < :d2
-    GROUP BY utilisateur_id, chantier_id, date_jour
   ");
-  $stmt->execute([':eid' => $entrepriseId, ':d1' => $startIso, ':d2' => $endIso]);
-  while ($r = $stmt->fetch(PDO::FETCH_ASSOC)) {
-    $uid = (int)$r['utilisateur_id'];
-    $cid = (int)$r['chantier_id'];
-    $dj  = $r['date_jour'];
-    $plannedDayMap[$uid][$dj][$cid] = true;
+}
+
+$stmt->execute([':eid' => $entrepriseId, ':d1' => $startIso, ':d2' => $endIso]);
+
+while ($r = $stmt->fetch(PDO::FETCH_ASSOC)) {
+  $uid = (int)$r['utilisateur_id'];
+  $dj  = (string)$r['date_jour'];
+
+  if ($hasTypeCol || $hasDepotCol) {
+    $type = strtolower((string)($r['type'] ?? ''));
+    if ($type === 'depot') {
+      $depotMap[$uid][$dj]   = true;
+      if ($hasDepotCol && isset($r['depot_id'])) $depotIdMap[$uid][$dj] = (int)$r['depot_id'];
+      continue;
+    }
+    $cid = isset($r['chantier_id']) ? (int)$r['chantier_id'] : 0;
+    if ($cid > 0) $plannedDayMap[$uid][$dj][$cid] = true;
+  } else {
+    // compat sans type: chantier_id=0 => dépôt
+    $cid = isset($r['chantier_id']) ? (int)$r['chantier_id'] : 0;
+    if ($cid === 0) {
+      $depotMap[$uid][$dj] = true;
+    } elseif ($cid > 0) {
+      $plannedDayMap[$uid][$dj][$cid] = true;
+    }
   }
 }
 
+
 /* ==============================
    Jours (Lun→Ven + Sam/Dim si planning)
-============================== */
+   ============================== */
 function hasPlanningForDate(array $map, string $iso): bool
 {
   foreach ($map as $byDate) {
@@ -227,7 +320,7 @@ if (hasPlanningForDate($plannedDayMap, $sunIso)) $days[] = ['iso' => $sunIso, 'l
 
 /* ==============================
    Heures pointées
-============================== */
+   ============================== */
 $hoursMap = [];
 $stH = $pdo->prepare("
   SELECT utilisateur_id, date_jour, heures
@@ -242,7 +335,7 @@ foreach ($stH->fetchAll(PDO::FETCH_ASSOC) as $r) {
 
 /* ==============================
    Absences (motif + heures)
-============================== */
+   ============================== */
 $absMap = [];
 $stmt = $pdo->prepare("
   SELECT utilisateur_id, date_jour, motif, heures
@@ -259,7 +352,7 @@ while ($r = $stmt->fetch(PDO::FETCH_ASSOC)) {
 
 /* ==============================
    Conduite A/R
-============================== */
+   ============================== */
 $conduiteMap = [];
 $stmt = $pdo->prepare("
   SELECT utilisateur_id, date_pointage, type
@@ -301,7 +394,7 @@ function fmtHM(float $dec): string
    ZONING conduite (modifiable)
    - ici on zone par durée aller simple (minutes)
    - ex: Z1 ≤ 10, Z2 ≤ 20, Z3 ≤ 30, Z4 au-delà
-============================== */
+   ============================== */
 $ZONES = [
   ['label' => 'Z1', 'max_min' => 10, 'class' => 'badge text-bg-success'],
   ['label' => 'Z2', 'max_min' => 20, 'class' => 'badge text-bg-primary'],
@@ -320,10 +413,9 @@ function computeZone(?int $minutes, array $ZONES): array
 
 $zone = computeZone($min, $ZONES);
 
-
 /* ==============================
    Tâche du jour (préaffichage)
-============================== */
+   ============================== */
 $dates = array_column($days, 'iso');
 $tacheMap = [];
 if ($dates) {
@@ -395,16 +487,17 @@ if ($dates) {
 }
 ?>
 
-
 <div class="container my-4" id="pointageApp"
   data-week-start="<?= htmlspecialchars($weekStart->format('Y-m-d')) ?>"
   data-role="<?= htmlspecialchars(strtolower($role)) ?>"
   data-chantier-id="<?= (int)$currentChantierId ?>">
+
   <div class="row align-items-center mb-3">
     <div class="col-12 col-md-4"><!-- vide --></div>
+
     <div class="col-12 col-md-4 text-center">
       <?php
-      // si chef: forcer un chantier sélectionné par défaut
+      // si chef: forcer un chantier sélectionné par défaut pour le titre
       if ($role !== 'administrateur' && $currentChantierId === 0 && !empty($visibleChantiers)) {
         $currentChantierId = (int)$visibleChantiers[0]['id'];
       }
@@ -417,57 +510,38 @@ if ($dates) {
       }
       ?>
       <h1 id="pageTitle" class="mb-0">
-        <?= ($role === 'administrateur') ? 'Pointage' : 'Pointage ' . htmlspecialchars($currentChantierName ?: '') ?>
+        <?= $isAdmin ? 'Pointage' : 'Pointage ' . htmlspecialchars($currentChantierName ?: '') ?>
       </h1>
     </div>
+
     <div class="col-12 col-md-4 text-md-end text-muted">
       Semaine <?= $weekNum ?>
     </div>
   </div>
 
+  <!-- Toolbar CENTRÉE sous le titre -->
+  <div class="d-flex justify-content-center">
+    <div class="btn-toolbar flex-column align-items-center gap-2" id="filtersToolbar">
 
-  <!-- Filtres agence(centré) -->
-  <?php if ($role === 'administrateur' && !empty($agences)): ?>
-    <div class="d-flex justify-content-center mb-2">
-      <div id="agenceFilters" class="d-flex flex-wrap gap-2">
-        <button type="button" class="btn btn-sm btn-primary" data-agence="all">Tous</button>
-        <button type="button" class="btn btn-sm btn-outline-secondary" data-agence="0">Sans agence</button>
-        <?php foreach ($agences as $ag): ?>
-          <button type="button" class="btn btn-sm btn-outline-secondary" data-agence="<?= (int)$ag['id'] ?>">
-            <?= htmlspecialchars($ag['nom']) ?>
+      <!-- Rangée AGENCE -->
+      <div id="agenceFilters" class="btn-group" role="group" aria-label="Filtre agence">
+        <button type="button" class="btn btn-outline-primary active" data-agence="0">Tous</button>
+        <?php foreach ($agences as $a): ?>
+          <button type="button" class="btn btn-outline-primary" data-agence="<?= (int)$a['id'] ?>">
+            <?= htmlspecialchars($a['nom']) ?>
           </button>
         <?php endforeach; ?>
       </div>
+
+      <!-- Rangée CHANTIERS -->
+
+      <div id="chantierFilters"
+        class="d-flex flex-wrap justify-content-center gap-2 my-2"
+        role="group" aria-label="Chantiers"></div>
     </div>
-  <?php endif; ?>
-
-
-
-  <!-- Recherche + filtres chantiers existants -->
-  <div class="mb-3">
-    <input type="search" id="searchInput" class="form-control" placeholder="Rechercher un employé…">
   </div>
 
-  <?php
-  $chefHasSingleChantier = ($role !== 'administrateur' && count($visibleChantiers) <= 1);
-  ?>
-  <div class="d-flex align-items-center flex-wrap gap-2 mb-3 <?= $chefHasSingleChantier ? 'd-none' : '' ?>" id="chantierFilters">
-    <?php if ($role === 'administrateur'): ?>
-      <button class="btn btn-sm btn-outline-secondary <?= $currentChantierId === 0 ? 'active' : '' ?>" data-chantier="all">Tous</button>
-    <?php endif; ?>
-
-    <?php foreach ($visibleChantiers as $ch): $cid = (int)$ch['id']; ?>
-  <button
-    class="btn btn-sm btn-outline-secondary <?= ($cid === (int)$currentChantierId ? 'active' : '') ?>"
-    data-chantier="<?= $cid ?>"
-    data-depot-id="<?= (int)($ch['depot_id'] ?? 0) ?>"
-    data-depot-name="<?= htmlspecialchars($ch['depot_nom'] ?? '') ?>">
-    <?= htmlspecialchars($ch['nom']) ?>
-  </button>
-<?php endforeach; ?>
-
-  </div>
-
+  <!-- Contrôles Camions -->
   <div id="camionControls" class="mb-2 d-flex align-items-center gap-2">
     <label for="camionCount" class="mb-0 small text-muted">Nombre de camions</label>
     <div class="input-group input-group-sm camion-stepper" style="width:140px">
@@ -477,16 +551,15 @@ if ($dates) {
       <button class="btn btn-outline-secondary" type="button" data-action="incr" aria-label="Augmenter">+</button>
     </div>
   </div>
-  <?php
-  $depotNom = trim((string)($chantier['depot_nom'] ?? ''));
-  ?>
+
+  <!-- Conduite (VERROUILLÉE sur le dépôt du chantier) -->
   <div class="d-flex align-items-center gap-2 my-3" id="conduiteWrap"
     data-chantier="<?= (int)$currentChantierId ?>"
-    data-depot-id="<?= (int)($chantier['depot_id'] ?? 0) ?>"
+    data-depot-id="<?= (int)($info['depot_id'] ?? 0) ?>"
     data-depot-name="<?= htmlspecialchars($depotNom) ?>"
-    data-last="<?= htmlspecialchars((string)($chantier['trajet_last_calc'] ?? '')) ?>">
+    data-last="<?= htmlspecialchars((string)($info['trajet_last_calc'] ?? '')) ?>">
 
-    <strong>Conduite :</strong>
+    <strong>Trajet :</strong>
 
     <?php if ($km !== null && $min !== null): ?>
       <!-- Zone d'abord -->
@@ -506,11 +579,6 @@ if ($dates) {
       <span id="trajetDepotPhrase" class="text-muted d-none"></span>
     <?php endif; ?>
   </div>
-
-
-
-
-
 
   <!-- Nav semaine -->
   <div class="d-flex justify-content-center gap-2 mb-3">
@@ -573,7 +641,6 @@ if ($dates) {
               $dow     = (int)$d['dow'];
               $planningType = $planAbs[$uid][$dateIso] ?? null; // 'rtt'|'conges'|'maladie'|null
 
-
               $plannedIdsForDay = isset($plannedDayMap[$uid][$dateIso])
                 ? implode(',', array_keys($plannedDayMap[$uid][$dateIso]))
                 : '';
@@ -599,7 +666,6 @@ if ($dates) {
 
               $absLabel = $isAbsent ? ($labelMap[strtolower((string)$absMotif)] ?? ucfirst((string)$absMotif)) : '';
               $presentDisabledByPlan = in_array($planningType, ['conges', 'maladie', 'rtt'], true);
-
 
               $hasSavedState = ($hDone !== null) || $aDone || $rDone || $isAbsent;
 
@@ -633,19 +699,27 @@ if ($dates) {
                 // ⚠️ PAS de plein pour 'conges_intemperies'
               }
 
-
               $fullLabel = $fullType ? [
                 'conges'  => 'Congés',
                 'maladie' => 'Maladie',
                 'rtt'     => 'RTT',
               ][$fullType] : '';
+
+              $isDepot = !empty($depotMap[$uid][$dateIso]);
+              $depotId = isset($depotIdMap[$uid][$dateIso]) ? (int)$depotIdMap[$uid][$dateIso] : 0;
+
+              // Priorité à 'depot' si c'est planifié ; sinon garde l’absence éventuelle (conges/maladie/rtt)
+              $cellPlanType = $isDepot ? 'depot' : ($planningType ?? '');
+
             ?>
 
               <td class="tl-cell text-center"
                 data-date="<?= htmlspecialchars($dateIso) ?>"
                 data-day-label="<?= htmlspecialchars($d['label']) ?>"
                 data-planned-chantiers-day="<?= htmlspecialchars($plannedIdsForDay) ?>"
-                data-planning-type="<?= htmlspecialchars($planningType ?? '') ?>">
+                data-planning-type="<?= htmlspecialchars($cellPlanType) ?>"
+                <?= $isDepot ? 'data-depot-id="' . (int)$depotId . '"' : '' ?>>
+
 
                 <?php
                 // ---- Données "tâche" DÉFINIES AVANT TOUT ----
@@ -754,15 +828,10 @@ if ($dates) {
                 <?php endif; ?>
               </td>
 
-
-
             <?php endforeach; ?>
           </tr>
         <?php endforeach; ?>
       </tbody>
-
-
-
     </table>
   </div>
 
@@ -815,7 +884,6 @@ if ($dates) {
         </div>
 
         <div class="modal-footer py-2">
-          <!-- Bouton supprimer (affiché uniquement en mode édition) -->
           <button type="button" class="btn btn-outline-danger btn-sm me-auto d-none" id="absenceDelete">
             Supprimer l'absence
           </button>
@@ -826,7 +894,6 @@ if ($dates) {
       </div>
     </div>
   </div>
-
 
   <!-- Modal: Tâche du jour -->
   <div class="modal fade" id="tacheJourModal" tabindex="-1" aria-hidden="true">
@@ -846,7 +913,6 @@ if ($dates) {
             Touchez une tâche pour la sélectionner, touchez à nouveau pour la retirer.
           </p>
 
-
           <div id="tj_list" class="list-group" style="max-height: 50vh; overflow:auto;"></div>
 
           <div class="form-text mt-2">
@@ -861,20 +927,13 @@ if ($dates) {
     </div>
   </div>
 
-
-
   <script>
     window.POINTAGE_DAYS = <?= json_encode(array_column($days, 'iso')) ?>;
     window.API_CAMIONS_CFG = "/pointage/api/camions_config.php";
   </script>
-  
-  
-
-
-
-
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
-
   <script src="js/pointage.js"></script>
-  <?php require_once __DIR__ . '/../templates/footer.php'; ?>
+</div>
+
+<?php require_once __DIR__ . '/../templates/footer.php'; ?>

@@ -403,8 +403,13 @@ require_once __DIR__ . '/../templates/navigation/navigation.php';
             <?= !empty($c['equipe_du_jour']) ? htmlspecialchars($c['equipe_du_jour']) : '—' ?>
           </td>
 
-          <td><?= htmlspecialchars($c['date_debut'] ?? '') ?></td>
-          <td><?= htmlspecialchars($c['date_fin'] ?? '') ?></td>
+          <td>
+            <?= !empty($c['date_debut']) ? date('d/m/Y', strtotime($c['date_debut'])) : '' ?>
+          </td>
+          <td>
+            <?= !empty($c['date_fin']) ? date('d/m/Y', strtotime($c['date_fin'])) : '' ?>
+          </td>
+
           <?php
           $km  = isset($c['trajet_distance_m']) ? round(((int)$c['trajet_distance_m']) / 1000, 1) : null;
           $min = isset($c['trajet_duree_s']) ? (int)round(((int)$c['trajet_duree_s']) / 60) : null;
@@ -445,19 +450,18 @@ require_once __DIR__ . '/../templates/navigation/navigation.php';
               <i class="bi bi-geo-alt"></i>
             </button>
             <?php
-  $isFini = ($c['etat'] ?? 'en_cours') === 'fini';
-  $toggleTitle = $isFini ? 'Repasser en cours' : 'Marquer comme fini';
-  $toggleIcon  = $isFini ? 'bi-arrow-counterclockwise' : 'bi-check2-circle';
-  $toggleClass = $isFini ? 'btn-outline-warning' : 'btn-outline-success';
-?>
-<button
-  class="btn btn-sm <?= $toggleClass ?> toggle-etat-btn"
-  data-id="<?= (int)$c['id'] ?>"
-  data-etat="<?= htmlspecialchars($c['etat'] ?? 'en_cours') ?>"
-  title="<?= $toggleTitle ?>"
->
-  <i class="bi <?= $toggleIcon ?>"></i>
-</button>
+            $isFini = ($c['etat'] ?? 'en_cours') === 'fini';
+            $toggleTitle = $isFini ? 'Repasser en cours' : 'Marquer comme fini';
+            $toggleIcon  = $isFini ? 'bi-arrow-counterclockwise' : 'bi-check2-circle';
+            $toggleClass = $isFini ? 'btn-outline-warning' : 'btn-outline-success';
+            ?>
+            <button
+              class="btn btn-sm <?= $toggleClass ?> toggle-etat-btn"
+              data-id="<?= (int)$c['id'] ?>"
+              data-etat="<?= htmlspecialchars($c['etat'] ?? 'en_cours') ?>"
+              title="<?= $toggleTitle ?>">
+              <i class="bi <?= $toggleIcon ?>"></i>
+            </button>
 
 
           </td>
