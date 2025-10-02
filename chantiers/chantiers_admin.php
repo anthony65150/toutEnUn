@@ -229,32 +229,6 @@ $agences = $stAgences->fetchAll(PDO::FETCH_ASSOC);
 
 
 
-$stSansAgence = $pdo->prepare("
-  SELECT
-    SUM(
-      CASE
-        WHEN NULLIF(COALESCE(c.agence_id, d.agence_id), 0) IS NULL THEN 1
-        ELSE 0
-      END
-    ) AS nb_sans
-  FROM chantiers c
-  LEFT JOIN depots d
-         ON d.id = c.depot_id
-        AND d.entreprise_id = :eid_d
-  WHERE c.entreprise_id = :eid_c
-");
-$stSansAgence->execute([
-  ':eid_d' => $entrepriseId,   // pour depots
-  ':eid_c' => $entrepriseId,   // pour chantiers
-]);
-$sansAgenceCount = (int)$stSansAgence->fetchColumn();
-
-
-
-
-
-
-
 
 // -------- Compteurs En cours / Fini *alignés* sur la logique d'affichage --------
 $agf = $_GET['agence_id'] ?? null;
@@ -317,7 +291,7 @@ require_once __DIR__ . '/../templates/navigation/navigation.php';
 
   <?php
   $agenceIdFromQS = $_GET['agence_id'] ?? '0';
-  $showEtat = ($agenceIdFromQS !== '0'); // visible seulement si une agence est sélectionnée (y compris "none")
+$showEtat = ($agenceIdFromQS !== '0'); // visible seulement si une agence est sélectionnée (y compris "none")
   ?>
 
   <!-- Toolbar CENTRÉE sous le bouton -->
@@ -327,9 +301,7 @@ require_once __DIR__ . '/../templates/navigation/navigation.php';
       <!-- 1) Filtres AGENCE (rangée du haut) -->
       <div id="agenceFilters" class="btn-group" role="group" aria-label="Filtre agence">
         <button type="button" class="btn btn-outline-primary" data-agence="0">Tous</button>
-        <button type="button" class="btn btn-outline-primary" data-agence="none">
-          Sans agence<?= $sansAgenceCount ? " ($sansAgenceCount)" : "" ?>
-        </button>
+        
         <?php foreach ($agences as $a): ?>
           <button type="button" class="btn btn-outline-primary" data-agence="<?= (int)$a['id'] ?>">
             <?= htmlspecialchars($a['nom']) ?><?= $a['nb'] ? " (" . (int)$a['nb'] . ")" : "" ?>

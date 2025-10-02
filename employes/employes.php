@@ -90,15 +90,19 @@ function badgeRole($role)
 
 
     <div id="agenceFilters" class="mb-3 d-flex flex-wrap gap-2 justify-content-center">
-  <button type="button" class="btn btn-primary" data-agence="all">Tous</button>
-  <?php foreach ($AG_LIST as $ag): ?>
-    <button type="button"
-            class="btn btn-outline-secondary"
-            data-agence="<?= (int)$ag['id'] ?>">
-      <?= htmlspecialchars($ag['nom']) ?>
-    </button>
-  <?php endforeach; ?>
-</div>
+        <button type="button" class="btn btn-primary" data-agence="all">Tous</button>
+        <?php foreach ($agences as $a): ?>
+            <?php if ((int)$a['id'] > 0): ?>
+                <button type="button"
+                    class="btn btn-outline-secondary"
+                    data-agence="<?= (int)$a['id'] ?>">
+                    <?= htmlspecialchars($a['nom']) ?>
+                </button>
+            <?php endif; ?>
+        <?php endforeach; ?>
+    </div>
+
+
 
 
     <input
@@ -323,54 +327,54 @@ function badgeRole($role)
     });
 </script>
 <script>
-  (function () {
-    let CURRENT_AGENCE = 'all';
+    (function() {
+        let CURRENT_AGENCE = 'all';
 
-    function applyFilter() {
-      const q = (document.getElementById('employeSearchInput')?.value || '').toLowerCase();
-      document.querySelectorAll('#employesTableBody tr').forEach(tr => {
-        const agId  = String(tr.dataset.agenceId || '0');
-        const name  = ((tr.dataset.nom || '') + ' ' + (tr.dataset.prenom || '') + ' ' + (tr.dataset.email || '') + ' ' + (tr.dataset.fonction || '')).toLowerCase();
+        function applyFilter() {
+            const q = (document.getElementById('employeSearchInput')?.value || '').toLowerCase();
+            document.querySelectorAll('#employesTableBody tr').forEach(tr => {
+                const agId = String(tr.dataset.agenceId || '0');
+                const name = ((tr.dataset.nom || '') + ' ' + (tr.dataset.prenom || '') + ' ' + (tr.dataset.email || '') + ' ' + (tr.dataset.fonction || '')).toLowerCase();
 
-        const matchAgence = (CURRENT_AGENCE === 'all') ? true : (agId === String(CURRENT_AGENCE));
-        const matchSearch = name.includes(q);
+                const matchAgence = (CURRENT_AGENCE === 'all') ? true : (agId === String(CURRENT_AGENCE));
+                const matchSearch = name.includes(q);
 
-        tr.style.display = (matchAgence && matchSearch) ? '' : 'none';
-      });
-    }
+                tr.style.display = (matchAgence && matchSearch) ? '' : 'none';
+            });
+        }
 
-    // Clic sur la barre agence
-    const agBar = document.getElementById('agenceFilters');
-    if (agBar) {
-      agBar.addEventListener('click', (e) => {
-        const btn = e.target.closest('button[data-agence]');
-        if (!btn) return;
+        // Clic sur la barre agence
+        const agBar = document.getElementById('agenceFilters');
+        if (agBar) {
+            agBar.addEventListener('click', (e) => {
+                const btn = e.target.closest('button[data-agence]');
+                if (!btn) return;
 
-        agBar.querySelectorAll('button').forEach(b => {
-          b.classList.remove('btn-primary');
-          b.classList.add('btn-outline-secondary');
-        });
-        btn.classList.remove('btn-outline-secondary');
-        btn.classList.add('btn-primary');
+                agBar.querySelectorAll('button').forEach(b => {
+                    b.classList.remove('btn-primary');
+                    b.classList.add('btn-outline-secondary');
+                });
+                btn.classList.remove('btn-outline-secondary');
+                btn.classList.add('btn-primary');
 
-        CURRENT_AGENCE = btn.dataset.agence || 'all';
+                CURRENT_AGENCE = btn.dataset.agence || 'all';
+                applyFilter();
+            });
+        }
+
+        // Recherche
+        const input = document.getElementById('employeSearchInput');
+        if (input) {
+            let t;
+            input.addEventListener('input', () => {
+                clearTimeout(t);
+                t = setTimeout(applyFilter, 120);
+            });
+        }
+
+        // 1er rendu
         applyFilter();
-      });
-    }
-
-    // Recherche
-    const input = document.getElementById('employeSearchInput');
-    if (input) {
-      let t;
-      input.addEventListener('input', () => {
-        clearTimeout(t);
-        t = setTimeout(applyFilter, 120);
-      });
-    }
-
-    // 1er rendu
-    applyFilter();
-  })();
+    })();
 </script>
 
 <script src="/employes/js/employesGestion_admin.js"></script>

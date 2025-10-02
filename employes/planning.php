@@ -84,7 +84,9 @@ $depots = $st->fetchAll(PDO::FETCH_ASSOC);
 $sqlAg = "SELECT id, nom
           FROM agences
           WHERE entreprise_id = :e
+            AND id > 0
           ORDER BY nom";
+
 $st = $pdo->prepare($sqlAg);
 $st->execute([':e' => $entrepriseId]);
 $agences = $st->fetchAll(PDO::FETCH_ASSOC);

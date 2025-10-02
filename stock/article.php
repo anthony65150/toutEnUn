@@ -4,13 +4,20 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../config/init.php';
 
-if (!isset($_SESSION['utilisateurs'])) {
+// --- Mode QR public ? ---
+$qrToken = isset($_GET['t']) ? (string)$_GET['t'] : '';
+$qrToken = (strlen($qrToken) >= 16 && strlen($qrToken) <= 64) ? $qrToken : '';
+$isQrView = ($qrToken !== ''); // <<< IMPORTANT: on le fixe tout de suite
+
+// Si pas connecté ET pas en mode QR public => connexion
+if (!$isQrView && !isset($_SESSION['utilisateurs'])) {
     header("Location: ../connexion.php");
     exit;
 }
 
 require_once __DIR__ . '/../templates/header.php';
 require_once __DIR__ . '/../templates/navigation/navigation.php';
+
 
 /* ================================
    Multi-entreprise helpers
@@ -42,15 +49,45 @@ function belongs_or_fallback(PDO $pdo, string $table, int $id, ?int $ENT_ID): bo
     }
 }
 
+
+
+/* Sélection article : par token (QR) ou par id */
+$isLoggedIn = isset($_SESSION['utilisateurs']);
+$fonction   = $_SESSION['utilisateurs']['fonction'] ?? null;
+$userId     = (int)($_SESSION['utilisateurs']['id'] ?? 0);
+
+$article   = null;
+$articleId = 0;
+
+if ($qrToken !== '') {
+    $st = $pdo->prepare("SELECT * FROM stock WHERE qr_token = :t LIMIT 1");
+    $st->execute([':t' => $qrToken]);
+    $article = $st->fetch(PDO::FETCH_ASSOC);
+
+    if (!$article) {
+        echo "<div class='container mt-4 alert alert-danger'>QR invalide ou article introuvable.</div>";
+        require_once __DIR__ . '/../templates/footer.php';
+        exit;
+    }
+    $isQrView  = true;
+    $articleId = (int)$article['id'];
+    if (!$isLoggedIn) {
+        $ENT_ID = (int)($article['entreprise_id'] ?? 0) ?: null;
+    }
+} else {
+    if (!isset($_GET['id'])) {
+        echo "<div class='container mt-4 alert alert-danger'>Aucun article sélectionné.</div>";
+        require_once __DIR__ . '/../templates/footer.php';
+        exit;
+    }
+    $articleId = (int)$_GET['id'];
+}
+
+
 /* ================================
    Params + rôle + sécurités
 ================================ */
-if (!isset($_GET['id'])) {
-    echo "<div class='container mt-4 alert alert-danger'>Aucun article sélectionné.</div>";
-    require_once __DIR__ . '/../templates/footer.php';
-    exit;
-}
-$articleId  = (int) $_GET['id'];
+
 $chantierId = (int) ($_GET['chantier_id'] ?? 0);
 $depotId    = (int) ($_GET['depot_id'] ?? 0);
 
@@ -105,6 +142,15 @@ if (!$article) {
     require_once __DIR__ . '/../templates/footer.php';
     exit;
 }
+
+
+/* Mode simplifié (scan QR public) */
+$isAdmin = $isLoggedIn && (($_SESSION['utilisateurs']['fonction'] ?? '') === 'administrateur');
+$isDepot = $isLoggedIn && (($_SESSION['utilisateurs']['fonction'] ?? '') === 'depot');
+$isChef  = $isLoggedIn && (($_SESSION['utilisateurs']['fonction'] ?? '') === 'chef');
+
+$qrSimpleMode = ($isQrView && !$isLoggedIn);
+
 
 /* ================================
    2) QUANTITÉS (globales + contexte)
@@ -537,6 +583,40 @@ function label_validateur(array $row): string
     return htmlspecialchars($prenom . $suffix);
 }
 ?>
+
+<?php if ($qrSimpleMode): ?>
+    <div class="container py-3">
+        <h1 class="h5 mb-1"><?= htmlspecialchars($article['nom'] ?? 'Article') ?></h1>
+        <div class="text-muted mb-3">Réf. <?= htmlspecialchars($article['reference'] ?? '—') ?></div>
+        <?php
+        try {
+            $qDepot = (int)$pdo->query("SELECT COALESCE(SUM(sd.quantite),0) FROM stock_depots sd JOIN depots d ON d.id=sd.depot_id WHERE sd.stock_id={$articleId}" . ($ENT_ID ? " AND d.entreprise_id={$ENT_ID}" : ''))->fetchColumn();
+        } catch (Throwable $e) {
+            $qDepot = 0;
+        }
+        try {
+            $qCh = (int)$pdo->query("SELECT COALESCE(SUM(sc.quantite),0) FROM stock_chantiers sc JOIN chantiers c ON c.id=sc.chantier_id WHERE sc.stock_id={$articleId}" . ($ENT_ID ? " AND c.entreprise_id={$ENT_ID}" : ''))->fetchColumn();
+        } catch (Throwable $e) {
+            $qCh = 0;
+        }
+        $qTot = $qDepot + $qCh;
+        ?>
+        <div class="card mb-3">
+            <div class="card-body d-flex gap-3 flex-wrap">
+                <div><span class="text-muted">Total :</span> <strong><?= $qTot ?></strong></div>
+                <div><span class="text-muted">Chantiers :</span> <strong><?= $qCh ?></strong></div>
+                <div><span class="text-muted">Dépôts :</span> <strong><?= $qDepot ?></strong></div>
+            </div>
+        </div>
+        <div class="d-grid gap-2">
+            <a class="btn btn-primary" href="/signalement.php?token=<?= urlencode((string)$article['qr_token']) ?>">Signaler un problème</a>
+            <a class="btn btn-outline-secondary" href="/connexion.php">Se connecter</a>
+        </div>
+    </div>
+    <?php require_once __DIR__ . '/../templates/footer.php';
+    return; ?>
+<?php endif; ?>
+
 <div class="container mt-4">
     <!-- En-tête -->
     <div class="d-flex justify-content-between align-items-center mb-3">
@@ -555,6 +635,30 @@ function label_validateur(array $row): string
                 <span class="badge bg-info">Dépôt : <?= htmlspecialchars($depotNomCtx ?: "#$depotId") ?></span>
             <?php endif; ?>
         </div>
+        <?php if ($isAdmin): ?>
+            <div class="ms-2 d-flex align-items-center gap-2">
+                <?php if (empty($article['qr_token'])): ?>
+                    <form method="post" action="/stock/stock_generate_qr.php" class="d-inline">
+                        <input type="hidden" name="id" value="<?= (int)$article['id'] ?>">
+                        <button class="btn btn-sm btn-outline-primary">Générer QR</button>
+                    </form>
+                <?php else: ?>
+                    <!-- bouton "Voir QR" -->
+                    <a class="btn btn-sm btn-outline-secondary" target="_blank"
+   href="/stock/qr_render.php?t=<?= urlencode($article['qr_token']) ?>">Voir QR</a>
+
+
+                    <form method="post" action="/stock/stock_generate_qr.php" class="d-inline"
+                        onsubmit="return confirm('Régénérer un nouveau token ? L’ancien QR sera invalidé.');">
+                        <input type="hidden" name="id" value="<?= (int)$article['id'] ?>">
+                        <input type="hidden" name="regenerate" value="1">
+                        <button class="btn btn-sm btn-warning">Régénérer</button>
+                    </form>
+                    <button class="btn btn-sm btn-success" onclick="window.print()">Imprimer</button>
+                <?php endif; ?>
+            </div>
+        <?php endif; ?>
+
     </div>
 
     <!-- Cartes quantités + photo -->
@@ -773,5 +877,52 @@ function label_validateur(array $row): string
         }
     });
 </script>
+<?php if ($isAdmin && !empty($article['qr_token'])): ?>
+    <style>
+        @media print {
+            body * {
+                visibility: hidden;
+            }
+
+            .printable,
+            .printable * {
+                visibility: visible;
+            }
+
+            .printable {
+                position: absolute;
+                left: 0;
+                top: 0;
+                width: 100%;
+                padding: 15mm;
+            }
+
+            .qr-card {
+                display: inline-block;
+                width: 60mm;
+                margin: 5mm;
+                text-align: center;
+            }
+
+            .qr-card img {
+                max-width: 100%;
+                height: auto;
+            }
+
+            .qr-card .title {
+                font-size: 12pt;
+                margin-top: 4mm;
+            }
+        }
+    </style>
+    <div class="printable d-none d-print-block">
+        <div class="qr-card">
+            <img src="/stock/qr_render.php?t=<?= urlencode($article['qr_token']) ?>&v=<?= time() ?>" alt="QR">
+            <div class="title"><?= htmlspecialchars($article['nom'] ?? 'Article') ?></div>
+            <div class="title">Réf. <?= htmlspecialchars($article['reference'] ?? '—') ?></div>
+        </div>
+    </div>
+<?php endif; ?>
+
 
 <?php require_once __DIR__ . '/../templates/footer.php'; ?>
