@@ -23,40 +23,51 @@ if (!$row || ($entrepriseId && (int)$row['entreprise_id'] !== $entrepriseId)) {
   header('Location: /stock/article.php?id='.$stockId.'&err=notfound'); exit;
 }
 
+// (Re)génère un token si besoin
 if ($regenerate || empty($row['qr_token'])) {
-  $newToken = bin2hex(random_bytes(16)); // 32 chars
-  $up = $pdo->prepare("UPDATE stock SET qr_token=:t, has_qrcode=1 WHERE id=:id");
-  $up->execute([':t'=>$newToken, ':id'=>$stockId]);
-  $token = $newToken;
+  $token = bin2hex(random_bytes(16)); // 32 chars
+  $pdo->prepare("UPDATE stock SET qr_token=:t, has_qrcode=1 WHERE id=:id")
+      ->execute([':t'=>$token, ':id'=>$stockId]);
 } else {
   $token = $row['qr_token'];
 }
 
-// URL encodée
-$baseUrl = $_ENV['APP_BASE_URL'] ?? (isset($_SERVER['HTTPS']) ? 'https' : 'http') . '://' . $_SERVER['HTTP_HOST'];
-$url = rtrim($baseUrl, '/') . '/stock/article.php?t=' . rawurlencode($token);
+// Base URL
+$baseUrl = $_ENV['APP_BASE_URL']
+  ?? ((isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http') . '://' . $_SERVER['HTTP_HOST'];
 
-// ====== ICI: CHOIX DU BON DOSSIER ======
-$entDirId = (int)($row['entreprise_id'] ?: $entrepriseId); // fallback si NULL/0 en base
-$dir = __DIR__ . '/qrcodes/' . $entDirId;
-if (!is_dir($dir)) { @mkdir($dir, 0775, true); }
+// URL encodée dans le QR → ouvre directement l’onglet État
+$url = rtrim($baseUrl, '/') . '/stock/article.php?t=' . rawurlencode($token) . '&tab=etat';
 
-$filePath = $dir . "/stock_{$stockId}.png";
+// Dossier public de sortie (par entreprise) — basé sur la webroot
+$entDirId = (int)($row['entreprise_id'] ?: $entrepriseId);
+$webDir   = '/stock/qrcodes/' . $entDirId; // URL publique
+$absDir   = rtrim($_SERVER['DOCUMENT_ROOT'], '/') . $webDir; // chemin disque correspondant
 
-// Génération
-$options = new QROptions([
-  'outputType'   => QRCode::OUTPUT_IMAGE_PNG,
-  'eccLevel'     => QRCode::ECC_L,
-  'scale'        => 6,
-  'imageBase64'  => false,   // <- clé du problème (selon versions: 'outputBase64' => false)
-]);
-$png = (new QRCode($options))->render($url);
-
-
-// Écriture
-if (file_put_contents($filePath, $pngData) === false) {
-  error_log('QR: échec d’écriture '.$filePath);
+if (!is_dir($absDir)) {
+  @mkdir($absDir, 0775, true);
 }
-error_log('QR généré: '.$filePath.' ('.(is_file($filePath)?filesize($filePath):0).' octets)');
 
-header('Location: /stock/article.php?id='.$stockId.'&qr=ok');
+$fileName    = "stock_{$stockId}.png";
+$filePathAbs = $absDir . '/' . $fileName;                // disque
+$filePathRel = $webDir . '/' . $fileName;                // URL à stocker en BDD
+
+// Génération du PNG (désactivation explicite du Base64)
+$options = new QROptions([
+  'outputType'  => QRCode::OUTPUT_IMAGE_PNG,
+  'eccLevel'    => QRCode::ECC_L,
+  'scale'       => 6,
+  'imageBase64' => false,   // <-- clé cruciale selon les versions
+]);
+
+$pngData = (new QRCode($options))->render($url);
+
+// Si c’est encore du base64 (certaines versions ignorent imageBase64)
+if (str_starts_with($pngData, 'data:image')) {
+  $pngData = base64_decode(preg_replace('#^data:image/\w+;base64,#i', '', $pngData));
+}
+
+file_put_contents($filePathAbs, $pngData);
+
+// Retour à la fiche (+ petite astuce pour forcer le refresh du PNG en cas de cache)
+header('Location: /stock/article.php?id='.$stockId.'&qr=ok#qr='.time());

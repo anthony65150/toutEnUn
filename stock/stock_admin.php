@@ -162,22 +162,98 @@ $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
 $categories = $stmt->fetchAll(PDO::FETCH_COLUMN);
 
+// --- Catégories (propres, affichables et utilisables comme clés JS)
 $sql = "
-    SELECT categorie, sous_categorie
+    SELECT DISTINCT TRIM(categorie) AS categorie
     FROM stock
-    WHERE sous_categorie IS NOT NULL
+    WHERE categorie IS NOT NULL AND TRIM(categorie) <> ''
 ";
 $params = [];
-if ($ENT_ID !== null) { $sql .= " AND entreprise_id = :eid"; $params[':eid'] = $ENT_ID; }
+if ($ENT_ID !== null){ $sql .= " AND entreprise_id = :eid"; $params[':eid'] = $ENT_ID; }
+$sql .= " ORDER BY categorie";
+
+$stmt = $pdo->prepare($sql);
+$stmt->execute($params);
+$categoriesRaw = $stmt->fetchAll(PDO::FETCH_COLUMN);
+
+// jolis libellés + dédoublon
+$toLabel = function(string $s): string{
+  $s = preg_replace('/\s+/u', ' ', trim($s));
+  $s = mb_strtolower($s, 'UTF-8');
+  return $s === '' ? '' : mb_strtoupper(mb_substr($s,0,1,'UTF-8'),'UTF-8').mb_substr($s,1,null,'UTF-8');
+};
+
+$seen = [];
+$categories = [];
+foreach ($categoriesRaw as $c){
+  $label = $toLabel((string)$c);
+  $k = mb_strtolower($label,'UTF-8');
+  if ($label !== '' && !isset($seen[$k])){
+    $seen[$k] = true;
+    $categories[] = $label;
+  }
+}
+
+
+
+// Normalisation d'affichage (Trim, espaces multiples -> 1, casse)
+$normalizeLabel = function (?string $s): string {
+    $s = preg_replace('/\s+/u', ' ', trim((string)$s));
+    $s = mb_strtolower($s, 'UTF-8');
+    return $s === '' ? '' : mb_strtoupper(mb_substr($s, 0, 1, 'UTF-8'), 'UTF-8') . mb_substr($s, 1, null, 'UTF-8');
+};
+// Clé de dédoublonnage (trim + minuscules + sans espaces multiples)
+// (si tu veux aussi ignorer les accents, ajoute une translit ici)
+$keyOf = function (?string $s): string {
+    $s = preg_replace('/\s+/u', ' ', trim((string)$s));
+    $s = mb_strtolower($s, 'UTF-8');
+    return $s;
+};
+
+// --- Sous-catégories groupées par libellé de catégorie (clés = libellés)
+$sql = "
+    SELECT TRIM(categorie) AS categorie, TRIM(sous_categorie) AS sous_categorie
+    FROM stock
+    WHERE sous_categorie IS NOT NULL AND TRIM(sous_categorie) <> ''
+";
+$params = [];
+if ($ENT_ID !== null){ $sql .= " AND entreprise_id = :eid"; $params[':eid'] = $ENT_ID; }
 
 $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
 $subCatRaw = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-$subCategoriesGrouped = [];
-foreach ($subCatRaw as $row) {
-    $subCategoriesGrouped[$row['categorie']][] = $row['sous_categorie'];
+$toLabel = function(string $s): string{
+  $s = preg_replace('/\s+/u', ' ', trim($s));
+  $s = mb_strtolower($s, 'UTF-8');
+  return $s === '' ? '' : mb_strtoupper(mb_substr($s,0,1,'UTF-8'),'UTF-8').mb_substr($s,1,null,'UTF-8');
+};
+
+$subCategoriesGrouped = [];            // ex: ['Bungalow' => ['Vestiaire', 'Sanitaire']]
+$seenPerCat = [];
+
+foreach ($subCatRaw as $row){
+  $cat = $toLabel((string)($row['categorie'] ?? ''));
+  $sub = $toLabel((string)($row['sous_categorie'] ?? ''));
+  if ($cat === '' || $sub === '') continue;
+
+  if (!isset($seenPerCat[$cat])) { $seenPerCat[$cat] = []; }
+  $ksub = mb_strtolower($sub,'UTF-8'); // clé de dédoublon
+
+  if (!isset($seenPerCat[$cat][$ksub])){
+    $seenPerCat[$cat][$ksub] = true;
+    $subCategoriesGrouped[$cat][] = $sub;
+  }
 }
+
+// tri joli
+ksort($subCategoriesGrouped, SORT_NATURAL | SORT_FLAG_CASE);
+foreach ($subCategoriesGrouped as &$list){
+  sort($list, SORT_NATURAL | SORT_FLAG_CASE);
+}
+unset($list);
+
+
 ?>
 
 <div class="container py-4">

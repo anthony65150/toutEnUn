@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Hôte : 127.0.0.1
--- Généré le : sam. 27 sep. 2025 à 20:59
+-- Généré le : dim. 05 oct. 2025 à 13:55
 -- Version du serveur : 10.4.32-MariaDB
 -- Version de PHP : 8.0.30
 
@@ -47,6 +47,25 @@ INSERT INTO `agences` (`id`, `entreprise_id`, `nom`, `adresse`, `actif`, `create
 -- --------------------------------------------------------
 
 --
+-- Structure de la table `article_etats`
+--
+
+CREATE TABLE `article_etats` (
+  `id` int(11) NOT NULL,
+  `entreprise_id` int(11) NOT NULL,
+  `article_id` int(11) NOT NULL,
+  `profil_qr` enum('aucun','compteur_heures','autre') NOT NULL DEFAULT 'aucun',
+  `action` enum('compteur_maj','declarer_ok','declarer_panne') NOT NULL,
+  `valeur_int` int(11) DEFAULT NULL,
+  `commentaire` text DEFAULT NULL,
+  `fichier` varchar(255) DEFAULT NULL,
+  `created_by` int(11) NOT NULL,
+  `created_at` datetime NOT NULL DEFAULT current_timestamp()
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- --------------------------------------------------------
+
+--
 -- Structure de la table `chantiers`
 --
 
@@ -77,10 +96,8 @@ CREATE TABLE `chantiers` (
 --
 
 INSERT INTO `chantiers` (`id`, `entreprise_id`, `nom`, `adresse`, `trajet_distance_m`, `trajet_duree_s`, `trajet_zone`, `trajet_last_calc`, `adresse_lat`, `adresse_lng`, `description`, `date_debut`, `date_fin`, `etat`, `responsable_id`, `depot_id`, `agence_id`, `created_at`, `updated_at`) VALUES
-(1, 1, 'Bouchait', '', NULL, NULL, NULL, NULL, NULL, NULL, '', NULL, NULL, 'en_cours', 4, NULL, NULL, '2025-07-17 20:27:49', '2025-09-27 20:59:49'),
-(31, 1, 'Coma', '38 avenue de saint-gaudens, 31210 montrejeau', 1735, 160, NULL, '2025-09-27 14:18:45', 43.0841915, 0.5721883, '', NULL, NULL, 'en_cours', 5, 1, NULL, '2025-09-26 14:19:44', '2025-09-27 20:59:49'),
-(32, 1, 'Toit pointis de riviere', 'rue du chateau d\'eau, 31210 pointis-de-riviere', 6306, 576, NULL, '2025-09-27 14:18:46', 43.0893810, 0.6127311, '', NULL, NULL, 'en_cours', 4, 1, NULL, '2025-09-26 15:07:17', '2025-09-27 20:59:49'),
-(33, 1, 'Piscine Auterive', 'Place du 11 novembre 1918 31190, Auterive', 90873, 3992, NULL, '2025-09-27 14:27:22', 43.3524333, 1.4779796, '', NULL, NULL, 'en_cours', 17, 1, NULL, '2025-09-27 12:26:50', '2025-09-27 20:59:49');
+(1, 1, 'Bouchait', '57 rue du pic du midi, 65150 saint-paul', 5995, 425, NULL, '2025-09-29 21:53:53', 43.0838391, 0.5017705, '', '2025-09-19', '2025-09-26', 'en_cours', 4, 1, NULL, '2025-07-17 20:27:49', '2025-09-29 21:53:53'),
+(36, 1, 'Piscine Auterive', 'Place du 11 novembre 1918 31190, Auterive', 90873, 3992, NULL, '2025-09-29 21:53:54', 43.3524333, 1.4779796, '', NULL, NULL, 'en_cours', 17, 1, NULL, '2025-09-29 19:00:00', '2025-09-29 21:53:54');
 
 -- --------------------------------------------------------
 
@@ -136,8 +153,7 @@ CREATE TABLE `depots` (
 
 INSERT INTO `depots` (`id`, `entreprise_id`, `nom`, `adresse`, `agence_id`, `adresse_lat`, `adresse_lng`, `responsable_id`, `created_at`) VALUES
 (1, 1, 'Montréjeau', 'avenue des toureilles, 31210 montrejeau', 10, 43.0929121, 0.5603920, 6, '2025-07-17 20:31:20'),
-(2, 1, 'Toulouse', '', 11, NULL, NULL, 8, '2025-08-19 19:38:14'),
-(12, 1, 'Pau', 'place royale, 64000 Pau', NULL, 43.2939082, -0.3706165, 16, '2025-09-26 12:38:18');
+(2, 1, 'Toulouse', 'place du capitole, 31000 toulouse', 11, 43.6044071, 1.4433773, 8, '2025-08-19 19:38:14');
 
 -- --------------------------------------------------------
 
@@ -270,20 +286,43 @@ INSERT INTO `planning_affectations` (`id`, `entreprise_id`, `utilisateur_id`, `c
 (709, 1, 6, NULL, NULL, '2025-09-24', 'depot', 'employe', 0.00, NULL, '2025-09-25 17:16:35', 1),
 (710, 1, 6, NULL, NULL, '2025-09-23', 'depot', 'employe', 0.00, NULL, '2025-09-25 17:16:36', 1),
 (711, 1, 6, NULL, NULL, '2025-09-22', 'depot', 'employe', 0.00, NULL, '2025-09-25 17:16:37', 1),
-(765, 1, 16, NULL, NULL, '2025-09-26', 'rtt', 'employe', 0.00, NULL, '2025-09-26 16:50:12', 1),
-(766, 1, 5, NULL, NULL, '2025-09-26', 'rtt', 'employe', 0.00, NULL, '2025-09-26 16:50:13', 1),
-(769, 1, 4, NULL, NULL, '2025-09-26', 'rtt', 'employe', 0.00, NULL, '2025-09-26 16:50:42', 1),
-(774, 1, 5, 31, NULL, '2025-09-25', 'chantier', 'employe', 0.00, NULL, '2025-09-26 19:32:53', 1),
-(775, 1, 5, 31, NULL, '2025-09-24', 'chantier', 'employe', 0.00, NULL, '2025-09-26 19:32:53', 1),
-(776, 1, 5, 31, NULL, '2025-09-23', 'chantier', 'employe', 0.00, NULL, '2025-09-26 19:32:53', 1),
-(777, 1, 5, 31, NULL, '2025-09-22', 'chantier', 'employe', 0.00, NULL, '2025-09-26 19:32:54', 1),
-(782, 1, 6, NULL, NULL, '2025-09-26', 'rtt', 'employe', 0.00, NULL, '2025-09-26 19:33:25', 1),
-(783, 1, 8, NULL, NULL, '2025-09-26', 'rtt', 'employe', 0.00, NULL, '2025-09-26 19:33:25', 1),
-(784, 1, 17, 33, NULL, '2025-09-22', 'chantier', 'employe', 0.00, NULL, '2025-09-27 12:27:37', 1),
-(786, 1, 17, 33, NULL, '2025-09-23', 'chantier', 'employe', 0.00, NULL, '2025-09-27 12:27:47', 1),
-(787, 1, 17, 33, NULL, '2025-09-24', 'chantier', 'employe', 0.00, NULL, '2025-09-27 12:27:47', 1),
-(788, 1, 17, 33, NULL, '2025-09-25', 'chantier', 'employe', 0.00, NULL, '2025-09-27 12:27:47', 1),
-(789, 1, 17, NULL, NULL, '2025-09-26', 'rtt', 'employe', 0.00, NULL, '2025-09-27 12:27:53', 1);
+(765, 1, 16, 1, NULL, '2025-09-26', 'chantier', 'employe', 0.00, NULL, '2025-09-26 16:50:12', 1),
+(769, 1, 4, 1, NULL, '2025-09-26', 'chantier', 'employe', 0.00, NULL, '2025-09-26 16:50:42', 1),
+(782, 1, 6, NULL, NULL, '2025-09-26', 'depot', 'employe', 0.00, NULL, '2025-09-26 19:33:25', 1),
+(783, 1, 8, NULL, NULL, '2025-09-26', 'depot', 'employe', 0.00, NULL, '2025-09-26 19:33:25', 1),
+(802, 1, 4, 1, NULL, '2025-09-27', 'chantier', 'employe', 0.00, NULL, '2025-09-27 19:24:26', 1),
+(804, 1, 4, 1, NULL, '2025-09-28', 'chantier', 'employe', 0.00, NULL, '2025-09-27 19:24:27', 1),
+(814, 1, 16, 1, NULL, '2025-09-27', 'chantier', 'employe', 0.00, NULL, '2025-09-28 16:07:35', 1),
+(821, 1, 16, 1, NULL, '2025-09-28', 'chantier', 'employe', 0.00, NULL, '2025-09-28 16:33:26', 1),
+(825, 1, 8, NULL, NULL, '2025-09-28', 'depot', 'employe', 0.00, NULL, '2025-09-28 19:27:01', 1),
+(826, 1, 6, NULL, NULL, '2025-09-28', 'depot', 'employe', 0.00, NULL, '2025-09-28 19:27:03', 1),
+(827, 1, 6, NULL, NULL, '2025-09-27', 'depot', 'employe', 0.00, NULL, '2025-09-28 19:27:04', 1),
+(836, 1, 8, NULL, NULL, '2025-09-27', 'depot', 'employe', 0.00, NULL, '2025-09-28 19:27:07', 1),
+(837, 1, 6, NULL, NULL, '2025-09-29', 'depot', 'employe', 0.00, NULL, '2025-09-29 18:13:18', 1),
+(838, 1, 6, NULL, NULL, '2025-09-30', 'depot', 'employe', 0.00, NULL, '2025-09-29 18:13:18', 1),
+(839, 1, 6, NULL, NULL, '2025-10-01', 'depot', 'employe', 0.00, NULL, '2025-09-29 18:13:18', 1),
+(840, 1, 6, NULL, NULL, '2025-10-02', 'depot', 'employe', 0.00, NULL, '2025-09-29 18:13:19', 1),
+(841, 1, 6, NULL, NULL, '2025-10-03', 'depot', 'employe', 0.00, NULL, '2025-09-29 18:13:19', 1),
+(842, 1, 8, NULL, NULL, '2025-10-03', 'depot', 'employe', 0.00, NULL, '2025-09-29 18:13:20', 1),
+(843, 1, 8, NULL, NULL, '2025-10-02', 'depot', 'employe', 0.00, NULL, '2025-09-29 18:13:20', 1),
+(844, 1, 8, NULL, NULL, '2025-10-01', 'depot', 'employe', 0.00, NULL, '2025-09-29 18:13:20', 1),
+(845, 1, 8, NULL, NULL, '2025-09-30', 'depot', 'employe', 0.00, NULL, '2025-09-29 18:13:20', 1),
+(846, 1, 8, NULL, NULL, '2025-09-29', 'depot', 'employe', 0.00, NULL, '2025-09-29 18:13:20', 1),
+(847, 1, 16, 1, NULL, '2025-09-29', 'chantier', 'employe', 0.00, NULL, '2025-09-29 18:13:27', 1),
+(848, 1, 16, 1, NULL, '2025-09-30', 'chantier', 'employe', 0.00, NULL, '2025-09-29 18:13:27', 1),
+(849, 1, 16, 1, NULL, '2025-10-01', 'chantier', 'employe', 0.00, NULL, '2025-09-29 18:13:28', 1),
+(850, 1, 16, 1, NULL, '2025-10-02', 'chantier', 'employe', 0.00, NULL, '2025-09-29 18:13:28', 1),
+(851, 1, 16, 1, NULL, '2025-10-03', 'chantier', 'employe', 0.00, NULL, '2025-09-29 18:13:28', 1),
+(852, 1, 4, 1, NULL, '2025-09-29', 'chantier', 'employe', 0.00, NULL, '2025-09-29 18:13:34', 1),
+(853, 1, 4, 1, NULL, '2025-09-30', 'chantier', 'employe', 0.00, NULL, '2025-09-29 18:13:34', 1),
+(854, 1, 4, 1, NULL, '2025-10-01', 'chantier', 'employe', 0.00, NULL, '2025-09-29 18:13:34', 1),
+(855, 1, 4, 1, NULL, '2025-10-02', 'chantier', 'employe', 0.00, NULL, '2025-09-29 18:13:34', 1),
+(856, 1, 4, 1, NULL, '2025-10-03', 'chantier', 'employe', 0.00, NULL, '2025-09-29 18:13:35', 1),
+(863, 1, 17, 36, NULL, '2025-09-29', 'chantier', 'employe', 0.00, NULL, '2025-09-29 19:00:20', 1),
+(864, 1, 17, 36, NULL, '2025-09-30', 'chantier', 'employe', 0.00, NULL, '2025-09-29 19:00:21', 1),
+(865, 1, 17, 36, NULL, '2025-10-01', 'chantier', 'employe', 0.00, NULL, '2025-09-29 19:00:21', 1),
+(866, 1, 17, 36, NULL, '2025-10-02', 'chantier', 'employe', 0.00, NULL, '2025-09-29 19:00:21', 1),
+(867, 1, 17, 36, NULL, '2025-10-03', 'chantier', 'employe', 0.00, NULL, '2025-09-29 19:00:21', 1);
 
 -- --------------------------------------------------------
 
@@ -349,10 +388,10 @@ CREATE TABLE `pointages_conduite` (
 --
 
 INSERT INTO `pointages_conduite` (`id`, `entreprise_id`, `utilisateur_id`, `chantier_id`, `date_pointage`, `type`, `created_at`, `updated_at`) VALUES
-(29, 1, 16, 1, '2025-09-22', 'A', '2025-09-24 20:35:44', '2025-09-24 20:35:44'),
-(30, 1, 4, 1, '2025-09-22', 'R', '2025-09-24 20:35:45', '2025-09-24 20:35:45'),
-(31, 1, 16, 1, '2025-09-23', 'A', '2025-09-24 20:35:46', '2025-09-24 20:35:46'),
-(32, 1, 4, 1, '2025-09-23', 'R', '2025-09-24 20:35:47', '2025-09-24 20:35:47');
+(41, 1, 16, 1, '2025-09-29', 'A', '2025-09-29 20:56:14', '2025-09-29 20:56:14'),
+(42, 1, 4, 1, '2025-09-29', 'R', '2025-09-29 20:56:14', '2025-09-29 20:56:14'),
+(43, 1, 17, 35, '2025-09-29', 'A', '2025-09-29 20:56:28', '2025-09-29 20:56:28'),
+(44, 1, 17, 35, '2025-09-29', 'R', '2025-09-29 20:56:29', '2025-09-29 20:56:29');
 
 -- --------------------------------------------------------
 
@@ -376,13 +415,11 @@ CREATE TABLE `pointages_jour` (
 --
 
 INSERT INTO `pointages_jour` (`id`, `entreprise_id`, `utilisateur_id`, `date_jour`, `chantier_id`, `tache_id`, `heures`, `updated_at`) VALUES
-(244, 1, 4, '2025-09-23', 1, NULL, 8.25, '2025-09-25 20:55:24'),
-(245, 1, 16, '2025-09-22', 1, 14, 8.25, '2025-09-26 09:36:08'),
-(246, 1, 4, '2025-09-22', 1, NULL, 8.25, '2025-09-25 20:55:26'),
-(247, 1, 16, '2025-09-23', 1, 14, 8.25, '2025-09-26 09:36:10'),
-(263, 1, 16, '2025-09-24', 1, 14, 8.25, '2025-09-26 09:45:55'),
-(264, 1, 4, '2025-09-24', 1, NULL, 8.25, '2025-09-25 20:55:22'),
-(293, 1, 16, '2025-09-25', 1, 14, 8.25, '2025-09-26 09:45:53');
+(300, 1, 16, '2025-09-29', 1, 14, 8.25, '2025-09-29 20:56:17'),
+(301, 1, 4, '2025-09-29', 1, 14, 8.25, '2025-09-29 20:56:19'),
+(304, 1, 17, '2025-09-29', 35, NULL, 8.25, '2025-09-29 20:56:23'),
+(305, 1, 6, '2025-09-29', NULL, NULL, 8.25, '2025-09-29 20:56:36'),
+(306, 1, 8, '2025-09-29', NULL, NULL, 8.25, '2025-09-29 20:56:40');
 
 -- --------------------------------------------------------
 
@@ -407,10 +444,8 @@ CREATE TABLE `pointages_taches` (
 --
 
 INSERT INTO `pointages_taches` (`id`, `entreprise_id`, `utilisateur_id`, `chantier_id`, `date_jour`, `tache_id`, `heures`, `created_at`, `updated_at`) VALUES
-(59, 1, 16, 1, '2025-09-22', 14, 8.25, '2025-09-26 07:36:08', '2025-09-26 07:36:08'),
-(60, 1, 16, 1, '2025-09-23', 14, 8.25, '2025-09-26 07:36:10', '2025-09-26 07:36:10'),
-(61, 1, 16, 1, '2025-09-24', 14, 8.25, '2025-09-26 07:36:12', '2025-09-26 07:45:55'),
-(62, 1, 16, 1, '2025-09-25', 14, 8.25, '2025-09-26 07:36:14', '2025-09-26 07:45:53');
+(65, 1, 16, 1, '2025-09-29', 14, 8.25, '2025-09-29 18:56:17', '2025-09-29 18:56:17'),
+(66, 1, 4, 1, '2025-09-29', 14, 8.25, '2025-09-29 18:56:19', '2025-09-29 18:56:19');
 
 -- --------------------------------------------------------
 
@@ -440,6 +475,8 @@ INSERT INTO `pointage_camions_cfg` (`entreprise_id`, `chantier_id`, `nb_camions`
 
 CREATE TABLE `stock` (
   `id` int(11) NOT NULL,
+  `qr_token` char(36) DEFAULT NULL,
+  `has_qrcode` tinyint(1) NOT NULL DEFAULT 0,
   `entreprise_id` int(10) UNSIGNED NOT NULL,
   `nom` varchar(255) NOT NULL,
   `quantite_totale` int(11) DEFAULT 0,
@@ -451,19 +488,27 @@ CREATE TABLE `stock` (
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
   `depot_id` int(11) DEFAULT NULL,
   `photo` varchar(255) DEFAULT NULL,
-  `document` varchar(255) DEFAULT NULL
+  `document` varchar(255) DEFAULT NULL,
+  `gestion_mode` enum('anonyme','nominatif') NOT NULL DEFAULT 'anonyme',
+  `maintenance_mode` enum('none','hour_meter','electrical') NOT NULL DEFAULT 'none',
+  `profil_qr` enum('aucun','compteur_heures','autre') NOT NULL DEFAULT 'aucun',
+  `qr_image_path` varchar(255) DEFAULT NULL,
+  `compteur_heures` int(11) DEFAULT NULL,
+  `panne` tinyint(1) NOT NULL DEFAULT 0
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
 -- Déchargement des données de la table `stock`
 --
 
-INSERT INTO `stock` (`id`, `entreprise_id`, `nom`, `quantite_totale`, `quantite_disponible`, `categorie`, `sous_categorie`, `dimensions`, `poids`, `created_at`, `depot_id`, `photo`, `document`) VALUES
-(2, 1, 'banche 2m75', 24, 24, 'Banches', 'Manuportables', NULL, NULL, '2025-07-17 20:31:41', NULL, 'uploads/photos/articles/2/68acb990e8a8e5.25520685.jpg', NULL),
-(10, 1, 'Piqueur', 23, 23, 'Electroportatif', 'Piquage', NULL, NULL, '2025-07-27 21:08:02', NULL, 'uploads/photos/articles/10/68a6d2139ffb16.19401476.jpg', NULL),
-(11, 1, 'Banche 2m40', 20, 20, 'Banches', 'Metalique', NULL, NULL, '2025-08-19 08:56:10', NULL, 'uploads/photos/articles/11/68a70b96268571.58204439.jpg', NULL),
-(12, 1, 'Element blanc', 100, 100, 'Peri', NULL, NULL, NULL, '2025-08-21 17:02:15', NULL, 'uploads/photos/articles/12/68a751c0846558.19603577.png', NULL),
-(15, 1, 'Plateau 3m', 100, 100, 'Echafaudage', '3m', NULL, NULL, '2025-09-07 10:13:23', NULL, NULL, NULL);
+INSERT INTO `stock` (`id`, `qr_token`, `has_qrcode`, `entreprise_id`, `nom`, `quantite_totale`, `quantite_disponible`, `categorie`, `sous_categorie`, `dimensions`, `poids`, `created_at`, `depot_id`, `photo`, `document`, `gestion_mode`, `maintenance_mode`, `profil_qr`, `qr_image_path`, `compteur_heures`, `panne`) VALUES
+(2, '23755665aeb88483dad50b4cb8f06ccd', 1, 1, 'banche 2m75', 24, 24, 'Banches', 'Manuportables', NULL, NULL, '2025-07-17 20:31:41', NULL, 'uploads/photos/articles/2/68acb990e8a8e5.25520685.jpg', NULL, 'anonyme', 'none', 'aucun', '/stock/qrcodes/1/stock_2.png', NULL, 0),
+(10, 'cd15a6380c640100987dba4bd52433bd', 1, 1, 'Piqueur', 23, 23, 'Electroportatif', 'Piquage', NULL, NULL, '2025-07-27 21:08:02', NULL, 'uploads/photos/articles/10/68a6d2139ffb16.19401476.jpg', NULL, 'anonyme', 'none', 'aucun', NULL, NULL, 0),
+(11, '6a3cdefa3a8fe7648724c6d9bae06682', 1, 1, 'Banche 2m40', 20, 20, 'Banches', 'Metalique', NULL, NULL, '2025-08-19 08:56:10', NULL, 'uploads/photos/articles/11/68a70b96268571.58204439.jpg', NULL, 'anonyme', 'none', 'aucun', '/stock/qrcodes/1/stock_11.png', NULL, 0),
+(12, '606e0a13e326589f79cd377c8a427793', 1, 1, 'Element blanc', 100, 100, 'Peri', NULL, NULL, NULL, '2025-08-21 17:02:15', NULL, 'uploads/photos/articles/12/68a751c0846558.19603577.png', NULL, 'anonyme', 'none', 'aucun', NULL, NULL, 0),
+(15, '29c117bcadb11d2cafc5560d86df49d3', 1, 1, 'Plateau 3m', 100, 100, 'Echafaudage', '3m', NULL, NULL, '2025-09-07 10:13:23', NULL, NULL, NULL, 'anonyme', 'none', 'aucun', NULL, NULL, 0),
+(25, 'e08e687c0f45ba219b428817a4b6389c', 1, 1, 'Bungalow vestiaire 1', 1, 1, 'Bungalow', 'Vestiaire', NULL, NULL, '2025-10-04 17:01:58', NULL, NULL, NULL, 'nominatif', 'electrical', 'autre', '/stock/qrcodes/1/stock_25.png', NULL, 0),
+(26, 'e777e584-54a5-4fe2-95c5-d627c3babde7', 0, 1, 'Bungalow vestiaire 2', 1, 1, 'Bungalow', 'Vestiaire', NULL, NULL, '2025-10-04 17:01:58', NULL, NULL, NULL, 'nominatif', 'electrical', 'autre', '/stock/qrcodes/1/stock_26.png', NULL, 0);
 
 -- --------------------------------------------------------
 
@@ -515,7 +560,9 @@ INSERT INTO `stock_depots` (`id`, `entreprise_id`, `depot_id`, `stock_id`, `quan
 (13, 1, 1, 12, 100),
 (14, 1, 2, 12, 0),
 (17, 1, 2, 2, 0),
-(19, 1, 1, 15, 100);
+(19, 1, 1, 15, 100),
+(28, 1, 1, 25, 1),
+(29, 1, 1, 26, 1);
 
 -- --------------------------------------------------------
 
@@ -632,7 +679,6 @@ CREATE TABLE `utilisateurs` (
 INSERT INTO `utilisateurs` (`id`, `nom`, `prenom`, `email`, `motDePasse`, `fonction`, `entreprise_id`, `photo`, `created_at`, `agence_id`) VALUES
 (3, 'Rodrigues', 'Anthony', 'anthony-rodrigues31@hotmail.fr', '$2y$10$C4KMy.RRbOE.V4M7puAda.5gcTKDZVYZ4lo4eL0KDfjtoHO2NNnI.', 'administrateur', 1, '/uploads/photos/687ce56a7631d_anthony.jpg', '2025-07-17 18:37:12', 10),
 (4, 'Rodrigues', 'Ana', 'user@hotmail.fr', '$2y$10$WDIDL8RdOUYD0gGKRrMKkOjWOHB1OXcxH58ZrIEwAbrreTi8Y4fRW', 'chef', 1, NULL, '2025-07-17 20:28:19', 10),
-(5, 'Boya', 'Stéphanie', 'bambina.31@hotmail.fr', '$2y$10$TzQr83yoAtF0YmQgh7n8qeHIL3z5C23/LPfS86VZkXZ.Nu/F9xRoS', 'chef', 1, NULL, '2025-07-17 20:29:00', 10),
 (6, 'Rodrigues', 'Sam', 'anthonyrodrigues0512@gmail.com', '$2y$10$tSVxg90G0qj96s7beBd6tuSMQn9P69MWaivTwKfvypRPQIuspJKgC', 'depot', 1, NULL, '2025-07-17 20:29:17', 10),
 (8, 'Bachar', 'Younes', 'user@test.com', '$2y$10$oSV7WwxVwMwPpw8.JnsRF.aiE915VUStRGeed/07BiFmHRJN/pyZO', 'depot', 1, NULL, '2025-08-19 19:36:28', 11),
 (16, 'Jalran', 'Maxime', 'max@email.fr', '$2y$10$2aCnOLTQq0AiyKrz1TrMp.nmAbwGX.P12S8oAhfYyUhGLw.Tv6kF.', 'employe', 1, NULL, '2025-09-04 16:47:35', 10),
@@ -656,10 +702,8 @@ CREATE TABLE `utilisateur_chantiers` (
 --
 
 INSERT INTO `utilisateur_chantiers` (`id`, `entreprise_id`, `utilisateur_id`, `chantier_id`) VALUES
-(52, 1, 4, 1),
-(91, 1, 5, 31),
-(92, 1, 4, 32),
-(93, 1, 17, 33);
+(95, 1, 4, 1),
+(110, 1, 17, 36);
 
 --
 -- Index pour les tables déchargées
@@ -671,6 +715,12 @@ INSERT INTO `utilisateur_chantiers` (`id`, `entreprise_id`, `utilisateur_id`, `c
 ALTER TABLE `agences`
   ADD PRIMARY KEY (`id`),
   ADD UNIQUE KEY `uniq_agence` (`entreprise_id`,`nom`);
+
+--
+-- Index pour la table `article_etats`
+--
+ALTER TABLE `article_etats`
+  ADD PRIMARY KEY (`id`);
 
 --
 -- Index pour la table `chantiers`
@@ -781,6 +831,7 @@ ALTER TABLE `pointage_camions_cfg`
 --
 ALTER TABLE `stock`
   ADD PRIMARY KEY (`id`),
+  ADD UNIQUE KEY `qr_token` (`qr_token`),
   ADD KEY `idx_stock_entreprise` (`entreprise_id`);
 
 --
@@ -859,10 +910,16 @@ ALTER TABLE `agences`
   MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=12;
 
 --
+-- AUTO_INCREMENT pour la table `article_etats`
+--
+ALTER TABLE `article_etats`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+
+--
 -- AUTO_INCREMENT pour la table `chantiers`
 --
 ALTER TABLE `chantiers`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=34;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=37;
 
 --
 -- AUTO_INCREMENT pour la table `chantier_taches`
@@ -892,7 +949,7 @@ ALTER TABLE `notifications`
 -- AUTO_INCREMENT pour la table `planning_affectations`
 --
 ALTER TABLE `planning_affectations`
-  MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=790;
+  MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=868;
 
 --
 -- AUTO_INCREMENT pour la table `pointages_absences`
@@ -910,25 +967,25 @@ ALTER TABLE `pointages_camions`
 -- AUTO_INCREMENT pour la table `pointages_conduite`
 --
 ALTER TABLE `pointages_conduite`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=39;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=45;
 
 --
 -- AUTO_INCREMENT pour la table `pointages_jour`
 --
 ALTER TABLE `pointages_jour`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=300;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=307;
 
 --
 -- AUTO_INCREMENT pour la table `pointages_taches`
 --
 ALTER TABLE `pointages_taches`
-  MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=65;
+  MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=67;
 
 --
 -- AUTO_INCREMENT pour la table `stock`
 --
 ALTER TABLE `stock`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=16;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=27;
 
 --
 -- AUTO_INCREMENT pour la table `stock_chantiers`
@@ -940,7 +997,7 @@ ALTER TABLE `stock_chantiers`
 -- AUTO_INCREMENT pour la table `stock_depots`
 --
 ALTER TABLE `stock_depots`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=20;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=30;
 
 --
 -- AUTO_INCREMENT pour la table `stock_documents`
@@ -970,7 +1027,7 @@ ALTER TABLE `utilisateurs`
 -- AUTO_INCREMENT pour la table `utilisateur_chantiers`
 --
 ALTER TABLE `utilisateur_chantiers`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=94;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=111;
 
 --
 -- Contraintes pour les tables déchargées

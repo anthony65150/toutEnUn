@@ -56,6 +56,59 @@ document.addEventListener('DOMContentLoaded', () => {
   if (document.body.dataset.nouvelleCategorie)  showNewCategoryInput();
   if (document.body.dataset.nouvelleSousCategorie) showNewSubCategoryInput();
 
+  const form                = $('form[action=""]') || $('form');
+  const nomInput            = $('#nom');
+  const quantiteInput       = $('#quantite');
+  const quantiteLabel       = document.querySelector('label[for="quantite"]');
+
+  // Nouveaux champs (ajoutés dans le HTML)
+  const radioAnonyme        = $('#mode_anonyme');
+  const radioNominatif      = $('#mode_nominatif');
+  const maintenanceSelect   = $('#maintenance_mode'); // pas utilisé ici mais prêt si besoin
+
+  // Aperçu sous le champ quantité (créé si absent)
+  let preview = $('#nominatifPreview');
+  if (!preview && quantiteInput) {
+    preview = document.createElement('div');
+    preview.id = 'nominatifPreview';
+    preview.className = 'form-text mt-1';
+    quantiteInput.parentElement?.appendChild(preview);
+  }
+
+  function getGestionMode() {
+    // défaut = anonyme si les radios n'existent pas
+    if (radioNominatif?.checked) return 'nominatif';
+    return 'anonyme';
+  }
+
+  function syncQuantiteLabel() {
+    if (!quantiteLabel) return;
+    quantiteLabel.textContent = (getGestionMode() === 'nominatif')
+      ? 'Nombre d’unités à créer'
+      : 'Quantité totale';
+    renderPreview();
+  }
+
+  function renderPreview() {
+    if (!preview) return;
+    const mode = getGestionMode();
+    const base = (nomInput?.value || '').trim();
+    const n    = Math.max(0, parseInt(quantiteInput?.value || '0', 10) || 0);
+
+    if (mode === 'nominatif' && base && n > 0) {
+      const maxShow = Math.min(n, 6);
+      const parts = [];
+      for (let i = 1; i <= maxShow; i++) parts.push(`${base} ${i}`);
+      const more = (n > maxShow) ? ` … (+${n - maxShow} autres)` : '';
+      preview.textContent = `Cela va créer ${n} lignes : ${parts.join(', ')}${more}`;
+    } else if (mode === 'anonyme' && n > 0) {
+      preview.textContent = `Une seule ligne sera créée avec la quantité ${n}.`;
+    } else {
+      preview.textContent = '';
+    }
+  }
+
+  // ====== Catégorie / Sous-catégorie (ton code existant) ======
   const categorieSelect     = $('#categorieSelect');
   const sousCategorieSelect = $('#sous_categorieSelect');
   const newSousCatDiv       = $('#newSousCategorieDiv');
@@ -63,100 +116,119 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (!categorieSelect || !sousCategorieSelect) {
     console.warn("[Simpliz] Elements de catégorie/sous-catégorie non trouvés.");
-    return;
-  }
+  } else {
+    // état de requête pour annuler la précédente si nécessaire
+    let currentAbort = null;
 
-  // état de requête pour annuler la précédente si nécessaire
-  let currentAbort = null;
-
-  function setSousCatLoading(loading) {
-    if (loading) {
-      sousCategorieSelect.innerHTML = '<option value="" disabled selected>Chargement…</option>';
-      sousCategorieSelect.disabled = true;
-    } else {
-      sousCategorieSelect.disabled = false;
-    }
-  }
-
-  // Changement de catégorie → maj sous-catégories + reset champ custom
-  categorieSelect.addEventListener('change', () => {
-    const categorie = categorieSelect.value;
-
-    // Reset sous-catégorie
-    sousCategorieSelect.innerHTML = '<option value="" disabled selected>-- Sélectionner une sous-catégorie --</option>';
-    hide(newSousCatDiv);
-    if (newSousCatInput) newSousCatInput.value = '';
-
-    // Annule une requête en cours si on rechangera de catégorie rapidement
-    if (currentAbort) {
-      currentAbort.abort();
-      currentAbort = null;
+    function setSousCatLoading(loading) {
+      if (loading) {
+        sousCategorieSelect.innerHTML = '<option value="" disabled selected>Chargement…</option>';
+        sousCategorieSelect.disabled = true;
+      } else {
+        sousCategorieSelect.disabled = false;
+      }
     }
 
-    if (!categorie) return;
+    // Changement de catégorie → maj sous-catégories + reset champ custom
+    categorieSelect.addEventListener('change', () => {
+      const categorie = categorieSelect.value;
 
-    setSousCatLoading(true);
+      // Reset sous-catégorie
+      sousCategorieSelect.innerHTML = '<option value="" disabled selected>-- Sélectionner une sous-catégorie --</option>';
+      hide(newSousCatDiv);
+      if (newSousCatInput) newSousCatInput.value = '';
 
-    // IMPORTANT: URL relative au document (page et script dans /stock/)
-    const url = `ajoutStock.php?action=getSousCategories&categorie=${encodeURIComponent(categorie)}`;
-    currentAbort = new AbortController();
-
-    fetch(url, { headers: { 'Accept': 'application/json' }, signal: currentAbort.signal })
-      .then(res => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
-      })
-      .then(data => {
-        // si on a été annulé entre-temps, on ne touche plus au DOM
-        if (!categorieSelect.value) return;
-
-        // data attendu: string[] ; on déduplique / trie joliment
-        const unique = Array.isArray(data)
-          ? Array.from(
-              new Map(
-                data
-                  .filter(Boolean)
-                  .map(s => s.toString())
-                  .map(s => [norm(s), s])
-              ).values()
-            )
-          : [];
-
-        unique.sort((a, b) => norm(a).localeCompare(norm(b)));
-
-        // Vide → on garde juste l’option par défaut
-        if (unique.length === 0) {
-          sousCategorieSelect.innerHTML =
-            '<option value="" disabled selected>Aucune sous-catégorie</option>';
-          return;
-        }
-
-        // Remplit la liste
-        sousCategorieSelect.innerHTML =
-          '<option value="" disabled selected>-- Sélectionner une sous-catégorie --</option>';
-        unique.forEach(subCat => {
-          const option = document.createElement('option');
-          option.value = subCat;
-          option.textContent = capitalizeFirst(subCat);
-          sousCategorieSelect.appendChild(option);
-        });
-      })
-      .catch(err => {
-        if (err.name === 'AbortError') return; // normal
-        console.error('[Simpliz] Erreur fetch sous-catégories:', err);
-        sousCategorieSelect.innerHTML =
-          '<option value="" disabled selected>Impossible de charger les sous-catégories</option>';
-      })
-      .finally(() => {
-        setSousCatLoading(false);
+      // Annule une requête en cours si on rechangera de catégorie rapidement
+      if (currentAbort) {
+        currentAbort.abort();
         currentAbort = null;
-      });
+      }
+
+      if (!categorie) return;
+
+      setSousCatLoading(true);
+
+      // IMPORTANT: URL relative au document (page et script dans /stock/)
+      const url = `ajoutStock.php?action=getSousCategories&categorie=${encodeURIComponent(categorie)}`;
+      currentAbort = new AbortController();
+
+      fetch(url, { headers: { 'Accept': 'application/json' }, signal: currentAbort.signal })
+        .then(res => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          return res.json();
+        })
+        .then(data => {
+          // si on a été annulé entre-temps, on ne touche plus au DOM
+          if (!categorieSelect.value) return;
+
+          // data attendu: string[] ; on déduplique / trie joliment
+          const unique = Array.isArray(data)
+            ? Array.from(
+                new Map(
+                  data
+                    .filter(Boolean)
+                    .map(s => s.toString())
+                    .map(s => [norm(s), s])
+                ).values()
+              )
+            : [];
+
+          unique.sort((a, b) => norm(a).localeCompare(norm(b)));
+
+          // Vide → on garde juste l’option par défaut
+          if (unique.length === 0) {
+            sousCategorieSelect.innerHTML =
+              '<option value="" disabled selected>Aucune sous-catégorie</option>';
+            return;
+          }
+
+          // Remplit la liste
+          sousCategorieSelect.innerHTML =
+            '<option value="" disabled selected>-- Sélectionner une sous-catégorie --</option>';
+          unique.forEach(subCat => {
+            const option = document.createElement('option');
+            option.value = subCat;
+            option.textContent = capitalizeFirst(subCat);
+            sousCategorieSelect.appendChild(option);
+          });
+        })
+        .catch(err => {
+          if (err.name === 'AbortError') return; // normal
+          console.error('[Simpliz] Erreur fetch sous-catégories:', err);
+          sousCategorieSelect.innerHTML =
+            '<option value="" disabled selected>Impossible de charger les sous-catégories</option>';
+        })
+        .finally(() => {
+          setSousCatLoading(false);
+          currentAbort = null;
+        });
+    });
+
+    // Déclencher la maj au chargement si une catégorie est déjà pré-sélectionnée
+    if (categorieSelect.value) {
+      categorieSelect.dispatchEvent(new Event('change'));
+    }
+  }
+
+  // ====== Écouteurs pour le mode de gestion / aperçu ======
+  [radioAnonyme, radioNominatif].forEach(r => r && r.addEventListener('change', syncQuantiteLabel));
+  [nomInput, quantiteInput].forEach(i => i && i.addEventListener('input', renderPreview));
+
+  // Confirmation si création nominative massive
+  form && form.addEventListener('submit', (e) => {
+    const base = (nomInput?.value || '').trim();
+    const n    = Math.max(0, parseInt(quantiteInput?.value || '0', 10) || 0);
+    if (!base) return;
+
+    if (getGestionMode() === 'nominatif' && n > 50) {
+      const ok = confirm(`Confirmer la création de ${n} lignes nominatives (“${base} 1..${n}”) ?`);
+      if (!ok) e.preventDefault();
+    }
   });
 
-  // Déclencher la maj au chargement si une catégorie est déjà pré-sélectionnée
-  if (categorieSelect.value) {
-    categorieSelect.dispatchEvent(new Event('change'));
-  }
+  // init
+  syncQuantiteLabel();
+  renderPreview();
 });
 
 // --- Expose global functions si utilisées par le HTML ---

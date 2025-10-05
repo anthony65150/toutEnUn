@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../config/init.php';
 
-// --- Mode QR public ? ---
-$qrToken = isset($_GET['t']) ? (string)$_GET['t'] : '';
-$qrToken = (strlen($qrToken) >= 16 && strlen($qrToken) <= 64) ? $qrToken : '';
-$isQrView = ($qrToken !== ''); // <<< IMPORTANT: on le fixe tout de suite
+/* ================================
+   Détection QR public
+================================ */
+$qrToken  = isset($_GET['t']) ? (string)$_GET['t'] : '';
+$qrToken  = (strlen($qrToken) >= 16 && strlen($qrToken) <= 64) ? $qrToken : '';
+$isQrView = ($qrToken !== '');
 
 // Si pas connecté ET pas en mode QR public => connexion
 if (!$isQrView && !isset($_SESSION['utilisateurs'])) {
@@ -17,7 +19,6 @@ if (!$isQrView && !isset($_SESSION['utilisateurs'])) {
 
 require_once __DIR__ . '/../templates/header.php';
 require_once __DIR__ . '/../templates/navigation/navigation.php';
-
 
 /* ================================
    Multi-entreprise helpers
@@ -48,10 +49,10 @@ function belongs_or_fallback(PDO $pdo, string $table, int $id, ?int $ENT_ID): bo
         return true; // colonne absente → permissif
     }
 }
-
-
-
-/* Sélection article : par token (QR) ou par id */
+$activeTab = $_GET['tab'] ?? 'details';
+/* ================================
+   Sélection de l'article (token ou id)
+================================ */
 $isLoggedIn = isset($_SESSION['utilisateurs']);
 $fonction   = $_SESSION['utilisateurs']['fonction'] ?? null;
 $userId     = (int)($_SESSION['utilisateurs']['id'] ?? 0);
@@ -59,7 +60,7 @@ $userId     = (int)($_SESSION['utilisateurs']['id'] ?? 0);
 $article   = null;
 $articleId = 0;
 
-if ($qrToken !== '') {
+if ($isQrView) { // via token
     $st = $pdo->prepare("SELECT * FROM stock WHERE qr_token = :t LIMIT 1");
     $st->execute([':t' => $qrToken]);
     $article = $st->fetch(PDO::FETCH_ASSOC);
@@ -69,12 +70,13 @@ if ($qrToken !== '') {
         require_once __DIR__ . '/../templates/footer.php';
         exit;
     }
-    $isQrView  = true;
     $articleId = (int)$article['id'];
+
+    // En vue QR publique, force ENT_ID depuis l'article (si pas connecté)
     if (!$isLoggedIn) {
         $ENT_ID = (int)($article['entreprise_id'] ?? 0) ?: null;
     }
-} else {
+} else { // via id (session requise plus haut)
     if (!isset($_GET['id'])) {
         echo "<div class='container mt-4 alert alert-danger'>Aucun article sélectionné.</div>";
         require_once __DIR__ . '/../templates/footer.php';
@@ -83,11 +85,66 @@ if ($qrToken !== '') {
     $articleId = (int)$_GET['id'];
 }
 
+/* ================================
+   Chargement article (filtré entreprise si possible)
+================================ */
+try {
+    $sql    = "SELECT * FROM stock WHERE id = :id";
+    $params = [':id' => $articleId];
+    if ($ENT_ID !== null) {
+        $sql .= " AND entreprise_id = :eid";
+        $params[':eid'] = $ENT_ID;
+    }
+    $stmt   = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $article = $stmt->fetch(PDO::FETCH_ASSOC);
+} catch (Throwable $e) {
+    $article = false;
+}
+
+if (!$article) {
+    echo "<div class='container mt-4 alert alert-warning'>Article introuvable.</div>";
+    require_once __DIR__ . '/../templates/footer.php';
+    exit;
+}
 
 /* ================================
-   Params + rôle + sécurités
+   Entretien (POST) – autorisé via token en QR public
 ================================ */
+$qrSavedMsg = $qrErrorMsg = null;
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $article) {
+    // Anti-CSRF minimal pour QR: on exige le même token
+    $t = (string)($_POST['t'] ?? '');
+    if ($isQrView && $t && hash_equals((string)$article['qr_token'], $t)) {
+        $mode = $article['maintenance_mode'] ?? 'none';
 
+        if ($mode === 'hour_meter') {
+            $h = $_POST['compteur_heures'] ?? null;
+            if ($h !== null && preg_match('/^\d{1,7}$/', (string)$h)) {
+                $h = (int)$h;
+                $pdo->prepare("UPDATE stock SET compteur_heures = :h WHERE id = :id")
+                    ->execute([':h' => $h, ':id' => $articleId]);
+                $article['compteur_heures'] = $h;
+                $qrSavedMsg = "Relevé d'heures enregistré.";
+            } else {
+                $qrErrorMsg = "Valeur d'heures invalide.";
+            }
+        } elseif ($mode === 'electrical') {
+            $p = isset($_POST['panne']) ? 1 : 0;
+            $pdo->prepare("UPDATE stock SET panne = :p WHERE id = :id")
+                ->execute([':p' => $p, ':id' => $articleId]);
+            $article['panne'] = $p;
+            $qrSavedMsg = "Statut mis à jour.";
+        }
+    } elseif (!$isQrView && $isLoggedIn) {
+        // (Optionnel) on pourrait accepter les MAJ aussi pour les connectés ici
+        // en exigeant un CSRF token de session si tu en as un.
+    }
+}
+
+/* ================================
+   Sécurités de contexte (rôles)
+================================ */
 $chantierId = (int) ($_GET['chantier_id'] ?? 0);
 $depotId    = (int) ($_GET['depot_id'] ?? 0);
 
@@ -116,45 +173,7 @@ if ($fonction === 'depot' && $depotId > 0) {
 }
 
 /* ================================
-   1) ARTICLE (filtré entreprise)
-================================ */
-try {
-    $sql = "SELECT * FROM stock WHERE id = :id";
-    $params = [':id' => $articleId];
-
-    if ($ENT_ID !== null) {
-        try {
-            $sql .= " AND entreprise_id = :eid";
-            $params[':eid'] = $ENT_ID;
-        } catch (Throwable $e) { /* fallback */
-        }
-    }
-
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute($params);
-    $article = $stmt->fetch(PDO::FETCH_ASSOC);
-} catch (Throwable $e) {
-    $article = false;
-}
-
-if (!$article) {
-    echo "<div class='container mt-4 alert alert-warning'>Article introuvable.</div>";
-    require_once __DIR__ . '/../templates/footer.php';
-    exit;
-}
-
-
-/* Mode simplifié (scan QR public) */
-$isAdmin = $isLoggedIn && (($_SESSION['utilisateurs']['fonction'] ?? '') === 'administrateur');
-$isDepot = $isLoggedIn && (($_SESSION['utilisateurs']['fonction'] ?? '') === 'depot');
-$isChef  = $isLoggedIn && (($_SESSION['utilisateurs']['fonction'] ?? '') === 'chef');
-
-$qrSimpleMode = ($isQrView && !$isLoggedIn);
-
-
-/* ================================
-   2) QUANTITÉS (globales + contexte)
-      (filtrées par entreprise via les tables depots/chantiers)
+   Quantités (globales + contexte)
 ================================ */
 try {
     $sql = "
@@ -165,17 +184,13 @@ try {
     ";
     $params = [':sid' => $articleId];
     if ($ENT_ID !== null) {
-        try {
-            $sql .= " AND d.entreprise_id = :eid";
-            $params[':eid'] = $ENT_ID;
-        } catch (Throwable $e) {
-        }
+        $sql .= " AND d.entreprise_id = :eid";
+        $params[':eid'] = $ENT_ID;
     }
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
     $quantiteDepot = (int)$stmt->fetchColumn();
 } catch (Throwable $e) {
-    // fallback historique
     $stmt = $pdo->prepare("SELECT COALESCE(SUM(quantite),0) FROM stock_depots WHERE stock_id = ?");
     $stmt->execute([$articleId]);
     $quantiteDepot = (int)$stmt->fetchColumn();
@@ -190,11 +205,8 @@ try {
     ";
     $params = [':sid' => $articleId];
     if ($ENT_ID !== null) {
-        try {
-            $sql .= " AND c.entreprise_id = :eid";
-            $params[':eid'] = $ENT_ID;
-        } catch (Throwable $e) {
-        }
+        $sql .= " AND c.entreprise_id = :eid";
+        $params[':eid'] = $ENT_ID;
     }
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
@@ -212,7 +224,6 @@ $currentQtyContext   = null;
 $currentLabelContext = null;
 
 if ($chantierId > 0) {
-    // garde-fou appartenance chantier
     if ($ENT_ID !== null && !belongs_or_fallback($pdo, 'chantiers', $chantierId, $ENT_ID)) {
         echo "<div class='container mt-4 alert alert-danger'>Chantier hors de votre entreprise.</div>";
         require_once __DIR__ . '/../templates/footer.php';
@@ -236,7 +247,7 @@ if ($depotId > 0) {
 }
 
 /* ================================
-   3) RÉPARTITION PAR CHANTIER (>0)
+   Répartition par chantier (>0)
 ================================ */
 try {
     $sql = "
@@ -247,11 +258,8 @@ try {
     ";
     $params = [':sid' => $articleId];
     if ($ENT_ID !== null) {
-        try {
-            $sql .= " AND c.entreprise_id = :eid";
-            $params[':eid'] = $ENT_ID;
-        } catch (Throwable $e) {
-        }
+        $sql .= " AND c.entreprise_id = :eid";
+        $params[':eid'] = $ENT_ID;
     }
     $sql .= " ORDER BY c.nom ASC";
     $stmt = $pdo->prepare($sql);
@@ -270,7 +278,7 @@ try {
 }
 
 /* ================================
-   4) DOCUMENTS LIÉS (stock_documents)
+   Documents liés
 ================================ */
 $stmt = $pdo->prepare("
     SELECT id, nom_affichage, chemin_fichier, type_mime, taille, created_at
@@ -307,21 +315,19 @@ function human_filesize(?int $bytes): string
     return round($bytes, 1) . ' ' . $units[$i];
 }
 
-// --- Pagination ---
+/* ================================
+   Historique (pagination)
+================================ */
 $perPage = 10;
-$page = max(1, (int)($_GET['hpage'] ?? 1));
-$offset = ($page - 1) * $perPage;
+$page    = max(1, (int)($_GET['hpage'] ?? 1));
+$offset  = ($page - 1) * $perPage;
 
-// total mouvements (filtré entreprise si possible)
 try {
     $sqlCnt = "SELECT COUNT(*) FROM stock_mouvements sm WHERE sm.stock_id = :sid";
     $paramsCnt = [':sid' => $articleId];
     if ($ENT_ID !== null) {
-        try {
-            $sqlCnt .= " AND sm.entreprise_id = :eid";
-            $paramsCnt[':eid'] = $ENT_ID;
-        } catch (Throwable $e) {
-        }
+        $sqlCnt .= " AND sm.entreprise_id = :eid";
+        $paramsCnt[':eid'] = $ENT_ID;
     }
     $stmtCnt = $pdo->prepare($sqlCnt);
     $stmtCnt->execute($paramsCnt);
@@ -332,7 +338,6 @@ try {
     $totalRows = (int)$stmtCnt->fetchColumn();
 }
 
-// helper pour reconstruire l’URL avec hpage + #history
 function historyUrl(int $p): string
 {
     $qs = $_GET;
@@ -341,98 +346,63 @@ function historyUrl(int $p): string
 }
 
 /* ================================
-   5) HISTORIQUE (stock_mouvements) – filtré entreprise si possible
+   Historique : data
 ================================ */
 $mouvements = [];
 try {
     $sql = "
     SELECT
         sm.*,
-
-        /* VALIDATEUR */
-        us.prenom    AS user_prenom,
-        us.fonction  AS user_fonction,
-        d_us.nom     AS validateur_depot_nom,
-        c_us.nom     AS validateur_chantier_nom,
-
-        /* DEMANDEUR */
-        dem.prenom   AS dem_prenom,
-        dem.fonction AS dem_fonction,
-
-        /* Lieux */
-        cs.nom       AS source_chantier_nom,
-        cd.nom       AS dest_chantier_nom,
-        ds.nom       AS source_depot_nom,
-        dd.nom       AS dest_depot_nom,
-
+        /* VALIDATEUR */ us.prenom AS user_prenom, us.fonction AS user_fonction,
+        d_us.nom AS validateur_depot_nom,
+        c_us.nom AS validateur_chantier_nom,
+        /* DEMANDEUR */ dem.prenom AS dem_prenom, dem.fonction AS dem_fonction,
+        /* Lieux */ cs.nom AS source_chantier_nom, cd.nom AS dest_chantier_nom,
+                   ds.nom AS source_depot_nom,    dd.nom AS dest_depot_nom,
         /* Responsables standard (source) */
-        us_src.prenom     AS src_respo_prenom,
-        uc_src_u.prenom   AS src_chef_prenom,
-        us_dst.prenom     AS dst_respo_prenom,
-        uc_dst_u.prenom   AS dst_chef_prenom,
-
+        us_src.prenom   AS src_respo_prenom,
+        uc_src_u.prenom AS src_chef_prenom,
+        /* Responsables standard (dest) */
+        us_dst.prenom   AS dst_respo_prenom,
+        uc_dst_u.prenom AS dst_chef_prenom,
         /* Acteurs résumé */
         CASE
-          WHEN dem.fonction = 'administrateur' THEN dem.prenom
-          WHEN sm.source_type = 'depot'        THEN us_src.prenom
-          WHEN sm.source_type = 'chantier'     THEN uc_src_u.prenom
+          WHEN dem.fonction='administrateur' THEN dem.prenom
+          WHEN sm.source_type='depot'        THEN us_src.prenom
+          WHEN sm.source_type='chantier'     THEN uc_src_u.prenom
           ELSE NULL
         END AS src_actor_prenom,
-
         CASE
-          WHEN sm.dest_type = 'depot'      THEN us_dst.prenom
-          WHEN sm.dest_type = 'chantier'   THEN uc_dst_u.prenom
+          WHEN sm.dest_type='depot'      THEN us_dst.prenom
+          WHEN sm.dest_type='chantier'   THEN uc_dst_u.prenom
           ELSE NULL
         END AS dst_actor_prenom
-
     FROM stock_mouvements sm
-
-    /* VALIDATEUR */
     LEFT JOIN utilisateurs us ON us.id = sm.utilisateur_id
-    LEFT JOIN depots d_us ON (us.fonction = 'depot' AND d_us.responsable_id = us.id)
-    LEFT JOIN (
-        SELECT uc.utilisateur_id, MIN(uc.chantier_id) AS chantier_id
-        FROM utilisateur_chantiers uc GROUP BY uc.utilisateur_id
-    ) uc_us ON (us.fonction = 'chef' AND uc_us.utilisateur_id = us.id)
+    LEFT JOIN depots d_us ON (us.fonction='depot' AND d_us.responsable_id = us.id)
+    LEFT JOIN (SELECT uc.utilisateur_id, MIN(uc.chantier_id) AS chantier_id FROM utilisateur_chantiers uc GROUP BY uc.utilisateur_id) uc_us
+           ON (us.fonction='chef' AND uc_us.utilisateur_id = us.id)
     LEFT JOIN chantiers c_us ON (c_us.id = uc_us.chantier_id)
-
-    /* DEMANDEUR */
     LEFT JOIN utilisateurs dem ON dem.id = sm.demandeur_id
-
-    /* Lieux */
-    LEFT JOIN chantiers cs ON (sm.source_type = 'chantier' AND cs.id = sm.source_id)
-    LEFT JOIN chantiers cd ON (sm.dest_type   = 'chantier' AND cd.id = sm.dest_id)
-    LEFT JOIN depots    ds ON (sm.source_type = 'depot'    AND ds.id = sm.source_id)
-    LEFT JOIN depots    dd ON (sm.dest_type   = 'depot'    AND dd.id = sm.dest_id)
-
-    /* Responsables standard (source) */
-    LEFT JOIN utilisateurs us_src ON (sm.source_type='depot'    AND us_src.id = ds.responsable_id)
-    LEFT JOIN (
-        SELECT uc.chantier_id, MIN(uc.utilisateur_id) AS chef_id
-        FROM utilisateur_chantiers uc GROUP BY uc.chantier_id
-    ) uc_src  ON (sm.source_type='chantier' AND uc_src.chantier_id = sm.source_id)
+    LEFT JOIN chantiers cs ON (sm.source_type='chantier' AND cs.id = sm.source_id)
+    LEFT JOIN chantiers cd ON (sm.dest_type='chantier' AND cd.id = sm.dest_id)
+    LEFT JOIN depots ds ON (sm.source_type='depot' AND ds.id = sm.source_id)
+    LEFT JOIN depots dd ON (sm.dest_type='depot' AND dd.id = sm.dest_id)
+    LEFT JOIN utilisateurs us_src ON (sm.source_type='depot' AND us_src.id = ds.responsable_id)
+    LEFT JOIN (SELECT uc.chantier_id, MIN(uc.utilisateur_id) AS chef_id FROM utilisateur_chantiers uc GROUP BY uc.chantier_id) uc_src
+           ON (sm.source_type='chantier' AND uc_src.chantier_id = sm.source_id)
     LEFT JOIN utilisateurs uc_src_u ON (uc_src_u.id = uc_src.chef_id)
-
-    /* Responsables standard (dest) */
-    LEFT JOIN utilisateurs us_dst ON (sm.dest_type='depot'     AND us_dst.id = dd.responsable_id)
-    LEFT JOIN (
-        SELECT uc.chantier_id, MIN(uc.utilisateur_id) AS chef_id
-        FROM utilisateur_chantiers uc GROUP BY uc.chantier_id
-    ) uc_dst  ON (sm.dest_type='chantier' AND uc_dst.chantier_id = sm.dest_id)
+    LEFT JOIN utilisateurs us_dst ON (sm.dest_type='depot' AND us_dst.id = dd.responsable_id)
+    LEFT JOIN (SELECT uc.chantier_id, MIN(uc.utilisateur_id) AS chef_id FROM utilisateur_chantiers uc GROUP BY uc.chantier_id) uc_dst
+           ON (sm.dest_type='chantier' AND uc_dst.chantier_id = sm.dest_id)
     LEFT JOIN utilisateurs uc_dst_u ON (uc_dst_u.id = uc_dst.chef_id)
-
     WHERE sm.stock_id = :sid
-";
+    ";
     $params = [':sid' => $articleId];
-
     if ($ENT_ID !== null) {
-        try {
-            $sql .= " AND sm.entreprise_id = :eid";
-            $params[':eid'] = $ENT_ID;
-        } catch (Throwable $e) {
-        }
+        $sql .= " AND sm.entreprise_id = :eid";
+        $params[':eid'] = $ENT_ID;
     }
-
     $sql .= " ORDER BY sm.created_at DESC, sm.id DESC LIMIT $perPage OFFSET $offset";
 
     $stmt = $pdo->prepare($sql);
@@ -442,13 +412,11 @@ try {
     // fallback sans filtre entreprise
     $sql = "
     SELECT
-        sm.*,
-        us.prenom AS user_prenom, us.fonction AS user_fonction,
-        d_us.nom  AS validateur_depot_nom,
-        c_us.nom  AS validateur_chantier_nom,
+        sm.*, us.prenom AS user_prenom, us.fonction AS user_fonction,
+        d_us.nom AS validateur_depot_nom, c_us.nom AS validateur_chantier_nom,
         dem.prenom AS dem_prenom, dem.fonction AS dem_fonction,
         cs.nom AS source_chantier_nom, cd.nom AS dest_chantier_nom,
-        ds.nom AS source_depot_nom,    dd.nom AS dest_depot_nom,
+        ds.nom AS source_depot_nom, dd.nom AS dest_depot_nom,
         us_src.prenom AS src_respo_prenom, uc_src_u.prenom AS src_chef_prenom,
         us_dst.prenom AS dst_respo_prenom, uc_dst_u.prenom AS dst_chef_prenom,
         CASE WHEN dem.fonction='administrateur' THEN dem.prenom
@@ -485,7 +453,7 @@ try {
     $mouvements = $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
-/* Helpers historique */
+/* Helpers affichage historique */
 function label_lieu(?string $type, ?int $id, ?string $chantierNom): string
 {
     if ($type === 'depot') return 'Dépôt';
@@ -498,82 +466,34 @@ function badge_statut(string $statut): string
     $cls = $map[$statut] ?? 'secondary';
     return "<span class=\"badge bg-$cls text-uppercase\">$statut</span>";
 }
-
-// --- Contexte chantier ---
-if ($chantierId > 0) {
-    $sql = "SELECT nom FROM chantiers WHERE id = ?";
-    $params = [$chantierId];
-    if ($ENT_ID !== null) {
-        $sql .= " AND entreprise_id = ?";
-        $params[] = $ENT_ID;
-    }
-    $sql .= " LIMIT 1";
-
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute($params);
-    $chantierNomCtx = $stmt->fetchColumn();
-}
-
-// --- Contexte dépôt ---
-if ($depotId > 0) {
-    $sql = "SELECT nom FROM depots WHERE id = ?";
-    $params = [$depotId];
-    if ($ENT_ID !== null) {
-        $sql .= " AND entreprise_id = ?";
-        $params[] = $ENT_ID;
-    }
-    $sql .= " LIMIT 1";
-
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute($params);
-    $depotNomCtx = $stmt->fetchColumn();
-}
-
-/* Historique : toujours affiché */
-$showHistorique = true;
-
-/**
- * Construit "Prénom (dépôt X)" ou "Prénom (chantier Y)" pour Source/Destination
- */
 function label_personne_lieu(?string $type, array $row, string $prefix): string
 {
     $actorPrenom = $row[$prefix === 'source' ? 'src_actor_prenom' : 'dst_actor_prenom'] ?? null;
-
     if ($type === 'depot') {
         $depot = $row[$prefix === 'source' ? 'source_depot_nom' : 'dest_depot_nom'] ?? null;
         if ($actorPrenom && $depot) return htmlspecialchars("$actorPrenom (dépôt $depot)");
         if ($depot)                 return htmlspecialchars("Dépôt ($depot)");
         return 'Dépôt';
     }
-
     if ($type === 'chantier') {
         $chantier = $row[$prefix === 'source' ? 'source_chantier_nom' : 'dest_chantier_nom'] ?? null;
         if ($actorPrenom && $chantier) return htmlspecialchars("$actorPrenom (chantier $chantier)");
         if ($chantier)                 return htmlspecialchars("Chantier : $chantier");
         return 'Chantier';
     }
-
     return '-';
 }
-
-/** Validateur (colonne "Par") */
 function label_validateur(array $row): string
 {
     $prenom = trim($row['user_prenom'] ?? '');
     if ($prenom === '') return '-';
-
     $suffix = '';
     switch ($row['user_fonction'] ?? '') {
         case 'depot':
-            if (!empty($row['validateur_depot_nom'])) {
-                $suffix = ' (dépôt ' . $row['validateur_depot_nom'] . ')';
-            }
+            if (!empty($row['validateur_depot_nom'])) $suffix = ' (dépôt ' . $row['validateur_depot_nom'] . ')';
             break;
         case 'chef':
-            $ch = $row['validateur_chantier_nom']
-                ?? $row['source_chantier_nom']
-                ?? $row['dest_chantier_nom']
-                ?? null;
+            $ch = $row['validateur_chantier_nom'] ?? $row['source_chantier_nom'] ?? $row['dest_chantier_nom'] ?? null;
             if ($ch) $suffix = ' (chantier ' . $ch . ')';
             break;
         case 'administrateur':
@@ -582,25 +502,72 @@ function label_validateur(array $row): string
     }
     return htmlspecialchars($prenom . $suffix);
 }
-?>
 
-<?php if ($qrSimpleMode): ?>
+/* ================================
+   Contexte (noms)
+================================ */
+if ($chantierId > 0) {
+    $sql = "SELECT nom FROM chantiers WHERE id = ?";
+    $params = [$chantierId];
+    if ($ENT_ID !== null) {
+        $sql .= " AND entreprise_id = ?";
+        $params[] = $ENT_ID;
+    }
+    $sql .= " LIMIT 1";
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $chantierNomCtx = $stmt->fetchColumn();
+}
+if ($depotId > 0) {
+    $sql = "SELECT nom FROM depots WHERE id = ?";
+    $params = [$depotId];
+    if ($ENT_ID !== null) {
+        $sql .= " AND entreprise_id = ?";
+        $params[] = $ENT_ID;
+    }
+    $sql .= " LIMIT 1";
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $depotNomCtx = $stmt->fetchColumn();
+}
+
+/* ================================
+   VUE QR PUBLIQUE (simple + entretien)
+================================ */
+$mmode      = $article['maintenance_mode'] ?? 'none';
+$qrSimpleMode = ($isQrView && !$isLoggedIn);
+
+if ($qrSimpleMode): ?>
     <div class="container py-3">
         <h1 class="h5 mb-1"><?= htmlspecialchars($article['nom'] ?? 'Article') ?></h1>
         <div class="text-muted mb-3">Réf. <?= htmlspecialchars($article['reference'] ?? '—') ?></div>
+
+        <?php if (!empty($qrSavedMsg)): ?>
+            <div class="alert alert-success"><?= htmlspecialchars($qrSavedMsg) ?></div>
+        <?php elseif (!empty($qrErrorMsg)): ?>
+            <div class="alert alert-danger"><?= htmlspecialchars($qrErrorMsg) ?></div>
+        <?php endif; ?>
+
         <?php
         try {
-            $qDepot = (int)$pdo->query("SELECT COALESCE(SUM(sd.quantite),0) FROM stock_depots sd JOIN depots d ON d.id=sd.depot_id WHERE sd.stock_id={$articleId}" . ($ENT_ID ? " AND d.entreprise_id={$ENT_ID}" : ''))->fetchColumn();
+            $qDepot = (int)$pdo->query(
+                "SELECT COALESCE(SUM(sd.quantite),0) FROM stock_depots sd JOIN depots d ON d.id=sd.depot_id
+                 WHERE sd.stock_id={$articleId}" . ($ENT_ID ? " AND d.entreprise_id={$ENT_ID}" : '')
+            )->fetchColumn();
         } catch (Throwable $e) {
             $qDepot = 0;
         }
         try {
-            $qCh = (int)$pdo->query("SELECT COALESCE(SUM(sc.quantite),0) FROM stock_chantiers sc JOIN chantiers c ON c.id=sc.chantier_id WHERE sc.stock_id={$articleId}" . ($ENT_ID ? " AND c.entreprise_id={$ENT_ID}" : ''))->fetchColumn();
+            $qCh = (int)$pdo->query(
+                "SELECT COALESCE(SUM(sc.quantite),0) FROM stock_chantiers sc JOIN chantiers c ON c.id=sc.chantier_id
+                 WHERE sc.stock_id={$articleId}" . ($ENT_ID ? " AND c.entreprise_id={$ENT_ID}" : '')
+            )->fetchColumn();
         } catch (Throwable $e) {
             $qCh = 0;
         }
         $qTot = $qDepot + $qCh;
         ?>
+
         <div class="card mb-3">
             <div class="card-body d-flex gap-3 flex-wrap">
                 <div><span class="text-muted">Total :</span> <strong><?= $qTot ?></strong></div>
@@ -608,14 +575,57 @@ function label_validateur(array $row): string
                 <div><span class="text-muted">Dépôts :</span> <strong><?= $qDepot ?></strong></div>
             </div>
         </div>
+
+        <?php if ($mmode === 'hour_meter'): ?>
+            <div class="card mb-3">
+                <div class="card-body">
+                    <h5 class="mb-2">Relevé compteur (heures)</h5>
+                    <form method="post">
+                        <input type="hidden" name="t" value="<?= htmlspecialchars((string)$article['qr_token']) ?>">
+                        <div class="mb-3" style="max-width:260px">
+                            <input type="number" min="0" step="1" class="form-control" name="compteur_heures"
+                                value="<?= (int)($article['compteur_heures'] ?? 0) ?>" required>
+                        </div>
+                        <button class="btn btn-primary">Enregistrer</button>
+                    </form>
+                    <small class="text-muted d-block mt-2">Dernier relevé: <?= (int)($article['compteur_heures'] ?? 0) ?> h</small>
+                </div>
+            </div>
+        <?php elseif ($mmode === 'electrical'): ?>
+            <div class="card mb-3">
+                <div class="card-body">
+                    <h5 class="mb-2">Statut électrique</h5>
+                    <form method="post">
+                        <input type="hidden" name="t" value="<?= htmlspecialchars((string)$article['qr_token']) ?>">
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" role="switch" id="panne" name="panne" value="1"
+                                <?= !empty($article['panne']) ? 'checked' : '' ?>>
+                            <label class="form-check-label" for="panne">En panne</label>
+                        </div>
+                        <button class="btn btn-primary">Mettre à jour</button>
+                    </form>
+                    <small class="text-muted d-block mt-2">État actuel: <?= !empty($article['panne']) ? 'En panne' : 'OK' ?></small>
+                </div>
+            </div>
+        <?php endif; ?>
+
         <div class="d-grid gap-2">
-            <a class="btn btn-primary" href="/signalement.php?token=<?= urlencode((string)$article['qr_token']) ?>">Signaler un problème</a>
             <a class="btn btn-outline-secondary" href="/connexion.php">Se connecter</a>
+            <a class="btn btn-light" href="/signalement.php?token=<?= urlencode((string)$article['qr_token']) ?>">Signaler un problème</a>
         </div>
     </div>
     <?php require_once __DIR__ . '/../templates/footer.php';
     return; ?>
 <?php endif; ?>
+
+<?php
+/* ================================
+   Interface complète (utilisateur connecté)
+================================ */
+$isAdmin = $isLoggedIn && (($_SESSION['utilisateurs']['fonction'] ?? '') === 'administrateur');
+$isDepot = $isLoggedIn && (($_SESSION['utilisateurs']['fonction'] ?? '') === 'depot');
+$isChef  = $isLoggedIn && (($_SESSION['utilisateurs']['fonction'] ?? '') === 'chef');
+?>
 
 <div class="container mt-4">
     <!-- En-tête -->
@@ -629,33 +639,36 @@ function label_validateur(array $row): string
         </div>
         <div class="d-flex gap-2">
             <?php if ($chantierId > 0): ?>
-                <span class="badge bg-secondary">Chantier : <?= htmlspecialchars($chantierNomCtx ?: "#$chantierId") ?></span>
+                <span class="badge bg-secondary">Chantier : <?= htmlspecialchars($chantierNomCtx ?? ("#" . $chantierId)) ?></span>
             <?php endif; ?>
             <?php if ($depotId > 0): ?>
-                <span class="badge bg-info">Dépôt : <?= htmlspecialchars($depotNomCtx ?: "#$depotId") ?></span>
+                <span class="badge bg-info">Dépôt : <?= htmlspecialchars($depotNomCtx ?? ("#" . $depotId)) ?></span>
             <?php endif; ?>
         </div>
+
         <?php if ($isAdmin): ?>
             <div class="ms-2 d-flex align-items-center gap-2">
-                <?php if (empty($article['qr_token'])): ?>
+                <?php if (!empty($article['qr_image_path'])):
+                    $qrPath = '/' . ltrim($article['qr_image_path'], '/'); ?>
+                    <a class="btn btn-sm btn-outline-secondary" target="_blank"
+                        href="<?= htmlspecialchars($qrPath) ?>">Voir QR</a>
+                <?php elseif (!empty($article['qr_token'])): ?>
+                    <a class="btn btn-sm btn-outline-secondary" target="_blank"
+                        href="/stock/qr_render.php?t=<?= urlencode($article['qr_token']) ?>">Voir QR</a>
+                <?php else: ?>
                     <form method="post" action="/stock/stock_generate_qr.php" class="d-inline">
                         <input type="hidden" name="id" value="<?= (int)$article['id'] ?>">
                         <button class="btn btn-sm btn-outline-primary">Générer QR</button>
                     </form>
-                <?php else: ?>
-                    <!-- bouton "Voir QR" -->
-                    <a class="btn btn-sm btn-outline-secondary" target="_blank"
-   href="/stock/qr_render.php?t=<?= urlencode($article['qr_token']) ?>">Voir QR</a>
-
-
-                    <form method="post" action="/stock/stock_generate_qr.php" class="d-inline"
-                        onsubmit="return confirm('Régénérer un nouveau token ? L’ancien QR sera invalidé.');">
-                        <input type="hidden" name="id" value="<?= (int)$article['id'] ?>">
-                        <input type="hidden" name="regenerate" value="1">
-                        <button class="btn btn-sm btn-warning">Régénérer</button>
-                    </form>
-                    <button class="btn btn-sm btn-success" onclick="window.print()">Imprimer</button>
                 <?php endif; ?>
+
+                <form method="post" action="/stock/stock_generate_qr.php" class="d-inline"
+                    onsubmit="return confirm('Régénérer un nouveau token ? L’ancien QR sera invalidé.');">
+                    <input type="hidden" name="id" value="<?= (int)$article['id'] ?>">
+                    <input type="hidden" name="regenerate" value="1">
+                    <button class="btn btn-sm btn-warning">Régénérer</button>
+                </form>
+                <button class="btn btn-sm btn-success" onclick="window.print()">Imprimer</button>
             </div>
         <?php endif; ?>
 
@@ -668,10 +681,8 @@ function label_validateur(array $row): string
             <div class="card shadow-sm">
                 <?php if (!empty($article['photo'])): ?>
                     <?php $photoUrl = '/' . ltrim($article['photo'], '/'); ?>
-                    <img src="<?= htmlspecialchars($photoUrl) ?>"
-                        class="card-img-top img-fluid"
-                        alt="Photo de l'article"
-                        style="max-height: 320px; object-fit: contain;">
+                    <img src="<?= htmlspecialchars($photoUrl) ?>" class="card-img-top img-fluid"
+                        alt="Photo de l'article" style="max-height: 320px; object-fit: contain;">
                 <?php else: ?>
                     <div class="text-muted text-center p-4">Aucune photo disponible</div>
                 <?php endif; ?>
@@ -706,7 +717,8 @@ function label_validateur(array $row): string
                 <?php if ($currentQtyContext !== null): ?>
                     <?php $alertClass = $currentQtyContext > 0 ? 'alert-success' : 'alert-danger'; ?>
                     <div class="alert <?= $alertClass ?> mt-3 mb-0 py-2">
-                        <?= htmlspecialchars($currentLabelContext) ?> : <strong><?= (int)$currentQtyContext ?></strong>
+                        <?= htmlspecialchars($currentLabelContext) ?> :
+                        <strong><?= (int)$currentQtyContext ?></strong>
                     </div>
                 <?php endif; ?>
             </div>
@@ -714,17 +726,29 @@ function label_validateur(array $row): string
     </div>
 
     <!-- Onglets -->
-    <ul class="nav nav-tabs mb-3" id="articleTabs" role="tablist">
-        <li class="nav-item" role="presentation">
-            <button class="nav-link active" id="details-tab" data-bs-toggle="tab" data-bs-target="#details" type="button" role="tab">Détails</button>
+    <?php
+    $isNominatif = ($article['mode_gestion'] ?? '') === 'nominatif';
+    $profilQr    = $article['profil_qr'] ?? 'aucun';
+    ?>
+
+    <ul class="nav nav-tabs" id="articleTabs">
+        <li class="nav-item">
+            <a class="nav-link <?= $activeTab === 'details' ? 'active' : '' ?>" href="?id=<?= $articleId ?>&tab=details">Détails</a>
         </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="files-tab" data-bs-toggle="tab" data-bs-target="#files" type="button" role="tab">Documents</button>
+        <li class="nav-item">
+            <a class="nav-link <?= $activeTab === 'documents' ? 'active' : '' ?>" href="?id=<?= $articleId ?>&tab=documents">Documents</a>
         </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" id="history-tab" data-bs-toggle="tab" data-bs-target="#history" type="button" role="tab">Historique</button>
+        <li class="nav-item">
+            <a class="nav-link <?= $activeTab === 'historique' ? 'active' : '' ?>" href="?id=<?= $articleId ?>&tab=historique">Historique</a>
         </li>
+
+        <?php if ($isNominatif && $profilQr !== 'aucun'): ?>
+            <li class="nav-item">
+                <a class="nav-link <?= $activeTab === 'etat' ? 'active' : '' ?>" href="?id=<?= $articleId ?>&tab=etat">État</a>
+            </li>
+        <?php endif; ?>
     </ul>
+
 
     <div class="tab-content" id="articleTabContent">
         <!-- Détails -->
@@ -738,6 +762,35 @@ function label_validateur(array $row): string
                     <li class="list-group-item">Matériau : <?= htmlspecialchars($article['materiau'] ?? '-') ?></li>
                     <li class="list-group-item">Fournisseur : <?= htmlspecialchars($article['fournisseur'] ?? '-') ?></li>
                 </ul>
+
+                <?php if (($article['maintenance_mode'] ?? 'none') !== 'none'): ?>
+                    <hr>
+                    <h6 class="fw-bold mt-3">Entretien</h6>
+                    <?php if ($article['maintenance_mode'] === 'hour_meter'): ?>
+                        <div>Compteur: <strong><?= (int)($article['compteur_heures'] ?? 0) ?> h</strong></div>
+                        <?php if ($isAdmin || $isDepot): ?>
+                            <form method="post" class="mt-2 d-flex gap-2" style="max-width:360px">
+                                <input type="hidden" name="t" value="<?= htmlspecialchars((string)$article['qr_token']) ?>">
+                                <input type="number" min="0" step="1" class="form-control" name="compteur_heures"
+                                    value="<?= (int)($article['compteur_heures'] ?? 0) ?>" required>
+                                <button class="btn btn-outline-primary">Mettre à jour</button>
+                            </form>
+                        <?php endif; ?>
+                    <?php elseif ($article['maintenance_mode'] === 'electrical'): ?>
+                        <div>État: <strong><?= !empty($article['panne']) ? 'En panne' : 'OK' ?></strong></div>
+                        <?php if ($isAdmin || $isDepot): ?>
+                            <form method="post" class="mt-2">
+                                <input type="hidden" name="t" value="<?= htmlspecialchars((string)$article['qr_token']) ?>">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" role="switch" id="panne2" name="panne" value="1"
+                                        <?= !empty($article['panne']) ? 'checked' : '' ?>>
+                                    <label class="form-check-label" for="panne2">En panne</label>
+                                </div>
+                                <button class="btn btn-outline-primary mt-2">Mettre à jour</button>
+                            </form>
+                        <?php endif; ?>
+                    <?php endif; ?>
+                <?php endif; ?>
 
                 <hr>
                 <h6 class="fw-bold mt-3">Répartition par chantier</h6>
@@ -849,9 +902,7 @@ function label_validateur(array $row): string
                                         </a>
                                     </li>
                                     <li class="page-item disabled">
-                                        <span class="page-link">
-                                            Page <?= $page ?> / <?= max(1, (int)ceil($totalRows / $perPage)) ?>
-                                        </span>
+                                        <span class="page-link">Page <?= $page ?> / <?= max(1, (int)ceil($totalRows / $perPage)) ?></span>
                                     </li>
                                     <li class="page-item <?= $hasNext ? '' : 'disabled' ?>">
                                         <a class="page-link" href="<?= $hasNext ? historyUrl($page + 1) : '#' ?>" aria-label="Suivant">
@@ -861,14 +912,97 @@ function label_validateur(array $row): string
                                 </ul>
                             </nav>
                         <?php endif; ?>
-
                     </div>
-
                 <?php endif; ?>
             </div>
         </div>
+        <!-- État -->
+        <?php if ($isNominatif && $profilQr !== 'aucun'): ?>
+            <div class="tab-pane fade <?= $activeTab === 'etat' ? 'show active' : '' ?>" id="etat" role="tabpanel">
+                <div class="card shadow-sm p-3">
+                    <h5 class="fw-bold mb-3">État de l’article</h5>
+
+                    <?php if (($article['maintenance_mode'] ?? 'none') === 'hour_meter'): ?>
+                        <!-- Parcours: Compteur d'heures -->
+                        <form id="etatCompteurForm" class="mb-3">
+                            <input type="hidden" name="article_id" value="<?= (int)$articleId ?>">
+                            <div class="row g-3">
+                                <div class="col-md-4">
+                                    <label class="form-label">Nouveau relevé (heures)</label>
+                                    <input type="number" min="0" step="1" class="form-control" name="valeur_int"
+                                        value="<?= (int)($article['compteur_heures'] ?? 0) ?>" required>
+                                </div>
+                                <div class="col-md-8">
+                                    <label class="form-label">Commentaire (optionnel)</label>
+                                    <input type="text" class="form-control" name="commentaire" placeholder="ex: arrivée chantier, entretien, etc.">
+                                </div>
+                            </div>
+                            <div class="mt-3 d-flex gap-2">
+                                <button type="submit" class="btn btn-primary">Mettre à jour le compteur</button>
+                                <button type="button" class="btn btn-success" data-action="declarer_ok">Marquer OK</button>
+                                <button type="button" class="btn btn-danger" data-action="declarer_panne">Déclarer une panne</button>
+                            </div>
+                        </form>
+
+                        <div class="alert alert-light border">
+                            Dernier relevé enregistré : <strong><?= (int)($article['compteur_heures'] ?? 0) ?> h</strong>
+                        </div>
+
+                        <hr>
+                        <h6 class="mb-2">Historique récent</h6>
+                        <div id="etatCompteurHistorique"><em>Chargement…</em></div>
+
+                    <?php elseif (($article['maintenance_mode'] ?? 'none') === 'electrical'): ?>
+                        <!-- Parcours: Autres (OK / Panne + PJ) -->
+                        <form id="etatAutreForm" class="mb-3" enctype="multipart/form-data">
+                            <input type="hidden" name="article_id" value="<?= (int)$articleId ?>">
+                            <div class="mb-3">
+                                <label class="form-label d-block">Action</label>
+                                <div class="d-flex gap-3">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="action" id="ok" value="declarer_ok" checked>
+                                        <label class="form-check-label" for="ok">Marquer OK</label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="action" id="panne" value="declarer_panne">
+                                        <label class="form-check-label" for="panne">Déclarer un problème / panne</label>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label">Commentaire (optionnel)</label>
+                                <textarea class="form-control" name="commentaire" rows="2" placeholder="ex: câble coupé, batterie HS, etc."></textarea>
+                            </div>
+
+                            <div class="mb-3" style="max-width:420px">
+                                <label class="form-label">Photo/Justificatif (optionnel)</label>
+                                <input type="file" name="fichier" class="form-control" accept="image/*,application/pdf">
+                            </div>
+
+                            <button type="submit" class="btn btn-primary">Enregistrer</button>
+                        </form>
+
+                        <div class="alert alert-light border">
+                            État actuel : <strong><?= !empty($article['panne']) ? 'En panne' : 'OK' ?></strong>
+                        </div>
+
+                        <hr>
+                        <h6 class="mb-2">Historique récent</h6>
+                        <div id="etatAutreHistorique"><em>Chargement…</em></div>
+
+                    <?php else: ?>
+                        <div class="alert alert-info mb-0">
+                            Aucun profil d’entretien n’est défini pour cet article.
+                        </div>
+                    <?php endif; ?>
+                </div>
+            </div>
+        <?php endif; ?>
+
     </div>
 </div>
+
 <script>
     document.addEventListener('DOMContentLoaded', () => {
         if (location.hash === '#history') {
@@ -877,6 +1011,7 @@ function label_validateur(array $row): string
         }
     });
 </script>
+
 <?php if ($isAdmin && !empty($article['qr_token'])): ?>
     <style>
         @media print {
@@ -917,11 +1052,22 @@ function label_validateur(array $row): string
     </style>
     <div class="printable d-none d-print-block">
         <div class="qr-card">
-            <img src="/stock/qr_render.php?t=<?= urlencode($article['qr_token']) ?>&v=<?= time() ?>" alt="QR">
+            <?php if (!empty($article['qr_image_path'])): ?>
+                <img src="<?= htmlspecialchars($article['qr_image_path']) . '?v=' . time() ?>" alt="QR">
+            <?php else: ?>
+                <img src="/stock/qr_render.php?t=<?= urlencode($article['qr_token']) ?>&v=<?= time() ?>" alt="QR">
+            <?php endif; ?>
             <div class="title"><?= htmlspecialchars($article['nom'] ?? 'Article') ?></div>
             <div class="title">Réf. <?= htmlspecialchars($article['reference'] ?? '—') ?></div>
         </div>
     </div>
+<?php endif; ?>
+
+<?php if ($isNominatif && $profilQr !== 'aucun'): ?>
+    <script>
+        window.ARTICLE_ID = <?= (int)$articleId ?>;
+    </script>
+    <script src="/stock/js/articleEtat.js?v=1"></script>
 <?php endif; ?>
 
 
