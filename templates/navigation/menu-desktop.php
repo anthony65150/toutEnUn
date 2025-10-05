@@ -38,6 +38,8 @@ $current_page = basename($_SERVER['PHP_SELF']);
         <li class="nav-item p-2">
           <a href="/employes/employes.php" class="nav-link <?= ($current_page === 'employes.php') ? 'active' : '' ?>">Employés</a>
         </li>
+
+
       <?php endif; ?>
 
       <?php
@@ -53,6 +55,9 @@ $current_page = basename($_SERVER['PHP_SELF']);
         <li class="nav-item p-2">
           <a href="<?= $stockPage ?>" class="nav-link <?= (strpos($_SERVER['PHP_SELF'], $stockPage) !== false) ? 'active' : '' ?>">Stock</a>
         </li>
+                <?php if (($_SESSION['utilisateurs']['fonction'] ?? '') === 'administrateur'): ?>
+  
+<?php endif; ?>
       <?php endif; ?>
     </ul>
   </div>

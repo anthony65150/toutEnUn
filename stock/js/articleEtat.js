@@ -2,6 +2,34 @@
 document.addEventListener('DOMContentLoaded', () => {
   if (!window.ARTICLE_ID) return;
 
+  // === Helpers ===
+  const $ = s => document.querySelector(s);
+
+  function showError(msg) {
+    const box = $('#etatError') || $('#etatAutreError') || $('#etatCompteurError');
+    if (box) {
+      box.innerHTML = msg;
+      box.classList.remove('d-none');
+    } else {
+      alert(msg);
+    }
+  }
+
+  async function fetchJSON(url, options = {}) {
+    const res = await fetch(url, { credentials: 'same-origin', ...options });
+    const raw = await res.text();             // <- d'abord texte
+    let data;
+    try { data = JSON.parse(raw); }           // <- puis JSON
+    catch (e) {
+      // On remonte l’HTML complet pour déboguer (notices PHP, etc.)
+      throw new Error('Réponse non-JSON du serveur:\n' + raw);
+    }
+    if (!res.ok || data.ok === false) {
+      throw new Error(data.msg || 'Erreur serveur');
+    }
+    return data;
+  }
+
   function renderHist(el, rows){
     const c = document.querySelector(el);
     if (!c) return;
@@ -18,44 +46,61 @@ document.addEventListener('DOMContentLoaded', () => {
     }).join('');
   }
 
-  function loadHist(){
-    fetch('/stock/ajax/ajax_article_etat_list.php?article_id=' + window.ARTICLE_ID)
-      .then(r=>r.json()).then(j=>{
-        if (!j.ok) return;
-        renderHist('#etatCompteurHistorique', j.rows);
-        renderHist('#etatAutreHistorique', j.rows);
-      });
+  async function loadHist(){
+    try {
+      const j = await fetchJSON('/stock/ajax/ajax_article_etat_list.php?article_id=' + encodeURIComponent(window.ARTICLE_ID));
+      renderHist('#etatCompteurHistorique', j.rows);
+      renderHist('#etatAutreHistorique', j.rows);
+    } catch (err) {
+      showError(err.message);
+    }
   }
   loadHist();
 
-  // Compteur
+  // ===== Formulaire compteur =====
   const f1 = document.querySelector('#etatCompteurForm');
   if (f1){
-    f1.addEventListener('submit', (e)=>{
+    // Submit "classique" -> compteur_maj
+    f1.addEventListener('submit', async (e)=>{
       e.preventDefault();
       const fd = new FormData(f1);
       fd.set('action', 'compteur_maj');
-      fetch('/stock/ajax/ajax_article_etat_save.php', { method:'POST', body:fd })
-        .then(r=>r.json()).then(j=>{ if(j.ok){ loadHist(); }});
+      // S'assure qu'on envoie bien l'article_id
+      if (!fd.has('article_id')) fd.set('article_id', String(window.ARTICLE_ID));
+      try {
+        await fetchJSON('/stock/ajax/ajax_article_etat_save.php', { method:'POST', body:fd });
+        await loadHist();
+      } catch (err) { showError(err.message); }
     });
+
+    // Boutons d’action (OK / PANNE / etc.)
     f1.querySelectorAll('button[data-action]').forEach(btn=>{
-      btn.addEventListener('click', ()=>{
+      // IMPORTANT: prévenir le double submit si le bouton est type=submit
+      btn.addEventListener('click', async (e)=>{
+        e.preventDefault();
         const fd = new FormData(f1);
         fd.set('action', btn.dataset.action);
-        fetch('/stock/ajax/ajax_article_etat_save.php', { method:'POST', body:fd })
-          .then(r=>r.json()).then(j=>{ if(j.ok){ loadHist(); }});
+        if (!fd.has('article_id')) fd.set('article_id', String(window.ARTICLE_ID));
+        try {
+          await fetchJSON('/stock/ajax/ajax_article_etat_save.php', { method:'POST', body:fd });
+          await loadHist();
+        } catch (err) { showError(err.message); }
       });
     });
   }
 
-  // Autres
+  // ===== Formulaire "Autres" (déclarer un problème + photo) =====
   const f2 = document.querySelector('#etatAutreForm');
   if (f2){
-    f2.addEventListener('submit', (e)=>{
+    f2.addEventListener('submit', async (e)=>{
       e.preventDefault();
-      const fd = new FormData(f2);
-      fetch('/stock/ajax/ajax_article_etat_save.php', { method:'POST', body:fd })
-        .then(r=>r.json()).then(j=>{ if(j.ok){ f2.reset(); loadHist(); }});
+      const fd = new FormData(f2); // inclut description, fichier (optionnel), etc.
+      if (!fd.has('article_id')) fd.set('article_id', String(window.ARTICLE_ID));
+      try {
+        await fetchJSON('/stock/ajax/ajax_article_etat_save.php', { method:'POST', body:fd });
+        f2.reset();
+        await loadHist();
+      } catch (err) { showError(err.message); }
     });
   }
 });
