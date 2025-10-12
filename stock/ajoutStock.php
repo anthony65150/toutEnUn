@@ -60,45 +60,39 @@ function web_to_abs(string $webPath): string{
     return rtrim($_SERVER['DOCUMENT_ROOT'], '/') . '/' . $rel;
 }
 
-$errors  = [];
-$success = false;
-
 /**
- * Génère le QR de la ligne stock et enregistre le token + le chemin image.
- * Utilise generateStockQr() de lib/QrHelper.php
- * ⚠️ Dans QrHelper.php, fais bien pointer l'URL vers
+ * Génère le QR (token + image) puis met à jour la ligne stock.
+ * ⚠️ Dans QrHelper.php, veille à ce que l’URL pointe vers:
  *    /stock/article.php?t={TOKEN}&tab=etat
  */
 function generate_qr_for_article(int $stockId, string $label = ''): void{
     global $pdo, $ENT_ID;
 
-    // token unique (uuid v4 fourni par ton projet)
     $qrToken = uuidv4();
+    $baseUrl = app_base_url();
+    $entId   = (int)($ENT_ID ?? 0);
 
-    // génère l'image (ABS) et récupère le chemin web
-    $baseUrl   = app_base_url();
-    $entId     = (int)($ENT_ID ?? 0);
-    $absPath   = generateStockQr($baseUrl, $entId, $stockId, $qrToken); // génère le PNG
-   $qrPathWeb = '/stock/qrcodes/' . $entId . "/stock_{$stockId}.png";
+    // génère le PNG (dans /stock/qrcodes/{entId}/stock_{id}.png)
+    generateStockQr($baseUrl, $entId, $stockId, $qrToken);
 
-    // enregistre sur la ligne stock
+    $qrPathWeb = '/stock/qrcodes/' . $entId . "/stock_{$stockId}.png";
     $pdo->prepare("UPDATE stock SET qr_token = ?, qr_image_path = ? WHERE id = ?")
         ->execute([$qrToken, $qrPathWeb, $stockId]);
 }
 
 /* =========================================================
+   Flash (PRG)
+========================================================= */
+$flash_success = $_SESSION['flash_success'] ?? null;
+unset($_SESSION['flash_success']);
+
+$errors  = [];
+$success = false;
+
+/* =========================================================
    POST
 ========================================================= */
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
-
-    // Normalisation propre (trim + espaces multiples -> 1 + casse)
-    $normalize = function (?string $s): string {
-        $s = trim((string)$s);
-        $s = preg_replace('/\s+/u', ' ', $s);
-        $s = mb_strtolower($s, 'UTF-8');
-        if ($s === '') return '';
-        return mb_strtoupper(mb_substr($s, 0, 1, 'UTF-8'), 'UTF-8') . mb_substr($s, 1, null, 'UTF-8');
-    };
 
     $nom       = ucfirst(mb_strtolower(trim($_POST['nom'] ?? ''), 'UTF-8'));
     $quantite  = (int)($_POST['quantite'] ?? 0);
@@ -128,8 +122,32 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
     if ($quantite < 0)       $errors['quantite'] = "La quantité doit être positive.";
     if ($categorie === '')   $errors['categorie'] = "La catégorie est obligatoire.";
 
-    // Pré-validation doc (optionnelle)
-    $document_path_web = null;
+    // Profil QR & maintenance
+    $gestionMode = in_array(($_POST['gestion_mode'] ?? ''), ['anonyme','nominatif'], true)
+        ? $_POST['gestion_mode'] : 'anonyme';
+
+    $profilQr = in_array(($_POST['profil_qr'] ?? ''), ['aucun','compteur_heures','autre'], true)
+        ? $_POST['profil_qr'] : 'aucun';
+
+    $maintenanceMode = match ($profilQr) {
+        'compteur_heures' => 'hour_meter',
+        'autre'           => 'electrical',
+        default           => 'none',
+    };
+
+    // 🆕 Compteur d'heures initial si profil "compteur_heures"
+    $hasHourMeter = ($profilQr === 'compteur_heures') ? 1 : 0;
+    $hourInit     = null;
+    if ($hasHourMeter) {
+        $hourRaw = $_POST['hour_meter_initial'] ?? null;
+        if ($hourRaw === '' || $hourRaw === null || !ctype_digit((string)$hourRaw)) {
+            $errors['hour_meter_initial'] = "Veuillez saisir le compteur initial (en heures).";
+        } else {
+            $hourInit = (int)$hourRaw;
+        }
+    }
+
+    // Pré-validation document
     if ($document && $document['error'] !== UPLOAD_ERR_NO_FILE) {
         if ($document['error'] !== UPLOAD_ERR_OK) {
             $errors['document'] = "Erreur lors de l’upload du document.";
@@ -142,8 +160,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
         }
     }
 
-    // Pré-validation photo (optionnelle)
-    $photo_path_web = null;
+    // Pré-validation photo
     if ($photo && $photo['error'] !== UPLOAD_ERR_NO_FILE) {
         if ($photo['error'] !== UPLOAD_ERR_OK) {
             $errors['photo'] = "Erreur lors de l’upload de la photo.";
@@ -158,22 +175,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
 
     if (empty($errors)) {
         try {
-            // =========
-            // Prépare: inputs + uploads temporaires
-            // =========
-            $gestionMode = in_array(($_POST['gestion_mode'] ?? ''), ['anonyme','nominatif'], true)
-                ? $_POST['gestion_mode'] : 'anonyme';
-
-            // Nouveau: lecture du profil QR + mapping vers maintenance_mode
-            $profilQr = in_array(($_POST['profil_qr'] ?? ''), ['aucun','compteur_heures','autre'], true)
-                ? $_POST['profil_qr'] : 'aucun';
-
-            $maintenanceMode = match ($profilQr) {
-                'compteur_heures' => 'hour_meter',
-                'autre'           => 'electrical',
-                default           => 'none',
-            };
-
+            // Uploads temporaires
             $tmp_doc_abs = $tmp_doc_ext = null;
             if ($document && $document['error'] === UPLOAD_ERR_OK) {
                 $tmp_doc_ext = strtolower(pathinfo($document['name'], PATHINFO_EXTENSION));
@@ -194,9 +196,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
                 }
             }
 
-            // =========
-            // Trouver le dépôt par défaut de l'entreprise
-            // =========
+            // Dépôt par défaut de l'entreprise
             $sqlDepot = "SELECT d.id FROM depots d";
             [ $fragD, $pD ] = me_where_first($ENT_ID, 'd');
             $sqlDepot .= $fragD . " ORDER BY d.id ASC LIMIT 1";
@@ -207,18 +207,17 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
                 throw new RuntimeException("Aucun dépôt n'est configuré pour cette entreprise.");
             }
 
-            // =========
-            // Branches: ANONYME = 1 ligne; NOMINATIF = N lignes (quantite=1)
-            // =========
             if ($gestionMode === 'anonyme') {
                 $pdo->beginTransaction();
 
-                // 1) Crée l'article (une ligne)
+                // INSERT anonyme (inclut colonnes compteur)
                 $stmt = $pdo->prepare("
                     INSERT INTO stock
-                      (nom, quantite_totale, quantite_disponible, categorie, sous_categorie, photo, document, entreprise_id, gestion_mode, maintenance_mode, profil_qr)
+                      (nom, quantite_totale, quantite_disponible, categorie, sous_categorie, photo, document, entreprise_id,
+                       gestion_mode, maintenance_mode, profil_qr, has_hour_meter, hour_meter_initial, hour_meter_unit)
                     VALUES
-                      (?, ?, 0, ?, ?, NULL, NULL, ?, 'anonyme', ?, ?)
+                      (?,   ?,               0,                     ?,        ?,              NULL,  NULL,     ?,
+                       'anonyme', ?, ?, ?, ?, 'h')
                 ");
                 $stmt->execute([
                     $nom,
@@ -228,17 +227,15 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
                     $ENT_ID,
                     $maintenanceMode,
                     $profilQr,
+                    $hasHourMeter,
+                    $hourInit, // null si non compteur
                 ]);
                 $stockId = (int)$pdo->lastInsertId();
 
-                // QR (token + image + champs)
-                $qrToken   = uuidv4();
-                $qrPathAbs = generateStockQr(app_base_url(), (int)$ENT_ID, $stockId, $qrToken); // ⚠️ ajouter &tab=etat dans le helper
-               $qrPathWeb = '/stock/qrcodes/' . ((int)$ENT_ID) . "/stock_{$stockId}.png";
-                $pdo->prepare("UPDATE stock SET qr_token = ?, qr_image_path = ? WHERE id = ?")
-                    ->execute([$qrToken, $qrPathWeb, $stockId]);
+                // QR
+                generate_qr_for_article($stockId, $nom);
 
-                // Fichiers (copie depuis /uploads/tmp/)
+                // Fichiers (déplace depuis /uploads/tmp/)
                 if ($tmp_doc_abs) {
                     $dir_web = "uploads/documents/articles/{$stockId}/";
                     $dir_abs = web_to_abs($dir_web);
@@ -271,20 +268,19 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
                 ");
                 $stSum->execute([':eid' => $ENT_ID, ':sid' => $stockId]);
 
-                // QR générique (même token mais via helper “joli” si besoin)
-                generate_qr_for_article($stockId, $nom);
-
                 $pdo->commit();
-                $success = true;
+
+                // ✅ PRG: flash + redirect => formulaire réinitialisé
+                $_SESSION['flash_success'] = "✅ Élément ajouté avec succès au dépôt.";
+                header('Location: '.$_SERVER['PHP_SELF'].'?ok=1');
+                exit;
 
             } else {
                 // ===== NOMINATIF =====
                 $N = max(1, (int)$quantite);
-                if ($N > 500) {
-                    throw new RuntimeException("Nombre d’unités trop élevé.");
-                }
+                if ($N > 500) throw new RuntimeException("Nombre d’unités trop élevé.");
 
-                // Trouver le prochain suffixe (évite les doublons)
+                // Suffixe
                 $q = $pdo->prepare("
                     SELECT nom FROM stock
                      WHERE entreprise_id = :eid
@@ -294,19 +290,20 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
                 $q->execute([':eid' => $ENT_ID, ':base' => $nom, ':like' => $nom . ' %']);
                 $max = 0;
                 while ($r = $q->fetch(PDO::FETCH_ASSOC)) {
-                    if (preg_match('/\s(\d+)$/', $r['nom'], $m)) {
-                        $max = max($max, (int)$m[1]);
-                    }
+                    if (preg_match('/\s(\d+)$/', $r['nom'], $m)) $max = max($max, (int)$m[1]);
                 }
                 $start = $max + 1;
 
                 $pdo->beginTransaction();
 
+                // INSERT nominatif (inclut colonnes compteur)
                 $ins = $pdo->prepare("
                     INSERT INTO stock
-                      (nom, quantite_totale, quantite_disponible, categorie, sous_categorie, photo, document, entreprise_id, gestion_mode, maintenance_mode, profil_qr)
+                      (nom, quantite_totale, quantite_disponible, categorie, sous_categorie, photo, document, entreprise_id,
+                       gestion_mode, maintenance_mode, profil_qr, has_hour_meter, hour_meter_initial, hour_meter_unit)
                     VALUES
-                      (?, 1, 0, ?, ?, NULL, NULL, ?, 'nominatif', ?, ?)
+                      (?,   1,               0,                     ?,        ?,              NULL,  NULL,     ?,
+                       'nominatif', ?, ?, ?, ?, 'h')
                 ");
                 $insDepot = $pdo->prepare("
                     INSERT INTO stock_depots (stock_id, depot_id, quantite, entreprise_id) VALUES (?, ?, 1, ?)
@@ -315,7 +312,6 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
                 for ($i = 0; $i < $N; $i++) {
                     $nomUnit = $nom . ' ' . ($start + $i);
 
-                    // crée la ligne
                     $ins->execute([
                         $nomUnit,
                         $categorie,
@@ -323,17 +319,15 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
                         $ENT_ID,
                         $maintenanceMode,
                         $profilQr,
+                        $hasHourMeter,
+                        $hourInit, // partagé à la création
                     ]);
                     $sid = (int)$pdo->lastInsertId();
 
-                    // QR (token + image + champs)
-                    $qrToken   = uuidv4();
-                    $qrPathAbs = generateStockQr(app_base_url(), (int)$ENT_ID, $sid, $qrToken); // ⚠️ ajouter &tab=etat dans le helper
-                    $qrPathWeb = '/stock/qrcodes/' . ((int)$ENT_ID) . "/stock_{$sid}.png";
-                    $pdo->prepare("UPDATE stock SET qr_token = ?, qr_image_path = ? WHERE id = ?")
-                        ->execute([$qrToken, $qrPathWeb, $sid]);
+                    // QR
+                    generate_qr_for_article($sid, $nomUnit);
 
-                    // fichiers (copie du tmp vers dossier de cette ligne)
+                    // Fichiers
                     if ($tmp_doc_abs) {
                         $dir_web = "uploads/documents/articles/{$sid}/";
                         $dir_abs = web_to_abs($dir_web);
@@ -351,25 +345,26 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
                         $pdo->prepare("UPDATE stock SET photo=? WHERE id=?")->execute([$dir_web . $img_name, $sid]);
                     }
 
-                    // met 1 au dépôt + dispo (=1)
+                    // dépôt + dispo = 1
                     $insDepot->execute([$sid, $depotId, $ENT_ID]);
                     $pdo->prepare("UPDATE stock SET quantite_disponible = 1 WHERE id = ?")->execute([$sid]);
-
-                    // QR individuel (helper)
-                    generate_qr_for_article($sid, $nomUnit);
                 }
 
                 $pdo->commit();
-                $success = true;
+
+                // ✅ PRG: flash + redirect => formulaire réinitialisé
+                $_SESSION['flash_success'] = "✅ $N élément(s) créés et ajoutés au dépôt.";
+                header('Location: '.$_SERVER['PHP_SELF'].'?ok=1');
+                exit;
             }
 
-            // Nettoyage des fichiers temporaires
-            if ($tmp_doc_abs && file_exists($tmp_doc_abs)) @unlink($tmp_doc_abs);
-            if ($tmp_img_abs && file_exists($tmp_img_abs)) @unlink($tmp_img_abs);
-        }
-        catch (Throwable $e) {
+        } catch (Throwable $e) {
             if ($pdo->inTransaction()) $pdo->rollBack();
             $errors['general'] = "Erreur lors de l'ajout : " . $e->getMessage();
+        } finally {
+            // Nettoyage des fichiers temporaires
+            if (!empty($tmp_doc_abs) && file_exists($tmp_doc_abs)) @unlink($tmp_doc_abs);
+            if (!empty($tmp_img_abs) && file_exists($tmp_img_abs)) @unlink($tmp_img_abs);
         }
     }
 }
@@ -419,8 +414,8 @@ require_once __DIR__ . '/../templates/navigation/navigation.php';
             <div class="container mt-1">
                 <h1 class="mb-3 text-center">Ajouter un élément au dépôt</h1>
 
-                <?php if ($success): ?>
-                    <div class="alert alert-success text-center">✅ Élément ajouté avec succès au dépôt.</div>
+                <?php if (!empty($flash_success)): ?>
+                    <div class="alert alert-success text-center"><?= $flash_success ?></div>
                 <?php elseif (!empty($errors['general'])): ?>
                     <div class="alert alert-danger text-center"><?= htmlspecialchars($errors['general']) ?></div>
                 <?php endif; ?>
@@ -429,7 +424,7 @@ require_once __DIR__ . '/../templates/navigation/navigation.php';
                     <div class="mb-3">
                         <label for="nom" class="form-label">Nom de l'élément</label>
                         <input type="text" name="nom" id="nom" class="form-control"
-                            value="<?= htmlspecialchars($_POST['nom'] ?? '') ?>">
+                               value="<?= htmlspecialchars($_POST['nom'] ?? '') ?>">
                         <?php if (!empty($errors['nom'])): ?>
                             <div class="alert alert-danger mt-1"><?= $errors['nom'] ?></div>
                         <?php endif; ?>
@@ -438,7 +433,7 @@ require_once __DIR__ . '/../templates/navigation/navigation.php';
                     <div class="mb-3">
                         <label for="quantite" class="form-label">Quantité totale</label>
                         <input type="number" name="quantite" id="quantite" min="0" class="form-control"
-                            value="<?= htmlspecialchars($_POST['quantite'] ?? '') ?>">
+                               value="<?= htmlspecialchars($_POST['quantite'] ?? '') ?>">
                         <?php if (!empty($errors['quantite'])): ?>
                             <div class="alert alert-danger mt-1"><?= $errors['quantite'] ?></div>
                         <?php endif; ?>
@@ -468,6 +463,24 @@ require_once __DIR__ . '/../templates/navigation/navigation.php';
                             <option value="compteur_heures" <?= $sel('compteur_heures') ?>>Machine avec compteur d'heures</option>
                             <option value="autre" <?= $sel('autre') ?>>Autres (déclarer problème/OK)</option>
                         </select>
+                    </div>
+
+                    <!-- 🆕 Bloc compteur initial -->
+                    <div id="hourMeterBlock" class="row g-3 align-items-end" style="display:none;">
+                      <div class="col-12 col-md-6">
+                        <label for="hour_meter_initial" class="form-label">Compteur initial</label>
+                        <div class="input-group">
+                          <input type="number" min="0" step="1" class="form-control"
+                                 id="hour_meter_initial" name="hour_meter_initial"
+                                 value="<?= htmlspecialchars($_POST['hour_meter_initial'] ?? '') ?>"
+                                 placeholder="Ex. 850">
+                          <span class="input-group-text">h</span>
+                        </div>
+                        <div class="form-text">Valeur actuelle de la machine au moment de la création.</div>
+                        <?php if (!empty($errors['hour_meter_initial'])): ?>
+                          <div class="alert alert-danger mt-1"><?= $errors['hour_meter_initial'] ?></div>
+                        <?php endif; ?>
+                      </div>
                     </div>
 
                     <div class="mb-3">

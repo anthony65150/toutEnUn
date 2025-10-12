@@ -231,6 +231,32 @@ document.addEventListener('DOMContentLoaded', () => {
   renderPreview();
 });
 
+document.addEventListener('DOMContentLoaded', function () {
+  const profil = document.getElementById('profil_qr');
+  const block  = document.getElementById('hourMeterBlock');
+  const input  = document.getElementById('hour_meter_initial');
+
+  function toggleHourBlock() {
+    if (!profil || !block) return;
+    const isHour = profil.value === 'compteur_heures';
+    block.style.display = isHour ? '' : 'none';
+    if (input) {
+      if (isHour) input.setAttribute('required', 'required');
+      else { input.removeAttribute('required'); input.value = ''; }
+    }
+  }
+
+  profil?.addEventListener('change', toggleHourBlock);
+  toggleHourBlock();
+
+  // Empêche les valeurs négatives
+  input?.addEventListener('input', () => {
+    const v = parseInt(input.value, 10);
+    if (Number.isNaN(v) || v < 0) input.value = '';
+  });
+});
+
+
 // --- Expose global functions si utilisées par le HTML ---
 window.showNewCategoryInput      = showNewCategoryInput;
 window.toggleNewCategoryInput    = toggleNewCategoryInput;

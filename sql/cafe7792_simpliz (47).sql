@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Hôte : 127.0.0.1
--- Généré le : sam. 04 oct. 2025 à 18:07
+-- Généré le : jeu. 09 oct. 2025 à 21:55
 -- Version du serveur : 10.4.32-MariaDB
 -- Version de PHP : 8.0.30
 
@@ -60,8 +60,21 @@ CREATE TABLE `article_etats` (
   `commentaire` text DEFAULT NULL,
   `fichier` varchar(255) DEFAULT NULL,
   `created_by` int(11) NOT NULL,
+  `alert_id` int(11) DEFAULT NULL,
   `created_at` datetime NOT NULL DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Déchargement des données de la table `article_etats`
+--
+
+INSERT INTO `article_etats` (`id`, `entreprise_id`, `article_id`, `profil_qr`, `action`, `valeur_int`, `commentaire`, `fichier`, `created_by`, `alert_id`, `created_at`) VALUES
+(63, 1, 32, 'compteur_heures', 'declarer_panne', NULL, 'fuite flexible bras', NULL, 4, NULL, '2025-10-09 20:54:29'),
+(64, 1, 32, 'compteur_heures', 'declarer_ok', NULL, 'Alerte #52 résolue', NULL, 3, NULL, '2025-10-09 20:55:03'),
+(65, 1, 32, 'compteur_heures', 'compteur_maj', 1400, NULL, NULL, 3, NULL, '2025-10-09 21:10:25'),
+(66, 1, 32, 'compteur_heures', 'declarer_panne', 1402, 'fuites flexible', 'uploads/etat/20251009_215344_ea72450f3dec.png', 3, NULL, '2025-10-09 21:53:44'),
+(67, 1, 32, 'compteur_heures', 'declarer_panne', NULL, 'fuites flexible', 'uploads/etat/20251009_215344_a0289046db1d.png', 3, NULL, '2025-10-09 21:53:44'),
+(68, 1, 32, 'compteur_heures', 'declarer_ok', NULL, 'Alerte #53 résolue', NULL, 3, NULL, '2025-10-09 21:54:26');
 
 -- --------------------------------------------------------
 
@@ -96,8 +109,8 @@ CREATE TABLE `chantiers` (
 --
 
 INSERT INTO `chantiers` (`id`, `entreprise_id`, `nom`, `adresse`, `trajet_distance_m`, `trajet_duree_s`, `trajet_zone`, `trajet_last_calc`, `adresse_lat`, `adresse_lng`, `description`, `date_debut`, `date_fin`, `etat`, `responsable_id`, `depot_id`, `agence_id`, `created_at`, `updated_at`) VALUES
-(1, 1, 'Bouchait', '57 rue du pic du midi, 65150 saint-paul', 5995, 425, NULL, '2025-09-29 21:53:53', 43.0838391, 0.5017705, '', '2025-09-19', '2025-09-26', 'en_cours', 4, 1, NULL, '2025-07-17 20:27:49', '2025-09-29 21:53:53'),
-(36, 1, 'Piscine Auterive', 'Place du 11 novembre 1918 31190, Auterive', 90873, 3992, NULL, '2025-09-29 21:53:54', 43.3524333, 1.4779796, '', NULL, NULL, 'en_cours', 17, 1, NULL, '2025-09-29 19:00:00', '2025-09-29 21:53:54');
+(1, 1, 'Bouchait', '57 rue du pic du midi, 65150 saint-paul', 5995, 425, NULL, '2025-10-08 21:57:20', 43.0838391, 0.5017705, '', '2025-09-19', '2025-09-26', 'en_cours', 4, 1, NULL, '2025-07-17 20:27:49', '2025-10-08 21:57:20'),
+(36, 1, 'Piscine Auterive', 'Place du 11 novembre 1918 31190, Auterive', 90873, 3992, NULL, '2025-10-08 21:57:17', 43.3524333, 1.4779796, '', NULL, NULL, 'en_cours', 17, 1, NULL, '2025-09-29 19:00:00', '2025-10-08 21:57:17');
 
 -- --------------------------------------------------------
 
@@ -185,6 +198,8 @@ CREATE TABLE `notifications` (
   `entreprise_id` int(10) UNSIGNED NOT NULL,
   `utilisateur_id` int(11) NOT NULL,
   `message` text NOT NULL,
+  `stock_id` int(11) DEFAULT NULL,
+  `is_read` tinyint(1) NOT NULL DEFAULT 0,
   `lu` tinyint(4) NOT NULL DEFAULT 0,
   `created_at` timestamp NOT NULL DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
@@ -193,25 +208,19 @@ CREATE TABLE `notifications` (
 -- Déchargement des données de la table `notifications`
 --
 
-INSERT INTO `notifications` (`id`, `entreprise_id`, `utilisateur_id`, `message`, `lu`, `created_at`) VALUES
-(254, 1, 3, '✅ Le transfert de 1 x Banche 2m40 fhd a été validé par l\'administrateur.', 0, '2025-09-07 19:37:55'),
-(255, 1, 3, '✅ Le transfert de 1 x Banche 2m40 fhd a été validé par l\'administrateur.', 0, '2025-09-07 19:48:25'),
-(256, 1, 3, '✅ Le transfert de 1 x Banche 2m40 a été validé par l\'administrateur.', 0, '2025-09-07 19:49:05'),
-(257, 1, 3, '✅ Le transfert de 1 x Banche 2m40 a été validé par l\'administrateur.', 0, '2025-09-07 19:49:20'),
-(260, 1, 3, '✅ Le transfert de 1 x Banche 2m40 a été validé par l\'administrateur.', 0, '2025-09-07 20:04:12'),
-(272, 1, 3, '✅ Le transfert de 3 x Banche 2m40 a été validé par l\'administrateur.', 0, '2025-09-08 17:47:47'),
-(273, 1, 3, '✅ Le transfert de 10 x banche 2m75 a été validé par l\'administrateur.', 0, '2025-09-08 19:10:25'),
-(274, 1, 3, '✅ Le transfert de 10 x banche 2m75 a été validé par l\'administrateur.', 0, '2025-09-08 19:10:40'),
-(275, 1, 3, '✅ Le transfert de 4 x Banche 2m40 a été validé par l\'administrateur.', 0, '2025-09-08 19:10:51'),
-(278, 1, 4, '✅ Le transfert de 5 x Banche 2m40 a été validé par le dépôt.', 0, '2025-09-08 19:29:08'),
-(280, 1, 6, '❌ Le chantier a refusé le transfert de 1 x Banche 2m40.', 0, '2025-09-08 19:32:05'),
-(281, 1, 3, '❌ Le chantier a refusé le transfert de 1 x Banche 2m40.', 0, '2025-09-08 19:32:39'),
-(282, 1, 4, '❌ Le dépôt a refusé le transfert de 2 x Banche 2m40.', 0, '2025-09-08 19:34:24'),
-(283, 1, 4, '✅ Le transfert de 2 x Banche 2m40 a été validé par le dépôt.', 0, '2025-09-08 19:34:49'),
-(284, 1, 3, '✅ Le transfert de 1 x Banche 2m40 a été validé par l\'administrateur.', 0, '2025-09-20 17:35:33'),
-(285, 1, 3, '✅ Le transfert de 1 x Plateau 3m a été validé par l\'administrateur.', 0, '2025-09-20 17:35:54'),
-(286, 1, 3, '✅ Le transfert de 1 x Banche 2m40 a été validé par l\'administrateur.', 0, '2025-09-20 17:36:26'),
-(287, 1, 3, '✅ Le transfert de 1 x Plateau 3m a été validé par l\'administrateur.', 0, '2025-09-20 17:36:27');
+INSERT INTO `notifications` (`id`, `entreprise_id`, `utilisateur_id`, `message`, `stock_id`, `is_read`, `lu`, `created_at`) VALUES
+(319, 1, 4, '✅ Le transfert de 1 x Mini-pelle 5t a été validé par l\'administrateur.', NULL, 0, 0, '2025-10-06 19:56:53'),
+(320, 1, 4, '⏱️ Relevé d\'heures demandé pour Mini-pelle 5t. Flashez le QR et saisissez le compteur.', 32, 1, 0, '2025-10-06 20:01:01'),
+(321, 1, 6, '⏱️ Relevé d\'heures demandé pour Mini-pelle 5t (envoyé depuis votre dépôt).', 32, 0, 0, '2025-10-06 20:01:01'),
+(322, 1, 3, '✅ Le transfert de 1 x Mini-pelle 5t a été validé par l\'administrateur.', NULL, 0, 0, '2025-10-06 20:07:38'),
+(323, 1, 4, '⏱️ Relevé d\'heures demandé pour Mini-pelle 5t. Flashez le QR et saisissez le compteur.', 32, 1, 0, '2025-10-06 20:08:01'),
+(324, 1, 6, '⏱️ Relevé d\'heures demandé pour Mini-pelle 5t (envoyé depuis votre dépôt).', 32, 0, 0, '2025-10-06 20:08:01'),
+(325, 1, 3, '✅ Le transfert de 1 x Mini-pelle 5t a été validé par l\'administrateur.', NULL, 0, 0, '2025-10-06 20:09:40'),
+(326, 1, 4, '⏱️ Relevé d\'heures demandé pour Mini-pelle 5t. Flashez le QR et saisissez le compteur.', 32, 1, 0, '2025-10-07 17:39:28'),
+(327, 1, 6, '⏱️ Relevé d\'heures demandé pour Mini-pelle 5t (envoyé depuis votre dépôt).', 32, 0, 0, '2025-10-07 17:39:28'),
+(328, 1, 3, '✅ Le transfert de 1 x Mini-pelle 5t a été validé par l\'administrateur.', NULL, 0, 0, '2025-10-07 19:26:53'),
+(329, 1, 4, '⏱️ Relevé d\'heures demandé pour Mini-pelle 5t. Flashez le QR et saisissez le compteur.', 32, 1, 0, '2025-10-07 19:48:56'),
+(330, 1, 6, '⏱️ Relevé d\'heures demandé pour Mini-pelle 5t (envoyé depuis votre dépôt).', 32, 0, 0, '2025-10-07 19:48:56');
 
 -- --------------------------------------------------------
 
@@ -322,7 +331,32 @@ INSERT INTO `planning_affectations` (`id`, `entreprise_id`, `utilisateur_id`, `c
 (864, 1, 17, 36, NULL, '2025-09-30', 'chantier', 'employe', 0.00, NULL, '2025-09-29 19:00:21', 1),
 (865, 1, 17, 36, NULL, '2025-10-01', 'chantier', 'employe', 0.00, NULL, '2025-09-29 19:00:21', 1),
 (866, 1, 17, 36, NULL, '2025-10-02', 'chantier', 'employe', 0.00, NULL, '2025-09-29 19:00:21', 1),
-(867, 1, 17, 36, NULL, '2025-10-03', 'chantier', 'employe', 0.00, NULL, '2025-09-29 19:00:21', 1);
+(867, 1, 17, 36, NULL, '2025-10-03', 'chantier', 'employe', 0.00, NULL, '2025-09-29 19:00:21', 1),
+(868, 1, 17, 36, NULL, '2025-10-06', 'chantier', 'employe', 0.00, NULL, '2025-10-08 19:55:25', 1),
+(869, 1, 17, 36, NULL, '2025-10-07', 'chantier', 'employe', 0.00, NULL, '2025-10-08 19:55:29', 1),
+(870, 1, 17, 36, NULL, '2025-10-08', 'chantier', 'employe', 0.00, NULL, '2025-10-08 19:55:29', 1),
+(871, 1, 17, 36, NULL, '2025-10-09', 'chantier', 'employe', 0.00, NULL, '2025-10-08 19:55:29', 1),
+(872, 1, 17, 36, NULL, '2025-10-10', 'chantier', 'employe', 0.00, NULL, '2025-10-08 19:55:30', 1),
+(873, 1, 16, 1, NULL, '2025-10-06', 'chantier', 'employe', 0.00, NULL, '2025-10-08 19:55:59', 1),
+(874, 1, 16, 1, NULL, '2025-10-07', 'chantier', 'employe', 0.00, NULL, '2025-10-08 19:55:59', 1),
+(875, 1, 16, 1, NULL, '2025-10-08', 'chantier', 'employe', 0.00, NULL, '2025-10-08 19:56:00', 1),
+(876, 1, 16, 1, NULL, '2025-10-09', 'chantier', 'employe', 0.00, NULL, '2025-10-08 19:56:00', 1),
+(877, 1, 16, 1, NULL, '2025-10-10', 'chantier', 'employe', 0.00, NULL, '2025-10-08 19:56:00', 1),
+(878, 1, 4, 1, NULL, '2025-10-10', 'chantier', 'employe', 0.00, NULL, '2025-10-08 19:56:02', 1),
+(879, 1, 4, 1, NULL, '2025-10-09', 'chantier', 'employe', 0.00, NULL, '2025-10-08 19:56:02', 1),
+(880, 1, 4, 1, NULL, '2025-10-08', 'chantier', 'employe', 0.00, NULL, '2025-10-08 19:56:03', 1),
+(881, 1, 4, 1, NULL, '2025-10-06', 'chantier', 'employe', 0.00, NULL, '2025-10-08 19:56:03', 1),
+(882, 1, 4, 1, NULL, '2025-10-07', 'chantier', 'employe', 0.00, NULL, '2025-10-08 19:56:03', 1),
+(883, 1, 6, NULL, NULL, '2025-10-06', 'depot', 'employe', 0.00, NULL, '2025-10-08 19:56:06', 1),
+(884, 1, 6, NULL, NULL, '2025-10-07', 'depot', 'employe', 0.00, NULL, '2025-10-08 19:56:07', 1),
+(885, 1, 6, NULL, NULL, '2025-10-08', 'depot', 'employe', 0.00, NULL, '2025-10-08 19:56:07', 1),
+(886, 1, 6, NULL, NULL, '2025-10-09', 'depot', 'employe', 0.00, NULL, '2025-10-08 19:56:07', 1),
+(887, 1, 6, NULL, NULL, '2025-10-10', 'depot', 'employe', 0.00, NULL, '2025-10-08 19:56:07', 1),
+(889, 1, 8, NULL, NULL, '2025-10-06', 'depot', 'employe', 0.00, NULL, '2025-10-08 19:57:04', 1),
+(890, 1, 8, NULL, NULL, '2025-10-07', 'depot', 'employe', 0.00, NULL, '2025-10-08 19:57:04', 1),
+(891, 1, 8, NULL, NULL, '2025-10-08', 'depot', 'employe', 0.00, NULL, '2025-10-08 19:57:04', 1),
+(892, 1, 8, NULL, NULL, '2025-10-09', 'depot', 'employe', 0.00, NULL, '2025-10-08 19:57:04', 1),
+(893, 1, 8, NULL, NULL, '2025-10-10', 'depot', 'employe', 0.00, NULL, '2025-10-08 19:57:05', 1);
 
 -- --------------------------------------------------------
 
@@ -485,29 +519,66 @@ CREATE TABLE `stock` (
   `sous_categorie` varchar(255) DEFAULT NULL,
   `dimensions` varchar(100) DEFAULT NULL,
   `poids` varchar(50) DEFAULT NULL,
+  `has_hour_meter` tinyint(1) NOT NULL DEFAULT 0,
+  `hour_meter_initial` int(10) UNSIGNED DEFAULT NULL,
+  `maintenance_threshold` int(10) UNSIGNED DEFAULT NULL,
+  `hour_meter_unit` enum('h') NOT NULL DEFAULT 'h',
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
   `depot_id` int(11) DEFAULT NULL,
   `photo` varchar(255) DEFAULT NULL,
   `document` varchar(255) DEFAULT NULL,
   `gestion_mode` enum('anonyme','nominatif') NOT NULL DEFAULT 'anonyme',
   `maintenance_mode` enum('none','hour_meter','electrical') NOT NULL DEFAULT 'none',
+  `profil_qr` enum('aucun','compteur_heures','autre') NOT NULL DEFAULT 'aucun',
   `qr_image_path` varchar(255) DEFAULT NULL,
   `compteur_heures` int(11) DEFAULT NULL,
-  `panne` tinyint(1) NOT NULL DEFAULT 0
+  `panne` tinyint(1) NOT NULL DEFAULT 0,
+  `panne_message` text DEFAULT NULL,
+  `panne_reported_at` datetime DEFAULT NULL,
+  `panne_reported_by` int(11) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --
 -- Déchargement des données de la table `stock`
 --
 
-INSERT INTO `stock` (`id`, `qr_token`, `has_qrcode`, `entreprise_id`, `nom`, `quantite_totale`, `quantite_disponible`, `categorie`, `sous_categorie`, `dimensions`, `poids`, `created_at`, `depot_id`, `photo`, `document`, `gestion_mode`, `maintenance_mode`, `qr_image_path`, `compteur_heures`, `panne`) VALUES
-(2, 'b8393f984687c4b21641f01160497f12', 1, 1, 'banche 2m75', 24, 24, 'Banches', 'Manuportables', NULL, NULL, '2025-07-17 20:31:41', NULL, 'uploads/photos/articles/2/68acb990e8a8e5.25520685.jpg', NULL, 'anonyme', 'none', NULL, NULL, 0),
-(10, 'cd15a6380c640100987dba4bd52433bd', 1, 1, 'Piqueur', 23, 23, 'Electroportatif', 'Piquage', NULL, NULL, '2025-07-27 21:08:02', NULL, 'uploads/photos/articles/10/68a6d2139ffb16.19401476.jpg', NULL, 'anonyme', 'none', NULL, NULL, 0),
-(11, '0a14bc399f1434684f839ea87773da75', 1, 1, 'Banche 2m40', 20, 20, 'Banches', 'Metalique', NULL, NULL, '2025-08-19 08:56:10', NULL, 'uploads/photos/articles/11/68a70b96268571.58204439.jpg', NULL, 'anonyme', 'none', NULL, NULL, 0),
-(12, '606e0a13e326589f79cd377c8a427793', 1, 1, 'Element blanc', 100, 100, 'Peri', NULL, NULL, NULL, '2025-08-21 17:02:15', NULL, 'uploads/photos/articles/12/68a751c0846558.19603577.png', NULL, 'anonyme', 'none', NULL, NULL, 0),
-(15, '34bf02274c49dc046164b27146ac470b', 1, 1, 'Plateau 3m', 100, 100, 'Echafaudage', '3m', NULL, NULL, '2025-09-07 10:13:23', NULL, NULL, NULL, 'anonyme', 'none', NULL, NULL, 0),
-(19, '40f8ce1f-cbe1-4b2d-94d5-9791bb60e78a', 0, 1, 'Bungalow 1', 1, 1, 'Bungalow', 'Vestiaire', NULL, NULL, '2025-10-02 19:31:16', NULL, NULL, NULL, 'nominatif', 'none', '/qrcodes/1/stock_19.png', NULL, 0),
-(20, 'f5b5992c-baa8-4eab-b3a2-2884e9461231', 0, 1, 'Bungalow 2', 1, 1, 'Bungalow', 'Vestiaire', NULL, NULL, '2025-10-02 19:31:16', NULL, NULL, NULL, 'nominatif', 'none', '/qrcodes/1/stock_20.png', NULL, 0);
+INSERT INTO `stock` (`id`, `qr_token`, `has_qrcode`, `entreprise_id`, `nom`, `quantite_totale`, `quantite_disponible`, `categorie`, `sous_categorie`, `dimensions`, `poids`, `has_hour_meter`, `hour_meter_initial`, `maintenance_threshold`, `hour_meter_unit`, `created_at`, `depot_id`, `photo`, `document`, `gestion_mode`, `maintenance_mode`, `profil_qr`, `qr_image_path`, `compteur_heures`, `panne`, `panne_message`, `panne_reported_at`, `panne_reported_by`) VALUES
+(2, '23755665aeb88483dad50b4cb8f06ccd', 1, 1, 'banche 2m75', 24, 24, 'Banches', 'Manuportables', NULL, NULL, 0, NULL, NULL, 'h', '2025-07-17 20:31:41', NULL, 'uploads/photos/articles/2/68acb990e8a8e5.25520685.jpg', NULL, 'anonyme', 'none', 'aucun', '/stock/qrcodes/1/stock_2.png', NULL, 0, NULL, NULL, NULL),
+(10, 'cd15a6380c640100987dba4bd52433bd', 1, 1, 'Piqueur', 23, 23, 'Electroportatif', 'Piquage', NULL, NULL, 0, NULL, NULL, 'h', '2025-07-27 21:08:02', NULL, 'uploads/photos/articles/10/68a6d2139ffb16.19401476.jpg', NULL, 'anonyme', 'none', 'aucun', NULL, NULL, 0, NULL, NULL, NULL),
+(11, '08414b741ac5a29f1f5a80f548e499f9', 1, 1, 'Banche 2m40', 20, 20, 'Banches', 'Metalique', NULL, NULL, 0, NULL, NULL, 'h', '2025-08-19 08:56:10', NULL, 'uploads/photos/articles/11/68a70b96268571.58204439.jpg', NULL, 'anonyme', 'none', 'aucun', '/stock/qrcodes/1/stock_11.png', NULL, 0, NULL, NULL, NULL),
+(12, '606e0a13e326589f79cd377c8a427793', 1, 1, 'Element blanc', 100, 100, 'Peri', NULL, NULL, NULL, 0, NULL, NULL, 'h', '2025-08-21 17:02:15', NULL, 'uploads/photos/articles/12/68a751c0846558.19603577.png', NULL, 'anonyme', 'none', 'aucun', NULL, NULL, 0, NULL, NULL, NULL),
+(15, '29c117bcadb11d2cafc5560d86df49d3', 1, 1, 'Plateau 3m', 100, 100, 'Echafaudage', '3m', NULL, NULL, 0, NULL, NULL, 'h', '2025-09-07 10:13:23', NULL, NULL, NULL, 'anonyme', 'none', 'aucun', NULL, NULL, 0, NULL, NULL, NULL),
+(25, 'f603ee8b4f8ee10d27e8f179cadc5497', 1, 1, 'Bungalow vestiaire 1', 1, 1, 'Bungalow', 'Vestiaire', NULL, NULL, 0, 0, NULL, 'h', '2025-10-04 17:01:58', NULL, NULL, NULL, 'nominatif', 'electrical', 'autre', '/stock/qrcodes/1/stock_25.png', NULL, 0, 'fuites', '2025-10-05 14:19:54', 3),
+(26, '5adf49f6ecaa44896bb817975727d161', 1, 1, 'Bungalow vestiaire 2', 1, 1, 'Bungalow', 'Vestiaire', NULL, NULL, 0, NULL, NULL, 'h', '2025-10-04 17:01:58', NULL, NULL, NULL, 'nominatif', 'electrical', 'autre', '/stock/qrcodes/1/stock_26.png', NULL, 0, NULL, NULL, NULL),
+(32, '6fa06aa3-c15d-430c-ab2c-4cd050d0d3ef', 0, 1, 'Mini-pelle 5t', 1, 1, 'Pelle', '5t', NULL, NULL, 1, 1300, NULL, 'h', '2025-10-05 19:44:30', NULL, NULL, NULL, 'nominatif', 'hour_meter', 'compteur_heures', '/stock/qrcodes/1/stock_32.png', 1402, 0, NULL, NULL, NULL);
+
+-- --------------------------------------------------------
+
+--
+-- Structure de la table `stock_alerts`
+--
+
+CREATE TABLE `stock_alerts` (
+  `id` int(11) NOT NULL,
+  `entreprise_id` int(11) DEFAULT NULL,
+  `stock_id` int(11) NOT NULL,
+  `type` enum('incident') NOT NULL DEFAULT 'incident',
+  `message` text NOT NULL,
+  `url` varchar(255) DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT current_timestamp(),
+  `archived_at` datetime DEFAULT NULL,
+  `archived_by` int(11) DEFAULT NULL,
+  `is_read` tinyint(1) NOT NULL DEFAULT 0
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Déchargement des données de la table `stock_alerts`
+--
+
+INSERT INTO `stock_alerts` (`id`, `entreprise_id`, `stock_id`, `type`, `message`, `url`, `created_at`, `archived_at`, `archived_by`, `is_read`) VALUES
+(52, 1, 32, 'incident', 'fuite flexible bras', 'problem', '2025-10-09 20:54:29', '2025-10-09 20:55:03', NULL, 1),
+(53, 1, 32, 'incident', 'fuites flexible', 'problem', '2025-10-09 21:53:44', '2025-10-09 21:54:26', NULL, 1),
+(54, 1, 32, 'incident', 'fuites flexible', 'problem', '2025-10-09 21:53:44', '2025-10-09 21:54:23', 3, 0);
 
 -- --------------------------------------------------------
 
@@ -531,7 +602,9 @@ CREATE TABLE `stock_chantiers` (
 INSERT INTO `stock_chantiers` (`id`, `entreprise_id`, `chantier_id`, `stock_id`, `quantite`, `created_at`) VALUES
 (39, 1, 1, 11, 0, '2025-09-07 19:37:55'),
 (48, 1, 1, 2, 0, '2025-09-08 19:10:25'),
-(49, 1, 1, 15, 0, '2025-09-20 17:35:54');
+(49, 1, 1, 15, 0, '2025-09-20 17:35:54'),
+(50, 1, 1, 25, 1, '2025-10-05 15:21:16'),
+(52, 1, 1, 32, 1, '2025-10-05 19:45:27');
 
 -- --------------------------------------------------------
 
@@ -560,8 +633,9 @@ INSERT INTO `stock_depots` (`id`, `entreprise_id`, `depot_id`, `stock_id`, `quan
 (14, 1, 2, 12, 0),
 (17, 1, 2, 2, 0),
 (19, 1, 1, 15, 100),
-(22, 1, 1, 19, 1),
-(23, 1, 1, 20, 1);
+(28, 1, 1, 25, 0),
+(29, 1, 1, 26, 1),
+(35, 1, 1, 32, 0);
 
 -- --------------------------------------------------------
 
@@ -582,6 +656,43 @@ CREATE TABLE `stock_documents` (
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
   `updated_at` timestamp NULL DEFAULT NULL ON UPDATE current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- --------------------------------------------------------
+
+--
+-- Structure de la table `stock_hour_logs`
+--
+
+CREATE TABLE `stock_hour_logs` (
+  `id` int(11) NOT NULL,
+  `stock_id` int(11) NOT NULL,
+  `chantier_id` int(11) DEFAULT NULL,
+  `utilisateur_id` int(11) DEFAULT NULL,
+  `hours` int(10) UNSIGNED NOT NULL,
+  `source` enum('admin','depot','chef','qr') NOT NULL DEFAULT 'qr',
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp()
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+--
+-- Déchargement des données de la table `stock_hour_logs`
+--
+
+INSERT INTO `stock_hour_logs` (`id`, `stock_id`, `chantier_id`, `utilisateur_id`, `hours`, `source`, `created_at`) VALUES
+(5, 32, NULL, 3, 1000, 'admin', '2025-10-06 19:31:09'),
+(6, 32, NULL, 3, 1010, 'admin', '2025-10-06 19:31:19'),
+(7, 32, NULL, 3, 1010, 'admin', '2025-10-06 19:31:23'),
+(8, 32, NULL, 3, 850, 'admin', '2025-10-06 19:31:49'),
+(9, 32, 1, 4, 852, 'chef', '2025-10-06 20:01:17'),
+(10, 32, 1, 4, 853, 'chef', '2025-10-07 18:28:52'),
+(11, 32, NULL, 3, 1000, 'admin', '2025-10-07 18:29:20'),
+(12, 32, NULL, 3, 850, 'admin', '2025-10-07 18:29:37'),
+(13, 32, NULL, 3, 999, 'admin', '2025-10-07 19:27:11'),
+(14, 32, NULL, 3, 1150, 'admin', '2025-10-07 19:48:02'),
+(15, 32, 1, 4, 1300, 'chef', '2025-10-07 19:49:04'),
+(16, 32, NULL, 3, 1300, 'admin', '2025-10-08 19:29:08'),
+(17, 32, NULL, 3, 1350, 'admin', '2025-10-09 18:47:26'),
+(18, 32, NULL, 3, 1400, 'admin', '2025-10-09 19:10:25'),
+(19, 32, NULL, 3, 1402, 'admin', '2025-10-09 19:53:44');
 
 -- --------------------------------------------------------
 
@@ -630,7 +741,37 @@ INSERT INTO `stock_mouvements` (`id`, `entreprise_id`, `stock_id`, `type`, `sour
 (141, 1, 11, 'transfert', 'depot', 1, 'chantier', 1, 1, 'valide', NULL, 3, 3, '2025-09-20 19:35:33'),
 (142, 1, 15, 'transfert', 'depot', 1, 'chantier', 1, 1, 'valide', NULL, 3, 3, '2025-09-20 19:35:54'),
 (143, 1, 11, 'transfert', 'chantier', 1, 'depot', 1, 1, 'valide', NULL, 3, 3, '2025-09-20 19:36:26'),
-(144, 1, 15, 'transfert', 'chantier', 1, 'depot', 1, 1, 'valide', NULL, 3, 3, '2025-09-20 19:36:27');
+(144, 1, 15, 'transfert', 'chantier', 1, 'depot', 1, 1, 'valide', NULL, 3, 3, '2025-09-20 19:36:27'),
+(145, 1, 25, 'transfert', 'depot', 1, 'chantier', 1, 1, 'valide', NULL, 3, 3, '2025-10-05 17:21:16'),
+(153, 1, 32, 'transfert', 'depot', 1, 'chantier', 1, 1, 'valide', NULL, 3, 4, '2025-10-05 21:45:27'),
+(154, 1, 32, 'transfert', 'chantier', 1, 'depot', 1, 1, 'valide', NULL, 4, 3, '2025-10-05 21:49:59'),
+(155, 1, 32, 'transfert', 'depot', 1, 'chantier', 1, 1, 'valide', NULL, 3, 4, '2025-10-05 21:50:22'),
+(156, 1, 32, 'transfert', 'chantier', 1, 'depot', 1, 1, 'valide', NULL, 3, 3, '2025-10-05 21:52:52'),
+(157, 1, 32, 'transfert', 'depot', 1, 'chantier', 1, 1, 'valide', NULL, 3, 4, '2025-10-05 21:53:20'),
+(158, 1, 32, 'transfert', 'chantier', 1, 'depot', 1, 1, 'valide', NULL, 4, 3, '2025-10-05 21:55:25'),
+(159, 1, 32, 'transfert', 'depot', 1, 'chantier', 1, 1, 'valide', NULL, 3, 4, '2025-10-05 21:56:15'),
+(160, 1, 32, 'transfert', 'chantier', 1, 'depot', 1, 1, 'valide', NULL, 3, 3, '2025-10-05 21:57:56'),
+(161, 1, 32, 'transfert', 'depot', 1, 'chantier', 1, 1, 'valide', NULL, 3, 4, '2025-10-05 22:00:12'),
+(162, 1, 32, 'transfert', 'chantier', 1, 'depot', 1, 1, 'valide', NULL, 4, 3, '2025-10-05 22:00:55'),
+(163, 1, 32, 'transfert', 'depot', 1, 'chantier', 1, 1, 'valide', NULL, 3, 4, '2025-10-05 22:01:32'),
+(164, 1, 32, 'transfert', 'chantier', 1, 'depot', 1, 1, 'valide', NULL, 4, 3, '2025-10-05 22:04:58'),
+(165, 1, 32, 'transfert', 'depot', 1, 'chantier', 1, 1, 'valide', NULL, 3, 4, '2025-10-05 22:14:27'),
+(166, 1, 32, 'transfert', 'chantier', 1, 'depot', 1, 1, 'valide', NULL, 4, 6, '2025-10-05 22:14:50'),
+(167, 1, 32, 'transfert', 'depot', 1, 'chantier', 1, 1, 'valide', NULL, 6, 4, '2025-10-05 22:15:40'),
+(168, 1, 32, 'transfert', 'chantier', 1, 'depot', 1, 1, 'valide', NULL, 3, 3, '2025-10-06 21:09:51'),
+(169, 1, 32, 'transfert', 'depot', 1, 'chantier', 1, 1, 'valide', NULL, 3, 4, '2025-10-06 21:10:14'),
+(170, 1, 32, 'transfert', 'chantier', 1, 'depot', 1, 1, 'valide', NULL, 3, 6, '2025-10-06 21:24:51'),
+(171, 1, 32, 'transfert', 'depot', 1, 'chantier', 1, 1, 'valide', NULL, 3, 4, '2025-10-06 21:26:19'),
+(172, 1, 32, 'transfert', 'chantier', 1, 'depot', 1, 1, 'valide', NULL, 4, 6, '2025-10-06 21:34:14'),
+(173, 1, 32, 'transfert', 'depot', 1, 'chantier', 1, 1, 'valide', NULL, 6, 4, '2025-10-06 21:37:19'),
+(174, 1, 32, 'transfert', 'chantier', 1, 'depot', 1, 1, 'valide', NULL, 4, 3, '2025-10-06 21:56:53'),
+(175, 1, 32, 'transfert', 'depot', 1, 'chantier', 1, 1, 'valide', NULL, 6, 4, '2025-10-06 22:01:01'),
+(176, 1, 32, 'transfert', 'chantier', 1, 'depot', 1, 1, 'valide', NULL, 3, 3, '2025-10-06 22:07:38'),
+(177, 1, 32, 'transfert', 'depot', 1, 'chantier', 1, 1, 'valide', NULL, 3, 4, '2025-10-06 22:08:01'),
+(178, 1, 32, 'transfert', 'chantier', 1, 'depot', 1, 1, 'valide', NULL, 3, 3, '2025-10-06 22:09:40'),
+(179, 1, 32, 'transfert', 'depot', 1, 'chantier', 1, 1, 'valide', NULL, 3, 4, '2025-10-07 19:39:28'),
+(180, 1, 32, 'transfert', 'chantier', 1, 'depot', 1, 1, 'valide', NULL, 3, 3, '2025-10-07 21:26:53'),
+(181, 1, 32, 'transfert', 'depot', 1, 'chantier', 1, 1, 'valide', NULL, 3, 4, '2025-10-07 21:48:56');
 
 -- --------------------------------------------------------
 
@@ -719,7 +860,8 @@ ALTER TABLE `agences`
 -- Index pour la table `article_etats`
 --
 ALTER TABLE `article_etats`
-  ADD PRIMARY KEY (`id`);
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `idx_alert_id` (`alert_id`);
 
 --
 -- Index pour la table `chantiers`
@@ -761,7 +903,8 @@ ALTER TABLE `entreprises`
 ALTER TABLE `notifications`
   ADD PRIMARY KEY (`id`),
   ADD KEY `utilisateur_id` (`utilisateur_id`),
-  ADD KEY `idx_notif_entreprise` (`entreprise_id`);
+  ADD KEY `idx_notif_entreprise` (`entreprise_id`),
+  ADD KEY `idx_notifications_stock_id` (`stock_id`);
 
 --
 -- Index pour la table `planning_affectations`
@@ -834,6 +977,12 @@ ALTER TABLE `stock`
   ADD KEY `idx_stock_entreprise` (`entreprise_id`);
 
 --
+-- Index pour la table `stock_alerts`
+--
+ALTER TABLE `stock_alerts`
+  ADD PRIMARY KEY (`id`);
+
+--
 -- Index pour la table `stock_chantiers`
 --
 ALTER TABLE `stock_chantiers`
@@ -862,6 +1011,15 @@ ALTER TABLE `stock_documents`
   ADD KEY `idx_checksum` (`checksum_sha1`),
   ADD KEY `fk_stock_documents_user` (`uploaded_by`),
   ADD KEY `idx_sdocs_entreprise` (`entreprise_id`);
+
+--
+-- Index pour la table `stock_hour_logs`
+--
+ALTER TABLE `stock_hour_logs`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `stock_id` (`stock_id`),
+  ADD KEY `chantier_id` (`chantier_id`),
+  ADD KEY `utilisateur_id` (`utilisateur_id`);
 
 --
 -- Index pour la table `stock_mouvements`
@@ -912,7 +1070,7 @@ ALTER TABLE `agences`
 -- AUTO_INCREMENT pour la table `article_etats`
 --
 ALTER TABLE `article_etats`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=69;
 
 --
 -- AUTO_INCREMENT pour la table `chantiers`
@@ -942,13 +1100,13 @@ ALTER TABLE `entreprises`
 -- AUTO_INCREMENT pour la table `notifications`
 --
 ALTER TABLE `notifications`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=288;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=331;
 
 --
 -- AUTO_INCREMENT pour la table `planning_affectations`
 --
 ALTER TABLE `planning_affectations`
-  MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=868;
+  MODIFY `id` int(10) UNSIGNED NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=894;
 
 --
 -- AUTO_INCREMENT pour la table `pointages_absences`
@@ -984,19 +1142,25 @@ ALTER TABLE `pointages_taches`
 -- AUTO_INCREMENT pour la table `stock`
 --
 ALTER TABLE `stock`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=21;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=33;
+
+--
+-- AUTO_INCREMENT pour la table `stock_alerts`
+--
+ALTER TABLE `stock_alerts`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=55;
 
 --
 -- AUTO_INCREMENT pour la table `stock_chantiers`
 --
 ALTER TABLE `stock_chantiers`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=50;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=53;
 
 --
 -- AUTO_INCREMENT pour la table `stock_depots`
 --
 ALTER TABLE `stock_depots`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=24;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=36;
 
 --
 -- AUTO_INCREMENT pour la table `stock_documents`
@@ -1005,16 +1169,22 @@ ALTER TABLE `stock_documents`
   MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=9;
 
 --
+-- AUTO_INCREMENT pour la table `stock_hour_logs`
+--
+ALTER TABLE `stock_hour_logs`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=20;
+
+--
 -- AUTO_INCREMENT pour la table `stock_mouvements`
 --
 ALTER TABLE `stock_mouvements`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=145;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=182;
 
 --
 -- AUTO_INCREMENT pour la table `transferts_en_attente`
 --
 ALTER TABLE `transferts_en_attente`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=287;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=324;
 
 --
 -- AUTO_INCREMENT pour la table `utilisateurs`
@@ -1060,6 +1230,7 @@ ALTER TABLE `depots`
 --
 ALTER TABLE `notifications`
   ADD CONSTRAINT `fk_notif_entreprise` FOREIGN KEY (`entreprise_id`) REFERENCES `entreprises` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  ADD CONSTRAINT `fk_notifications_stock` FOREIGN KEY (`stock_id`) REFERENCES `stock` (`id`) ON DELETE SET NULL,
   ADD CONSTRAINT `notifications_ibfk_1` FOREIGN KEY (`utilisateur_id`) REFERENCES `utilisateurs` (`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
 --
@@ -1105,6 +1276,12 @@ ALTER TABLE `stock_documents`
   ADD CONSTRAINT `fk_sdocs_entreprise` FOREIGN KEY (`entreprise_id`) REFERENCES `entreprises` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
   ADD CONSTRAINT `fk_stock_documents_stock` FOREIGN KEY (`stock_id`) REFERENCES `stock` (`id`) ON DELETE CASCADE,
   ADD CONSTRAINT `fk_stock_documents_user` FOREIGN KEY (`uploaded_by`) REFERENCES `utilisateurs` (`id`) ON DELETE SET NULL;
+
+--
+-- Contraintes pour la table `stock_hour_logs`
+--
+ALTER TABLE `stock_hour_logs`
+  ADD CONSTRAINT `fk_shl_stock` FOREIGN KEY (`stock_id`) REFERENCES `stock` (`id`) ON DELETE CASCADE;
 
 --
 -- Contraintes pour la table `stock_mouvements`

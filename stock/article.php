@@ -174,6 +174,37 @@ $isChef  = $isLoggedIn && (($_SESSION['utilisateurs']['fonction'] ?? '') === 'ch
 $qrSimpleMode = ($isQrView && !$isLoggedIn);
 
 /* ================================
+   Heures compteur : variables dédiées
+================================ */
+$maintenanceMode = $article['maintenance_mode'] ?? 'none';
+$qrTokenForPost  = (string)($article['qr_token'] ?? '');
+
+$hasHourMeter = ((int)($article['has_hour_meter'] ?? 0) === 1)
+    || ($maintenanceMode === 'hour_meter')
+    || (($article['profil_qr'] ?? '') === 'compteur_heures');
+
+$hourUnit = ($article['hour_meter_unit'] ?? 'h') ?: 'h';
+$hourInit = isset($article['hour_meter_initial']) ? (int)$article['hour_meter_initial'] : 0;
+
+// Dernier relevé global
+$lastHours = $hourInit;
+try {
+    $stH = $pdo->prepare("SELECT hours FROM stock_hour_logs WHERE stock_id=? ORDER BY created_at DESC, id DESC LIMIT 1");
+    $stH->execute([$articleId]);
+    $h = $stH->fetchColumn();
+    if ($h !== false) $lastHours = (int)$h;
+} catch (Throwable $e) {
+}
+
+$contextChantier = ($chantierId > 0) ? $chantierId : null;
+if ($isChef && !$contextChantier) {
+    // Si le chef n’a pas ?chantier_id, on prend son premier chantier
+    $stC = $pdo->prepare("SELECT chantier_id FROM utilisateur_chantiers WHERE utilisateur_id=? ORDER BY chantier_id ASC LIMIT 1");
+    $stC->execute([$userId]);
+    $contextChantier = (int)($stC->fetchColumn() ?: 0) ?: null;
+}
+
+/* ================================
    2) QUANTITÉS
 ================================ */
 try {
@@ -486,38 +517,34 @@ function label_validateur(array $row): string
     return htmlspecialchars($prenom . $suffix);
 }
 
-/* ================================
-   Entretien / incidents (nouveau)
-================================ */
-$maintenanceMode = $article['maintenance_mode'] ?? 'none';
-$qrTokenForPost  = (string)($article['qr_token'] ?? '');
+// Actions (article_etats)
+$etatLogs = [];
+$st = $pdo->prepare("
+  SELECT id, profil_qr, action, valeur_int, commentaire, fichier, created_by, created_at
+  FROM article_etats
+  WHERE article_id = :sid " . ($ENT_ID ? " AND entreprise_id=:eid " : "") . "
+  ORDER BY created_at DESC, id DESC
+  LIMIT 200
+");
+$p = [':sid' => $articleId];
+if ($ENT_ID) $p[':eid'] = $ENT_ID;
+$st->execute($p);
+$etatLogs = $st->fetchAll(PDO::FETCH_ASSOC);
 
-/* Toutes les alertes pour cet article (y compris archivées) */
-$alerts = [];
-try {
-    $q = $pdo->prepare("
-        SELECT a.id,
-               a.message,
-               a.is_read,
-               a.created_at,
-               a.archived_at,         -- << NEW: on récupère l’archivage
-               a.archived_by          -- << NEW: si tu veux afficher qui a archivé
-        FROM stock_alerts a
-        JOIN stock s ON s.id = a.stock_id
-        WHERE a.stock_id = :sid
-          " . ($ENT_ID ? " AND s.entreprise_id = :eid " : "") . "
-        ORDER BY
-          (a.archived_at IS NULL) DESC,   -- d’abord non archivées
-          a.is_read ASC,                  -- non lues puis lues
-          a.created_at DESC, a.id DESC
-    ");
-    $params = [':sid' => $articleId];
-    if ($ENT_ID) $params[':eid'] = $ENT_ID;
-    $q->execute($params);
-    $alerts = $q->fetchAll(PDO::FETCH_ASSOC);
-} catch (Throwable $e) {
-    $alerts = [];
-}
+// Alertes archivées
+$archivedAlerts = [];
+$st = $pdo->prepare("
+  SELECT id, type, url, message, created_at, archived_at, archived_by
+  FROM stock_alerts
+  WHERE stock_id = :sid
+    AND archived_at IS NOT NULL
+    AND type IN ('incident','maintenance')
+  ORDER BY archived_at DESC, created_at DESC, id DESC
+  LIMIT 200
+");
+$st->execute([':sid' => $articleId]);
+$archivedAlerts = $st->fetchAll(PDO::FETCH_ASSOC);
+
 ?>
 
 <?php if ($qrSimpleMode): ?>
@@ -545,17 +572,18 @@ try {
             </div>
         </div>
 
-        <?php if ($maintenanceMode === 'hour_meter'): ?>
+        <?php if ($maintenanceMode === 'hour_meter' || $hasHourMeter): ?>
             <div class="card mb-3">
                 <div class="card-body">
                     <h5 class="mb-2">Relevé compteur (heures)</h5>
                     <form class="row g-2" id="formHourQR">
                         <input type="hidden" name="action" value="hour_meter">
                         <input type="hidden" name="stock_id" value="<?= (int)$articleId ?>">
-                        <div class="col-auto"><input type="number" min="0" step="1" class="form-control" name="hours" value="<?= (int)($article['compteur_heures'] ?? 0) ?>"></div>
+                        <!-- Prérempli avec la valeur initiale -->
+                        <div class="col-auto"><input type="number" min="0" step="1" class="form-control" name="hours" value="<?= $hourInit ?>"></div>
                         <div class="col-auto"><button class="btn btn-primary">Enregistrer</button></div>
                     </form>
-                    <small class="text-muted d-block mt-2">Dernier relevé: <?= (int)($article['compteur_heures'] ?? 0) ?> h</small>
+                    <small class="text-muted d-block mt-2">Dernier relevé: <?= $hourInit ?> <?= htmlspecialchars($hourUnit) ?></small>
                     <div id="declareMsgQR" class="alert d-none mt-2"></div>
                 </div>
             </div>
@@ -566,7 +594,6 @@ try {
                     <div>
                         État :
                         <?php
-                        // << NEW: un “problème” signifie une alerte NON ARCHIVÉE et NON LUE
                         $hasOpen = false;
                         foreach ($alerts as $a) {
                             if (empty($a['archived_at']) && (int)$a['is_read'] === 0) {
@@ -619,7 +646,7 @@ try {
                     <button class="btn btn-danger w-100 mt-3" data-bs-toggle="modal" data-bs-target="#declareModal">
                         Déclarer un problème
                     </button>
-                    <div id="resolveMsg" class="alert d-none mt-2"></div>
+                    <div id="declareMsgQR" class="alert d-none mt-2"></div>
                 </div>
             </div>
         <?php endif; ?>
@@ -832,8 +859,14 @@ try {
             <button class="nav-link" id="files-tab" data-bs-toggle="tab" data-bs-target="#files" type="button" role="tab">Documents</button>
         </li>
         <li class="nav-item" role="presentation">
-            <button class="nav-link" id="history-tab" data-bs-toggle="tab" data-bs-target="#history" type="button" role="tab">Historique</button>
+            <button class="nav-link" id="history-tab" data-bs-toggle="tab" data-bs-target="#history" type="button" role="tab">Historique des transferts</button>
         </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#etatlog" type="button" role="tab">
+                Historique des états
+            </button>
+        </li>
+
     </ul>
 
     <div class="tab-content" id="articleTabContent">
@@ -849,35 +882,210 @@ try {
                     <li class="list-group-item">Fournisseur : <?= htmlspecialchars($article['fournisseur'] ?? '-') ?></li>
                 </ul>
 
-                <!-- ===== Entretien (nouveau) ===== -->
-                <?php if ($maintenanceMode !== 'none'): ?>
+                <?php
+                // Charge toutes les alertes non archivées de l’article (incidents + entretien)
+                $alerts = [];
+                try {
+                    $qa = $pdo->prepare("
+  SELECT a.id, a.type, a.message, a.is_read, a.created_at, a.url, a.archived_at,
+         /* récupère la dernière pièce jointe liée à cette alerte */
+         (
+           SELECT ae.fichier
+           FROM article_etats ae
+           WHERE ae.alert_id = a.id
+           ORDER BY ae.id DESC
+           LIMIT 1
+         ) AS alert_file
+  FROM stock_alerts a
+  WHERE a.stock_id = :sid
+    AND a.archived_at IS NULL
+    AND a.type IN ('incident','maintenance')
+  ORDER BY a.created_at DESC, a.id DESC
+");
+
+
+                    $qa->execute([':sid' => $articleId]);
+                    $alerts = $qa->fetchAll(PDO::FETCH_ASSOC);
+                } catch (Throwable $e) {
+                    $alerts = [];
+                }
+
+                // PANNE s’il existe au moins 1 incident non archivé (peu importe url)
+                $hasOpenIncident = false;
+                foreach ($alerts as $a) {
+                    if (($a['type'] ?? '') === 'incident') {
+                        $hasOpenIncident = true;
+                        break;
+                    }
+                }
+                $etatLabel = $hasOpenIncident ? 'PANNE' : 'OK';
+                $etatClass = $hasOpenIncident ? 'bg-danger' : 'bg-success';
+                ?>
+
+
+                <!-- ===== Entretien (compteur/état) ===== -->
+                <?php if ($maintenanceMode !== 'none' || $hasHourMeter): ?>
                     <hr>
                     <h6 class="fw-bold mt-3">Entretien</h6>
+                    <?php
+                    $renderAlertAttachment = function (?string $filePath) {
+                        if (!$filePath) return '';
+                        $url = '/' . ltrim($filePath, '/');
+                        $ext = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
+                        if (in_array($ext, ['jpg', 'jpeg', 'png', 'webp'], true)) {
+                            return '<a href="' . htmlspecialchars($url) . '" target="_blank" rel="noopener">
+                  <img src="' . htmlspecialchars($url) . '" alt="pièce jointe"
+                       style="max-width:70px; max-height:70px; border-radius:6px; margin-top:.25rem;"/>
+                </a>';
+                        }
+                        if ($ext === 'pdf') {
+                            return '<div class="mt-1"><a href="' . htmlspecialchars($url) . '" target="_blank" rel="noopener">Voir le PDF</a></div>';
+                        }
+                        return '<div class="mt-1"><a href="' . htmlspecialchars($url) . '" target="_blank" rel="noopener">Voir le fichier</a></div>';
+                    };
+                    ?>
 
-                    <?php if ($maintenanceMode === 'hour_meter'): ?>
-                        <div>Compteur: <strong><?= (int)($article['compteur_heures'] ?? 0) ?> h</strong></div>
-                        <?php if ($isAdmin || $isDepot): ?>
+
+                    <?php if ($maintenanceMode === 'hour_meter' || $hasHourMeter): ?>
+
+                        <div>État :
+                            <span class="badge <?= $etatClass ?>" data-article-etat-badge><?= $etatLabel ?></span>
+                        </div>
+
+                        <?php
+                        // Incidents utilisateur uniquement
+                        $alertsProblems = array_filter(
+                            $alerts,
+                            fn($a) => ($a['type'] ?? '') === 'incident' && (($a['url'] ?? '') === 'problem')
+                        );
+                        ?>
+
+                        <?php if (!empty($alertsProblems)): ?>
+                            <ul class="list-group list-group-flush mt-2" id="alertsProblemsList">
+                                <?php
+                                // Aperçu PJ (image miniature / lien PDF)
+                                $renderAlertAttachment = function (?string $filePath) {
+                                    if (!$filePath) return '';
+                                    $url = '/' . ltrim($filePath, '/');
+                                    $ext = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
+                                    if (in_array($ext, ['jpg', 'jpeg', 'png', 'webp'], true)) {
+                                        return '<a href="' . htmlspecialchars($url) . '" target="_blank" rel="noopener">
+                    <img src="' . htmlspecialchars($url) . '" alt="pièce jointe"
+                         style="max-width:70px; max-height:70px; border-radius:6px; margin-top:.25rem;"/>
+                  </a>';
+                                    }
+                                    if ($ext === 'pdf') {
+                                        return '<div class="mt-1"><a href="' . htmlspecialchars($url) . '" target="_blank" rel="noopener">Voir le PDF</a></div>';
+                                    }
+                                    return '<div class="mt-1"><a href="' . htmlspecialchars($url) . '" target="_blank" rel="noopener">Voir le fichier</a></div>';
+                                };
+                                ?>
+
+                                <?php foreach ($alertsProblems as $a): ?>
+                                    <?php
+                                    $isArchived = !empty($a['archived_at']);
+                                    $isUnread   = ((int)($a['is_read'] ?? 0) === 0);
+                                    ?>
+                                    <li class="list-group-item d-flex justify-content-between align-items-start">
+                                        <div class="me-3">
+                                            <div class="<?= $isUnread && !$isArchived ? 'fw-semibold' : 'text-muted' ?>">
+                                                <?= nl2br(htmlspecialchars($a['message'] ?? '')) ?>
+                                            </div>
+                                            <small class="text-muted"><?= date('d/m/Y H:i', strtotime($a['created_at'])) ?></small>
+
+                                            <?= $renderAlertAttachment($a['alert_file'] ?? null) ?>
+
+                                            <?php if ($isArchived): ?>
+                                                <span class="badge bg-secondary ms-2">archivée</span>
+                                            <?php elseif (!$isUnread): ?>
+                                                <!-- déjà vue mais pas résolue -->
+                                                <span class="badge bg-secondary ms-2">lu</span>
+                                            <?php endif; ?>
+                                        </div>
+
+                                        <?php if ($isAdmin && !$isArchived): ?>
+                                            <!-- Autoriser la résolution même si déjà "lu" -->
+                                            <button class="btn btn-sm btn-success btn-resolve-one" data-alert-id="<?= (int)$a['id'] ?>">
+                                                Marquer résolu
+                                            </button>
+                                        <?php endif; ?>
+                                    </li>
+                                <?php endforeach; ?>
+                            </ul>
+                        <?php else: ?>
+                            <small id="alertsProblemsEmpty" class="text-muted d-block mt-2">Aucune alerte enregistrée.</small>
+                        <?php endif; ?>
+
+                        <div>Compteur: <strong><?= $lastHours ?> <?= htmlspecialchars($hourUnit) ?></strong></div>
+
+                        <?php if ($isAdmin || $isDepot || $isChef): ?>
                             <form class="mt-2 d-flex gap-2" id="formHour">
                                 <input type="hidden" name="action" value="hour_meter">
                                 <input type="hidden" name="stock_id" value="<?= (int)$articleId ?>">
-                                <input type="number" min="0" step="1" class="form-control" name="hours" value="<?= (int)($article['compteur_heures'] ?? 0) ?>" required style="max-width:200px">
+                                <?php if ($contextChantier): ?>
+                                    <input type="hidden" name="chantier_id" value="<?= (int)$contextChantier ?>">
+                                <?php endif; ?>
+                                <input type="number" min="0" step="1" class="form-control" name="hours"
+                                    value="<?= $lastHours ?>" required style="max-width:200px">
                                 <button class="btn btn-outline-primary">Mettre à jour</button>
                             </form>
                             <div id="hourMsg" class="alert d-none mt-2"></div>
                         <?php endif; ?>
 
+                        <?php if (($article['maintenance_mode'] ?? '') === 'hour_meter'): ?>
+                            <hr class="my-3">
+                            <button id="btnDeclarePanne"
+                                class="btn btn-danger w-100"
+                                data-bs-toggle="modal"
+                                data-bs-target="#modalDeclarePanne"
+                                data-article-id="<?= (int)$article['id'] ?>">
+                                Déclarer un problème
+                            </button>
+                        <?php endif; ?>
+
+                        <?php if ($isChef): ?>
+                            <?php
+                            $chefTodo = 0;
+                            try {
+                                $stReq = $pdo->prepare("
+          SELECT COUNT(*) FROM stock_alerts
+          WHERE stock_id = :sid
+            AND type = 'incident'
+            AND url = 'hour_meter_request'
+            AND archived_at IS NULL
+        ");
+                                $stReq->execute([':sid' => $articleId]);
+                                $chefTodo = (int)$stReq->fetchColumn();
+                            } catch (Throwable $e) {
+                                $chefTodo = 0;
+                            }
+                            ?>
+                            <?php if ($chefTodo > 0): ?>
+                                <div class="alert alert-warning d-flex align-items-center gap-2">
+                                    <span>⏱️ Relevé d'heures demandé pour cet article. Merci de flasher le QR et de saisir le compteur.</span>
+                                    <a class="btn btn-sm btn-outline-dark ms-auto" href="<?= htmlspecialchars($qrPublicUrl) ?>" target="_blank">Ouvrir la page QR</a>
+                                </div>
+                            <?php endif; ?>
+                        <?php endif; ?>
+
+
+
+
+
+
                     <?php elseif ($maintenanceMode === 'electrical'): ?>
                         <div>État :
                             <?php
-                            $hasOpen = false;
-                            foreach ($alerts as $a) {
-                                if ((int)$a['is_read'] === 0) {
-                                    $hasOpen = true;
-                                    break;
-                                }
-                            }
+                            // Problèmes ouverts = incidents "problem" non archivés (peu importe "lu")
+                            $openProblems = array_filter(
+                                $alerts,
+                                fn($al) => (($al['type'] ?? '') === 'incident')
+                                    && (($al['url']  ?? '') === 'problem')
+                                    && empty($al['archived_at'])
+                            );
+                            $hasOpenProblem = !empty($openProblems);
                             ?>
-                            <?php if ($hasOpen): ?>
+                            <?php if ($hasOpenProblem): ?>
                                 <span class="badge bg-danger">Problème</span>
                             <?php else: ?>
                                 <span class="badge bg-success">OK</span>
@@ -887,35 +1095,63 @@ try {
                         <?php if (!empty($alerts)): ?>
                             <ul class="list-group list-group-flush mt-2">
                                 <?php foreach ($alerts as $a): ?>
+                                    <?php
+                                    $isArchived = !empty($a['archived_at']);
+                                    $isUnread   = ((int)($a['is_read'] ?? 0) === 0);
+                                    ?>
                                     <li class="list-group-item d-flex justify-content-between align-items-start">
                                         <div class="me-3">
-                                            <div class="<?= (int)$a['is_read'] === 0 ? 'fw-semibold' : 'text-muted' ?>">
-                                                <?= nl2br(htmlspecialchars($a['message'])) ?>
+                                            <div class="<?= (!$isArchived && $isUnread) ? 'fw-semibold' : 'text-muted' ?>">
+                                                <?= nl2br(htmlspecialchars($a['message'] ?? '')) ?>
                                             </div>
                                             <small class="text-muted"><?= date('d/m/Y H:i', strtotime($a['created_at'])) ?></small>
-                                            <?php if ((int)$a['is_read'] !== 0): ?>
+
+                                            <!-- miniatures / liens pièces jointes -->
+                                            <?= $renderAlertAttachment($a['alert_file'] ?? null) ?>
+
+                                            <?php if ($isArchived): ?>
                                                 <span class="badge bg-secondary ms-2">clos</span>
+                                            <?php elseif (!$isUnread): ?>
+                                                <span class="badge bg-light text-muted border ms-2">lu</span>
                                             <?php endif; ?>
                                         </div>
-                                        <?php if ($isAdmin && (int)$a['is_read'] === 0): ?>
-                                            <button class="btn btn-sm btn-success btn-resolve-one" data-alert-id="<?= (int)$a['id'] ?>">
+
+                                        <?php if ($isAdmin && !$isArchived): ?>
+                                            <button class="btn btn-sm btn-success btn-resolve-one"
+                                                data-alert-id="<?= (int)$a['id'] ?>">
                                                 Marquer résolu
                                             </button>
                                         <?php endif; ?>
                                     </li>
                                 <?php endforeach; ?>
                             </ul>
+
+                            <?php if ($hasOpenProblem && $isAdmin): ?>
+                                <div class="text-end mt-2">
+                                    <button type="button"
+                                        class="btn btn-success btn-resolve-all"
+                                        data-article-id="<?= (int)$articleId ?>">
+                                        Marquer résolu
+                                    </button>
+                                </div>
+                            <?php endif; ?>
+
                         <?php else: ?>
                             <small class="text-muted d-block mt-2">Aucune alerte enregistrée.</small>
                         <?php endif; ?>
 
-                        <button class="btn btn-danger w-100 mt-3" data-bs-toggle="modal" data-bs-target="#declareModal">
+                        <button id="btnDeclarePanne"
+                            class="btn btn-danger w-100 mt-3"
+                            data-bs-toggle="modal"
+                            data-bs-target="#modalDeclarePanne">
                             Déclarer un problème
                         </button>
+
                         <div id="resolveMsg" class="alert d-none mt-2"></div>
                     <?php endif; ?>
+
                 <?php endif; ?>
-                <!-- ===== /Entretien ===== -->
+
 
                 <hr>
                 <h6 class="fw-bold mt-3">Répartition par chantier</h6>
@@ -931,6 +1167,50 @@ try {
                         <li class="list-group-item text-muted">Aucune quantité sur les chantiers</li>
                     <?php endif; ?>
                 </ul>
+                <!-- Modale -->
+                <div class="modal fade" id="modalDeclarePanne" tabindex="-1" aria-hidden="true">
+                    <div class="modal-dialog modal-dialog-centered">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title">Déclarer un problème</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
+                            </div>
+
+                            <div class="modal-body">
+                                <div class="mb-3">
+                                    <label class="form-label">Description (obligatoire)</label>
+                                    <textarea id="panneComment"
+                                        class="form-control"
+                                        rows="4"
+                                        placeholder="Décrire le symptôme, contexte, etc."
+                                        required></textarea>
+                                </div>
+
+                                <?php if (($article['maintenance_mode'] ?? '') === 'hour_meter'): ?>
+                                    <!-- Champ compteur visible UNIQUEMENT pour les articles en mode compteur d'heures -->
+                                    <div class="mb-2">
+                                        <label class="form-label">Compteur (h) — optionnel</label>
+                                        <input id="panneHours" type="number" min="0" step="1"
+                                            class="form-control"
+                                            placeholder="ex : <?= (int)($lastHours ?? 0) ?>">
+                                        <div class="form-text">Si renseigné, le compteur sera mis à jour et historisé.</div>
+                                    </div>
+                                <?php endif; ?>
+
+                                <div class="mb-3">
+                                    <label class="form-label">Pièce jointe (photo/PDF, optionnel)</label>
+                                    <input id="panneFile" type="file" class="form-control" accept=".jpg,.jpeg,.png,.webp,.pdf">
+                                    <div class="form-text">Formats acceptés : JPG, PNG, WEBP, PDF</div>
+                                </div>
+                            </div>
+
+                            <div class="modal-footer">
+                                <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Annuler</button>
+                                <button id="confirmDeclarePanne" type="button" class="btn btn-danger">Envoyer l’alerte</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -1041,39 +1321,214 @@ try {
                 <?php endif; ?>
             </div>
         </div>
-    </div>
-</div>
+        <!-- Onglet "Historique des états" -->
+        <div class="tab-pane fade" id="etatlog" role="tabpanel">
+            <?php
+            /* =========================================================
+   Onglet "Historique des états" — bloc complet avec couleurs
+========================================================= */
 
-<!-- Modale déclaration (connecté) -->
-<div class="modal fade" id="declareModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog">
-        <form class="modal-content" id="formDeclare" enctype="multipart/form-data">
-            <div class="modal-header">
-                <h5 class="modal-title">Déclarer un problème</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
-            </div>
+            // Récup de l’historique des états + auteur (created_by)
+            $rows = [];
+            try {
+                $sql = "
+        SELECT ae.id, ae.created_at, ae.action, ae.valeur_int, ae.commentaire, ae.fichier, ae.created_by,
+       ae.alert_id, 
+               u.nom  AS auteur_nom, u.prenom AS auteur_prenom
+        FROM article_etats ae
+        LEFT JOIN utilisateurs u ON u.id = ae.created_by
+        WHERE ae.article_id = :aid
+        " . ($ENT_ID ? " AND ae.entreprise_id = :eid " : "") . "
+        ORDER BY ae.id DESC, ae.created_at DESC
+    ";
+                $st = $pdo->prepare($sql);
+                $params = [':aid' => $articleId];
+                if ($ENT_ID) $params[':eid'] = $ENT_ID;
+                $st->execute($params);
+                $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+            } catch (Throwable $e) {
+                $rows = [];
+            }
 
-            <div class="modal-body">
-                <input type="hidden" name="article_id" value="<?= (int)$article['id'] ?>">
-                <input type="hidden" name="action" value="declarer_panne">
+            // helpers
+            $fullName = fn(?string $nom, ?string $prenom): string => (trim((string)$nom . $prenom) === '') ? '—' : htmlspecialchars(trim($prenom . ' ' . $nom));
 
-                <div class="mb-3">
-                    <label class="form-label">Description</label>
-                    <textarea class="form-control" name="commentaire" rows="4" required
-                        placeholder="Décrivez brièvement le souci (ex. : fuite, problème electrique…)"></textarea>
+            $renderActionBadge = function (string $action): string {
+                return match ($action) {
+                    'declarer_panne' => '<span class="badge bg-danger">panne déclarée</span>',
+                    'declarer_ok'    => '<span class="badge bg-success">panne résolue</span>',
+                    'compteur_maj'   => '<span class="badge bg-secondary">relevé compteur</span>',
+                    default          => '<span class="badge bg-secondary">' . htmlspecialchars($action) . '</span>',
+                };
+            };
+
+            $renderValue = fn($action, $val) => (is_numeric($val) && in_array($action, ['compteur_maj', 'declarer_panne', 'declarer_ok'], true))
+                ? htmlspecialchars((string)$val) . ' h'
+                : '—';
+
+
+            $renderPhoto = function (?string $filePath) {
+                if (!$filePath) return '—';
+                $url = '/' . ltrim($filePath, '/');
+                $ext = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
+                if (in_array($ext, ['jpg', 'jpeg', 'png', 'webp'], true)) {
+                    return '<a href="' . htmlspecialchars($url) . '" target="_blank" rel="noopener">
+                  <img src="' . htmlspecialchars($url) . '" alt="pièce jointe"
+                       style="max-width:70px; max-height:70px; border-radius:6px;"/>
+                </a>';
+                }
+                if ($ext === 'pdf') return '<a href="' . htmlspecialchars($url) . '" target="_blank" rel="noopener">Voir le PDF</a>';
+                return '<a href="' . htmlspecialchars($url) . '" target="_blank" rel="noopener">Voir le fichier</a>';
+            };
+            ?>
+
+            <div class="card mt-3">
+                <div class="card-body">
+                    <h5 class="card-title mb-3">Historique des états</h5>
+
+                    <div class="table-responsive">
+                        <table class="table table-sm align-middle">
+                            <thead>
+                                <tr>
+                                    <th style="width:100px;">N°</th>
+                                    <th style="width:160px;">Date</th>
+                                    <th style="width:150px;">Action</th>
+                                    <th style="width:190px;">Envoyé par</th>
+                                    <th style="width:220px;">Réparation validée par</th>
+                                    <th style="width:110px;">Valeur</th>
+                                    <th>Commentaire</th>
+                                    <th style="width:110px;">Photos</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php if (empty($rows)): ?>
+                                    <tr>
+                                        <td colspan="7" class="text-muted">Aucun évènement enregistré.</td>
+                                    </tr>
+                                    <?php else: foreach ($rows as $r):
+                                        $num    = !empty($r['alert_id']) ? '#' . (int)$r['alert_id'] : '—';
+                                        $action = (string)$r['action'];
+
+                                        // Valeur (afficher pour compteur_maj, declarer_panne, declarer_ok)
+                                        $val = (is_numeric($r['valeur_int']) && in_array($action, ['compteur_maj', 'declarer_panne', 'declarer_ok'], true))
+                                            ? htmlspecialchars((string)$r['valeur_int']) . ' h' : '—';
+
+                                        // Commentaire : si résoudre ciblée et alert_id présent, on impose le libellé demandé
+                                        if ($action === 'declarer_ok' && !empty($r['alert_id'])) {
+                                            $com = 'problème #' . (int)$r['alert_id'] . ' résolu';
+                                        } else {
+                                            $com = trim((string)$r['commentaire']) !== '' ? htmlspecialchars((string)$r['commentaire']) : '—';
+                                        }
+
+
+                                        $who    = $fullName($r['auteur_nom'] ?? '', $r['auteur_prenom'] ?? '');
+
+
+                                        $photo  = $renderPhoto($r['fichier'] ?? null);
+
+                                        // auteurs
+                                        $envoyePar = '—';
+                                        $reparePar = '—';
+                                        if ($action === 'declarer_panne') {
+                                            $envoyePar = ($who !== '—') ? $who : '<span class="text-muted">QR public</span>';
+                                        } elseif ($action === 'declarer_ok') {
+                                            $reparePar = ($who !== '—') ? $who : '<span class="text-muted">—</span>';
+                                        }
+
+                                        // couleur de ligne
+                                        $rowClass = match ($action) {
+                                            'declarer_panne' => 'table-danger',
+                                            'declarer_ok'    => 'table-success',
+                                            'compteur_maj'   => 'table-secondary',
+                                            default          => ''
+                                        };
+                                    ?>
+                                        <tr class="<?= $rowClass ?>">
+                                            <td><?= $num ?></td>
+                                            <td><?= htmlspecialchars(date('d/m/Y H:i', strtotime((string)($r['created_at'] ?? 'now')))) ?></td>
+                                            <td><?= $renderActionBadge($action) ?></td>
+                                            <td><?= $envoyePar ?></td>
+                                            <td><?= $reparePar ?></td>
+                                            <td><?= $val ?></td>
+                                            <td><?= $com ?></td>
+                                            <td><?= $photo ?></td>
+                                        </tr>
+                                <?php endforeach;
+                                endif; ?>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
-
-
-                <div id="declareFeedback" class="small"></div>
             </div>
+        </div><!-- /tab-pane etatlog -->
 
-            <div class="modal-footer">
-                <button type="button" class="btn btn-light" data-bs-dismiss="modal">Fermer</button>
-                <button type="submit" class="btn btn-primary">Envoyer</button>
-            </div>
-        </form>
+
+
+
     </div>
 </div>
+
+
+<script>
+    document.getElementById('confirmDeclarePanne').addEventListener('click', async function() {
+        const btn = this;
+        const comment = document.getElementById('panneComment').value.trim();
+        const fileEl = document.getElementById('panneFile');
+        const hoursEl = document.getElementById('panneHours');
+        const stockId = document.getElementById('panneStockId').value;
+        const chantierIdEl = document.getElementById('panneChantierId');
+
+        if (!comment) {
+            alert("Merci d'indiquer une description.");
+            return;
+        }
+
+        const fd = new FormData();
+        fd.append('action', 'declarer_panne');
+        fd.append('stock_id', stockId);
+        fd.append('commentaire', comment);
+        if (hoursEl && hoursEl.value !== '') {
+            fd.append('hours', parseInt(hoursEl.value, 10));
+        }
+        if (chantierIdEl) {
+            fd.append('chantier_id', chantierIdEl.value);
+        }
+        if (fileEl && fileEl.files && fileEl.files[0]) {
+            fd.append('fichier', fileEl.files[0]);
+        }
+
+        btn.disabled = true;
+
+        try {
+            const resp = await fetch('/stock/ajax/ajax_article_etat_save.php', {
+                method: 'POST',
+                body: fd
+            });
+            const data = await resp.json();
+
+            if (!resp.ok || !data.ok) {
+                throw new Error(data.msg || 'Erreur serveur');
+            }
+
+            // succès : on ferme la modale et on rafraîchit proprement
+            const modalEl = document.getElementById('modalDeclarePanne');
+            const bsModal = bootstrap.Modal.getInstance(modalEl) || new bootstrap.Modal(modalEl);
+            bsModal.hide();
+
+            // Option : reload pour voir l’historique mis à jour (photos + ligne rouge)
+            location.reload();
+
+        } catch (e) {
+            alert('Échec: ' + e.message);
+        } finally {
+            btn.disabled = false;
+        }
+    });
+</script>
+
+<script>
+    window.IS_ADMIN = <?= $isAdmin ? 'true' : 'false' ?>;
+</script>
 
 <script>
     // === Helpers front : texte -> JSON (UrlEncoded)
@@ -1145,20 +1600,53 @@ try {
                         credentials: 'same-origin'
                     });
                     const raw = await res.text();
-                    let json;
-                    try {
-                        json = JSON.parse(raw);
-                    } catch {
-                        throw new Error('Réponse non-JSON du serveur:\n' + raw);
-                    }
+                    const json = JSON.parse(raw);
                     if (!res.ok || json.ok === false) throw new Error(json.msg || 'Erreur serveur');
+
+                    // ✅ MAJ UI SANS RECHARGER
+                    const badge = document.querySelector('[data-article-etat-badge]');
+                    if (badge) {
+                        badge.className = 'badge bg-danger';
+                        badge.textContent = 'PANNE';
+                    }
+
+                    // Liste UL existante ou à créer
+                    let list = document.querySelector('#alertsProblemsList');
+                    if (!list) {
+                        // Si le message “Aucune alerte…” est là, on le retire
+                        const empty = document.querySelector('#alertsProblemsEmpty');
+                        if (empty) empty.remove();
+
+                        list = document.createElement('ul');
+                        list.className = 'list-group list-group-flush mt-2';
+                        list.id = 'alertsProblemsList';
+                        const anchor = document.querySelector('[data-article-etat-badge]');
+                        anchor && anchor.closest('div').insertAdjacentElement('afterend', list);
+                    }
+
+                    // Ajoute l’élément en tête
+                    const a = json.alert;
+                    const li = document.createElement('li');
+                    li.className = 'list-group-item d-flex justify-content-between align-items-start';
+                    li.innerHTML = `
+    <div class="me-3">
+      <div class="fw-semibold">${(a.message || '').replace(/</g,'&lt;').replace(/\n/g,'<br>')}</div>
+      <small class="text-muted">${new Date(a.created_at.replace(' ','T')).toLocaleString()}</small>
+    </div>
+    ${ (window.IS_ADMIN ? `<button class="btn btn-sm btn-success btn-resolve-one" data-alert-id="${a.id}">Marquer résolu</button>` : '') }
+  `;
+                    list.prepend(li);
+
+                    // Feedback modal
                     fb.className = 'alert alert-success';
                     fb.textContent = 'Problème envoyé.';
-                    setTimeout(() => location.reload(), 600);
+                    // Fermer la modale un peu après
+                    setTimeout(() => bootstrap.Modal.getInstance(document.getElementById('declareModal'))?.hide(), 400);
                 } catch (err) {
                     fb.className = 'alert alert-danger';
                     fb.textContent = String(err.message || err);
                 }
+
             });
         }
 
@@ -1237,5 +1725,10 @@ try {
         </div>
     </div>
 <?php endif; ?>
+<script>
+    window.ARTICLE_ID = <?= (int)$article['id'] ?>;
+</script>
+<script src="/stock/js/articleEtat.js"></script>
+
 
 <?php require_once __DIR__ . '/../templates/footer.php'; ?>

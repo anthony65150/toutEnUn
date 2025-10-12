@@ -19,9 +19,9 @@ $ENT_ID = (int)($_SESSION['utilisateurs']['entreprise_id'] ?? 0);
 // ===== Recherche (facultatif) =====
 $search = isset($_GET['q']) ? trim((string)$_GET['q']) : '';
 
-// ===== Récup des alertes NON archivées =====
-// Table: stock_alerts (id, entreprise_id, stock_id, type, message, url, created_at, is_read, archived_at, archived_by)
+// ===== Récup des alertes NON archivées : entretien + incidents déclarés =====
 $params = [':eid' => $ENT_ID];
+
 $sql = "
     SELECT 
         sa.id              AS alert_id,
@@ -33,15 +33,17 @@ $sql = "
     FROM stock_alerts sa
     JOIN stock s ON s.id = sa.stock_id
     WHERE s.entreprise_id = :eid
-      AND sa.archived_at IS NULL        -- << ne montre pas les archivées
+      AND sa.archived_at IS NULL
+      AND sa.type = 'incident'
+      AND sa.url IN ('maintenance_due','problem')
 ";
 
 if ($search !== '') {
     $sql .= " AND (s.nom LIKE :q OR sa.message LIKE :q) ";
-    $params[':q'] = '%'.$search.'%';
+    $params[':q'] = '%' . $search . '%';
 }
 
-$sql .= " ORDER BY sa.id DESC";
+$sql .= " ORDER BY sa.created_at DESC, sa.id DESC";
 $st = $pdo->prepare($sql);
 $st->execute($params);
 $rows = $st->fetchAll(PDO::FETCH_ASSOC);
@@ -55,10 +57,16 @@ $csrf = $_SESSION['csrf_token'];
 ?>
 <div class="container my-4">
     <h2 class="mb-3">
-        Alertes incidents 
+        Alertes entretien à prévoir
         <span class="badge bg-secondary align-middle"><?= (int)$count ?></span>
     </h2>
 
+    <form class="mb-3" method="get" action="">
+        <div class="input-group" style="max-width:520px">
+            <input type="text" name="q" class="form-control" placeholder="Rechercher (article, message…)" value="<?= htmlspecialchars($search, ENT_QUOTES) ?>">
+            <button class="btn btn-outline-secondary" type="submit">Rechercher</button>
+        </div>
+    </form>
 
     <div class="table-responsive">
         <table class="table table-striped table-bordered table-hover text-center align-middle">
@@ -75,28 +83,31 @@ $csrf = $_SESSION['csrf_token'];
             <tbody id="alertsTableBody">
                 <?php if (!$rows): ?>
                     <tr>
-                        <td colspan="6" class="text-center text-muted py-4">Aucune alerte.</td>
+                        <td colspan="6" class="text-center text-muted py-4">Aucune alerte d’entretien.</td>
                     </tr>
                 <?php else: ?>
                     <?php foreach ($rows as $r): ?>
-                        <tr data-row-id="<?= (int)$r['alert_id'] ?>">
+                        <tr data-row-id="<?= (int)$r['alert_id'] ?>" data-stock-id="<?= (int)$r['stock_id'] ?>">
                             <td>#<?= (int)$r['alert_id'] ?></td>
                             <td><?= htmlspecialchars((string)$r['article_nom']) ?></td>
                             <td><?= htmlspecialchars((string)$r['message']) ?></td>
                             <td><?= $r['created_at'] ? date('d/m/Y H:i', strtotime((string)$r['created_at'])) : '' ?></td>
-                            <td><?= ((int)$r['is_read'] === 1) ? 'Oui' : 'Non' ?></td>
+                            <td class="col-read"><?= ((int)$r['is_read'] === 1) ? 'Oui' : 'Non' ?></td>
                             <td class="text-end">
-                                <a class="btn btn-sm btn-outline-primary"
-                                   href="article.php?id=<?= (int)$r['stock_id'] ?>">
-                                    Ouvrir
-                                </a>
                                 <button type="button"
-                                        class="btn btn-sm btn-outline-danger ms-1 archive-btn"
-                                        data-id="<?= (int)$r['alert_id'] ?>"
-                                        data-csrf="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">
+                                    class="btn btn-sm btn-outline-primary open-btn"
+                                    data-id="<?= (int)$r['alert_id'] ?>"
+                                    data-stock-id="<?= (int)$r['stock_id'] ?>">
+                                    Ouvrir
+                                </button>
+
+                                <button type="button"
+                                    class="btn btn-sm btn-outline-danger ms-1 archive-btn"
+                                    data-id="<?= (int)$r['alert_id'] ?>">
                                     Supprimer
                                 </button>
                             </td>
+
                         </tr>
                     <?php endforeach; ?>
                 <?php endif; ?>
@@ -106,42 +117,80 @@ $csrf = $_SESSION['csrf_token'];
 </div>
 
 <script>
-// Archiver (soft-delete) via AJAX : retire de la liste, reste visible dans la fiche article.
-document.addEventListener('click', async (e) => {
-    const btn = e.target.closest('.archive-btn');
+    // Archiver (soft-delete) via AJAX
+    document.addEventListener('click', async (e) => {
+        const btn = e.target.closest('.archive-btn');
+        if (!btn) return;
+
+        const id = parseInt(btn.dataset.id, 10);
+        if (!id) {
+            alert('ID manquant');
+            return;
+        }
+
+        if (!confirm("Retirer cette alerte de la liste ?\n(L'historique restera dans la fiche article)")) return;
+
+        btn.disabled = true;
+
+        try {
+            const res = await fetch('archive_alert.php', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                body: new URLSearchParams({
+                    id: id /*, csrf: btn.dataset.csrf */
+                })
+            });
+            const json = await res.json();
+
+            if (!json.ok) throw new Error(json.msg || 'Erreur');
+
+            const tr = btn.closest('tr');
+            tr.style.transition = 'background-color .4s, opacity .4s';
+            tr.style.backgroundColor = '#f8d7da';
+            tr.style.opacity = '0';
+            setTimeout(() => tr.remove(), 320);
+        } catch (err) {
+            alert(err.message || 'Erreur réseau');
+            btn.disabled = false;
+        }
+    });
+</script>
+<script>
+  // Ouvrir : marque l’alerte LU puis redirige vers la fiche article
+  document.addEventListener('click', async (e) => {
+    const btn = e.target.closest('.open-btn');
     if (!btn) return;
 
     const id = parseInt(btn.dataset.id, 10);
-    if (!id) { alert('ID manquant'); return; }
-
-    if (!confirm("Retirer cette alerte de la liste ?\n(L'historique restera dans la fiche article)")) return;
+    const stockId = parseInt(btn.dataset.stockId, 10);
+    if (!id || !stockId) return;
 
     btn.disabled = true;
 
     try {
-        const res = await fetch('archive_alert.php', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: new URLSearchParams({
-                id: id
-                // , csrf: btn.dataset.csrf   // décommente si tu valides aussi côté API
-            })
-        });
-        const json = await res.json();
+      await fetch('api/alert_mark_read.php', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: new URLSearchParams({ id })
+      });
 
-        if (!json.ok) throw new Error(json.msg || 'Erreur');
+      // On met à jour l'UI tout de suite
+      const row = btn.closest('tr');
+      const readCell = row?.querySelector('.col-read');
+      if (readCell) readCell.textContent = 'Oui';
 
-        const tr = btn.closest('tr');
-        tr.style.transition = 'background-color .4s, opacity .4s';
-        tr.style.backgroundColor = '#f8d7da';
-        tr.style.opacity = '0';
-        setTimeout(() => tr.remove(), 320);
+      // Puis on redirige vers la fiche article
+      window.location.href = 'article.php?id=' + stockId;
+
     } catch (err) {
-        alert(err.message || 'Erreur réseau');
-        btn.disabled = false;
+      alert('Impossible de marquer comme lu.');
+      btn.disabled = false;
     }
-});
+  });
 </script>
+
 
 <?php
 require_once __DIR__ . '/../templates/footer.php';

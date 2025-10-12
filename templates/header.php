@@ -43,6 +43,8 @@ $currentPage = basename($_SERVER['PHP_SELF']);
 $isLogged    = isset($_SESSION['utilisateurs']);
 $role        = $isLogged ? (string)($_SESSION['utilisateurs']['fonction'] ?? '') : '';
 $isAdmin     = ($role === 'administrateur');
+$isChef      = ($role === 'chef');
+$isDepot     = ($role === 'depot'); // <-- AJOUT
 $prenom      = $isLogged ? (string)($_SESSION['utilisateurs']['prenom'] ?? '') : '';
 
 /* Photo profil sûre */
@@ -75,7 +77,7 @@ if ($isLogged && !empty($_SESSION['utilisateurs']['photo'])) {
     <link rel="stylesheet" href="/pointage/css/pointage.css" />
 
     <style>
-      /* ====== Cloche alertes (admin) ====== */
+      /* ====== Cloche alertes (admin/chef/depot) ====== */
       #alertsBellIcon, #alertsBellIconMobile{
         display:inline-block;
         transform-origin:50% 0;
@@ -153,10 +155,16 @@ if ($isLogged && !empty($_SESSION['utilisateurs']['photo'])) {
         </div>
 
         <!-- Zone droite (desktop ≥ md) -->
-        <?php if ($isAdmin): ?>
+        <?php if ($isAdmin || $isChef || $isDepot): ?>
+          <?php
+            // Destination de la cloche selon le rôle
+            $alertsHref =
+              $isAdmin ? '/stock/alerts_admin.php'
+              : ($isChef ? '/stock/alerts_chef.php' : '/stock/alerts_depot.php');
+          ?>
           <div class="ms-auto d-none d-md-flex align-items-center gap-3 pe-3">
-            <!-- Cloche alertes (ADMIN uniquement) -->
-            <a href="/stock/alerts_admin.php"
+            <!-- Cloche alertes (ADMIN / CHEF / DÉPÔT) -->
+            <a href="<?= $alertsHref ?>"
                class="position-relative text-decoration-none"
                id="alertsBell" aria-label="Voir les alertes">
               <i class="bi bi-bell-fill fs-4" id="alertsBellIcon"></i>
@@ -172,11 +180,16 @@ if ($isLogged && !empty($_SESSION['utilisateurs']['photo'])) {
         <?php endif; ?>
       <?php endif; ?>
 
-      <!-- Mobile : cloche (admin uniquement) + burger -->
+      <!-- Mobile : cloche (admin/chef/dépôt) + burger -->
       <?php if ($currentPage !== 'index.php'): ?>
         <div class="d-md-none d-flex align-items-center gap-2">
-          <?php if ($isAdmin): ?>
-            <a href="/stock/alerts_admin.php"
+          <?php if ($isAdmin || $isChef || $isDepot): ?>
+            <?php
+              $alertsHref =
+                $isAdmin ? '/stock/alerts_admin.php'
+                : ($isChef ? '/stock/alerts_chef.php' : '/stock/alerts_depot.php');
+            ?>
+            <a href="<?= $alertsHref ?>"
                class="position-relative text-decoration-none d-none"
                id="alertsBellMobile" aria-label="Voir les alertes">
               <i class="bi bi-bell-fill fs-5" id="alertsBellIconMobile"></i>
@@ -196,7 +209,7 @@ if ($isLogged && !empty($_SESSION['utilisateurs']['photo'])) {
     </div>
   </nav>
 
-  <!-- Scripts cloche (unifiés) : s’exécutent seulement si éléments présents (donc admin) -->
+  <!-- Scripts cloche (unifiés) : s’exécutent seulement si éléments présents (admin/chef/dépôt) -->
   <script>
   (function(){
     const bellD  = document.getElementById('alertsBell');
@@ -204,7 +217,7 @@ if ($isLogged && !empty($_SESSION['utilisateurs']['photo'])) {
     const bellM  = document.getElementById('alertsBellMobile');
     const badgeM = document.getElementById('alertsBadgeMobile');
 
-    if (!bellD && !bellM) return; // non-admin : rien à faire
+    if (!bellD && !bellM) return; // pas de cloche à gérer
 
     function play(el){
       if (!el) return;

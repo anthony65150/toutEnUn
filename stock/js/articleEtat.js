@@ -1,4 +1,4 @@
-// stock/js/articleEtat.js
+// /stock/js/articleEtat.js
 document.addEventListener('DOMContentLoaded', () => {
   if (!window.ARTICLE_ID) return;
 
@@ -8,7 +8,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function showError(msg) {
     const box = $('#etatError') || $('#etatAutreError') || $('#etatCompteurError');
     if (box) {
-      box.innerHTML = msg;
+      box.textContent = msg;
       box.classList.remove('d-none');
     } else {
       alert(msg);
@@ -17,15 +17,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function fetchJSON(url, options = {}) {
     const res = await fetch(url, { credentials: 'same-origin', ...options });
-    const raw = await res.text();             // <- d'abord texte
+    const raw = await res.text();
     let data;
-    try { data = JSON.parse(raw); }           // <- puis JSON
-    catch (e) {
-      // On remonte l’HTML complet pour déboguer (notices PHP, etc.)
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      // Propage le HTML/notice PHP complet pour debug
       throw new Error('Réponse non-JSON du serveur:\n' + raw);
     }
-    if (!res.ok || data.ok === false) {
-      throw new Error(data.msg || 'Erreur serveur');
+    if (!res.ok || data?.ok === false) {
+      // Fais remonter le message backend s'il existe, sinon le raw tronqué
+      const msg = data?.msg || raw.slice(0, 200) || ('HTTP ' + res.status);
+      throw new Error(msg);
     }
     return data;
   }
@@ -37,8 +40,9 @@ document.addEventListener('DOMContentLoaded', () => {
     c.innerHTML = rows.map(r => {
       const label = r.action === 'compteur_maj'
         ? `Compteur mis à jour: <strong>${(r.valeur_int ?? '')} h</strong>`
-        : (r.action === 'declarer_panne' ? '🚨 Panne déclarée' : '✅ Marqué OK');
-      const file = r.fichier ? ` – <a href="/${r.fichier}" target="_blank">pièce jointe</a>` : '';
+        : (r.action === 'declarer_panne' ? '🚨 Panne déclarée'
+           : (r.action === 'entretien_effectue' ? '🛠️ Entretien effectué' : '✅ Marqué OK'));
+      const file = r.fichier ? ` – <a href="/${r.fichier}" target="_blank" rel="noopener">pièce jointe</a>` : '';
       const who  = ((r.prenom||'') + ' ' + (r.nom||'')).trim();
       const com  = r.commentaire ? ' — ' + r.commentaire : '';
       const dt   = new Date(r.created_at).toLocaleString();
@@ -55,17 +59,31 @@ document.addEventListener('DOMContentLoaded', () => {
       showError(err.message);
     }
   }
+
+  function updateEtatBadge(state /* 'OK' | 'PANNE' */) {
+    const badge = document.querySelector('[data-article-etat-badge]');
+    if (!badge) return;
+    if (state === 'PANNE') {
+      badge.classList.remove('bg-success');
+      badge.classList.add('bg-danger');
+      badge.textContent = 'PANNE';
+    } else {
+      badge.classList.remove('bg-danger');
+      badge.classList.add('bg-success');
+      badge.textContent = 'OK';
+    }
+  }
+
+  // Chargement initial de l'historique
   loadHist();
 
   // ===== Formulaire compteur =====
   const f1 = document.querySelector('#etatCompteurForm');
   if (f1){
-    // Submit "classique" -> compteur_maj
     f1.addEventListener('submit', async (e)=>{
       e.preventDefault();
       const fd = new FormData(f1);
       fd.set('action', 'compteur_maj');
-      // S'assure qu'on envoie bien l'article_id
       if (!fd.has('article_id')) fd.set('article_id', String(window.ARTICLE_ID));
       try {
         await fetchJSON('/stock/ajax/ajax_article_etat_save.php', { method:'POST', body:fd });
@@ -73,9 +91,7 @@ document.addEventListener('DOMContentLoaded', () => {
       } catch (err) { showError(err.message); }
     });
 
-    // Boutons d’action (OK / PANNE / etc.)
     f1.querySelectorAll('button[data-action]').forEach(btn=>{
-      // IMPORTANT: prévenir le double submit si le bouton est type=submit
       btn.addEventListener('click', async (e)=>{
         e.preventDefault();
         const fd = new FormData(f1);
@@ -83,6 +99,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!fd.has('article_id')) fd.set('article_id', String(window.ARTICLE_ID));
         try {
           await fetchJSON('/stock/ajax/ajax_article_etat_save.php', { method:'POST', body:fd });
+          if (btn.dataset.action === 'declarer_ok') updateEtatBadge('OK');
           await loadHist();
         } catch (err) { showError(err.message); }
       });
@@ -97,10 +114,95 @@ document.addEventListener('DOMContentLoaded', () => {
       const fd = new FormData(f2); // inclut description, fichier (optionnel), etc.
       if (!fd.has('article_id')) fd.set('article_id', String(window.ARTICLE_ID));
       try {
+        const action = (fd.get('action') || '').toString();
         await fetchJSON('/stock/ajax/ajax_article_etat_save.php', { method:'POST', body:fd });
+        if (action === 'declarer_panne') updateEtatBadge('PANNE');
+        if (action === 'declarer_ok')    updateEtatBadge('OK');
         f2.reset();
         await loadHist();
       } catch (err) { showError(err.message); }
     });
+  }
+
+  // ======= Déclarer un problème pour profil "compteur d'heures" via MODALE =======
+  const btnDeclare   = document.querySelector('#btnDeclarePanne');
+  const modalEl      = document.getElementById('modalDeclarePanne');
+  const confirmBtn   = document.querySelector('#confirmDeclarePanne');
+  const hoursInput   = document.getElementById('panneHours');        // <input number optionnel>
+  const chantierIdEl = document.getElementById('panneChantierId');   // <input hidden> si présent
+
+  // Ouvrir la modale
+  if (btnDeclare && modalEl) {
+    btnDeclare.addEventListener('click', (e) => {
+      e.preventDefault();
+      const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+      modal.show();
+    });
+  }
+
+  // Envoyer la panne depuis la modale (anti double clic + envoi compteur & pièce jointe)
+  if (confirmBtn && modalEl && !confirmBtn.dataset.bound) {
+    confirmBtn.dataset.bound = '1';
+    confirmBtn.setAttribute('type','button'); // sécurité si pas déjà fait dans le HTML
+
+    confirmBtn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      if (confirmBtn.dataset.loading === '1') return; // 🔒 anti-double
+      confirmBtn.dataset.loading = '1';
+      confirmBtn.disabled = true;
+
+      const textarea = document.getElementById('panneComment');
+      const fileInput = document.getElementById('panneFile');
+      const comment = (textarea?.value || '').trim();
+
+      if (!comment) {
+        showError('Merci de saisir une description du problème.');
+        confirmBtn.disabled = false;
+        confirmBtn.dataset.loading = '0';
+        return;
+      }
+
+      const fd = new FormData();
+      fd.append('action', 'declarer_panne');
+      fd.append('article_id', String(window.ARTICLE_ID));
+      fd.append('commentaire', comment);
+
+      // compteur optionnel
+      if (hoursInput && hoursInput.value !== '') {
+        const v = parseInt(hoursInput.value, 10);
+        if (!Number.isNaN(v) && v >= 0) fd.append('hours', String(v));
+      }
+      // chantier_id optionnel
+      if (chantierIdEl && chantierIdEl.value) {
+        fd.append('chantier_id', chantierIdEl.value);
+      }
+      // fichier optionnel
+      if (fileInput?.files?.[0]) fd.append('fichier', fileInput.files[0]);
+
+      try {
+        await fetchJSON('/stock/ajax/ajax_article_etat_save.php', { method:'POST', body:fd });
+
+        // Fermer proprement la modale
+        const modalInstance = bootstrap.Modal.getOrCreateInstance(modalEl);
+        modalInstance.hide();
+
+        // Reset champs
+        if (textarea) textarea.value = '';
+        if (fileInput) fileInput.value = '';
+        if (hoursInput) hoursInput.value = '';
+
+        // Feedback visuel
+        updateEtatBadge('PANNE');
+
+        // Recharger l’historique pour voir la ligne "panne déclarée"
+        await loadHist();
+
+      } catch (err) {
+        showError(err.message);
+      } finally {
+        confirmBtn.disabled = false;
+        confirmBtn.dataset.loading = '0';
+      }
+    }, { passive: true });
   }
 });

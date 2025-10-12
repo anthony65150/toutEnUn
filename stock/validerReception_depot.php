@@ -1,5 +1,4 @@
 <?php
-
 declare(strict_types=1);
 
 require_once __DIR__ . '/../config/init.php';
@@ -47,17 +46,17 @@ try {
 
     /* 3) Charger + verrouiller le transfert (dest = CE dépôt, article de l'entreprise) */
     $stmt = $pdo->prepare("
-    SELECT t.*, s.nom AS article_nom
-    FROM transferts_en_attente t
-    JOIN stock s        ON s.id = t.article_id AND s.entreprise_id = :eid1
-    JOIN depots d_dest  ON d_dest.id = t.destination_id
-                       AND t.destination_type = 'depot'
-                       AND d_dest.entreprise_id = :eid2
-    WHERE t.id = :tid
-      AND t.destination_id = :did
-      AND t.statut = 'en_attente'
-    FOR UPDATE
-");
+        SELECT t.*, s.nom AS article_nom
+        FROM transferts_en_attente t
+        JOIN stock s        ON s.id = t.article_id AND s.entreprise_id = :eid1
+        JOIN depots d_dest  ON d_dest.id = t.destination_id
+                           AND t.destination_type = 'depot'
+                           AND d_dest.entreprise_id = :eid2
+        WHERE t.id = :tid
+          AND t.destination_id = :did
+          AND t.statut = 'en_attente'
+        FOR UPDATE
+    ");
     $stmt->execute([
         ':eid1' => $ENT_ID,
         ':eid2' => $ENT_ID,
@@ -101,21 +100,24 @@ try {
         ");
         $stmtUpdate->execute([':eid' => $ENT_ID, ':qte' => $quantite, ':did' => $depotId, ':sid' => $articleId]);
     } else {
-        /* IMPORTANT: si table stock_depots possède entreprise_id NOT NULL + FK, on le renseigne */
-        $hasEntCol = true; // passe à false si ta table n'a pas entreprise_id
-        if ($hasEntCol) {
-            $stmtInsert = $pdo->prepare("
-                INSERT INTO stock_depots (entreprise_id, depot_id, stock_id, quantite)
-                VALUES (:eid, :did, :sid, :qte)
-            ");
-            $stmtInsert->execute([':eid' => $ENT_ID, ':did' => $depotId, ':sid' => $articleId, ':qte' => $quantite]);
-        } else {
-            $stmtInsert = $pdo->prepare("
-                INSERT INTO stock_depots (depot_id, stock_id, quantite)
-                VALUES (:did, :sid, :qte)
-            ");
-            $stmtInsert->execute([':did' => $depotId, ':sid' => $articleId, ':qte' => $quantite]);
-        }
+        $stmtInsert = $pdo->prepare("
+            INSERT INTO stock_depots (entreprise_id, depot_id, stock_id, quantite)
+            VALUES (:eid, :did, :sid, :qte)
+        ");
+        $stmtInsert->execute([':eid' => $ENT_ID, ':did' => $depotId, ':sid' => $articleId, ':qte' => $quantite]);
+    }
+
+    /* 4.1) Archiver une éventuelle demande de relevé si l’article revient au dépôt */
+    try {
+        $pdo->prepare("
+            UPDATE stock_alerts
+               SET is_read = 1, archived_at = NOW()
+             WHERE stock_id = :sid
+               AND type = 'hour_meter_request'
+               AND archived_at IS NULL
+        ")->execute([':sid' => $articleId]);
+    } catch (Throwable $e) {
+        error_log('archive hour_meter_request on depot reception: '.$e->getMessage());
     }
 
     /* 5) Retirer de la source si source = chantier (bornage entreprise) */
@@ -133,23 +135,6 @@ try {
             ':sid' => $articleId
         ]);
     }
-
-    /* (Optionnel) Si la décrémentation n'a PAS été faite à l'envoi et que la source = dépôt,
-       décommente ce bloc pour la gérer ici aussi, bornée par entreprise.
-    */
-    /*
-    if ($sourceType === 'depot' && $sourceId) {
-        $stmtUpdateDepotSrc = $pdo->prepare("
-            UPDATE stock_depots sd
-            JOIN depots d ON d.id = sd.depot_id AND d.entreprise_id = :eid
-               SET sd.quantite = GREATEST(sd.quantite - :qte, 0)
-             WHERE sd.depot_id = :src AND sd.stock_id = :sid
-        ");
-        $stmtUpdateDepotSrc->execute([
-            ':eid'=>$ENT_ID, ':qte'=>$quantite, ':src'=>$sourceId, ':sid'=>$articleId
-        ]);
-    }
-    */
 
     /* 6) Historique */
     $commentaire = $transfert['commentaire'] ?? null;
@@ -173,25 +158,39 @@ try {
         ':ent_id'        => $ENT_ID,
     ]);
 
-    /* 7) Supprimer la demande + notifier */
+    /* 7) Supprimer la demande + notifier le demandeur (avec stock_id si dispo) */
     $stmtDelete = $pdo->prepare("DELETE FROM transferts_en_attente WHERE id = :tid");
     $stmtDelete->execute([':tid' => $transfertId]);
 
     $message = "✅ Le transfert de {$quantite} x {$articleNom} a été validé par le dépôt.";
-    $stmtNotif = $pdo->prepare("
-    INSERT INTO notifications (utilisateur_id, message, entreprise_id, created_at)
-    VALUES (:uid, :msg, :ent, NOW())
-");
-    $stmtNotif->execute([
-        ':uid' => $demandeurId,
-        ':msg' => $message,
-        ':ent' => $ENT_ID,
-    ]);
+    try {
+        // tentative avec colonne stock_id
+        $pdo->prepare("
+            INSERT INTO notifications (utilisateur_id, message, entreprise_id, stock_id, created_at)
+            VALUES (:uid, :msg, :ent, :sid, NOW())
+        ")->execute([
+            ':uid' => $demandeurId,
+            ':msg' => $message,
+            ':ent' => $ENT_ID,
+            ':sid' => $articleId,
+        ]);
+    } catch (Throwable $e) {
+        // fallback si la colonne stock_id n'existe pas
+        $pdo->prepare("
+            INSERT INTO notifications (utilisateur_id, message, entreprise_id, created_at)
+            VALUES (:uid, :msg, :ent, NOW())
+        ")->execute([
+            ':uid' => $demandeurId,
+            ':msg' => $message,
+            ':ent' => $ENT_ID,
+        ]);
+    }
 
     $pdo->commit();
 
     $_SESSION['success_message']    = "Transfert validé avec succès.";
     $_SESSION['highlight_stock_id'] = $articleId;
+
 } catch (Throwable $e) {
     if ($pdo->inTransaction()) $pdo->rollBack();
     $_SESSION['error_message'] = "Erreur lors de la validation : " . $e->getMessage();
