@@ -185,6 +185,16 @@ $hasHourMeter = ((int)($article['has_hour_meter'] ?? 0) === 1)
 
 $hourUnit = ($article['hour_meter_unit'] ?? 'h') ?: 'h';
 $hourInit = isset($article['hour_meter_initial']) ? (int)$article['hour_meter_initial'] : 0;
+// === Faut-il afficher l’onglet "Historique des états" ? ===
+$hasEtatRows = false;
+try {
+    $st = $pdo->prepare("SELECT 1 FROM article_etats WHERE article_id = :aid LIMIT 1");
+    $st->execute([':aid' => (int)$articleId]);
+    $hasEtatRows = (bool)$st->fetchColumn();
+} catch (Throwable $e) {
+    $hasEtatRows = false;
+}
+$showEtatTab = ($maintenanceMode !== 'none') || $hasHourMeter || $hasEtatRows;
 
 // Dernier relevé global
 $lastHours = $hourInit;
@@ -668,6 +678,7 @@ $archivedAlerts = $st->fetchAll(PDO::FETCH_ASSOC);
                 </div>
                 <div class="modal-body">
                     <form id="formDeclareQR">
+                        <input type="hidden" id="panneStockId" value="<?= (int)$articleId ?>">
                         <input type="hidden" name="action" value="declare_problem">
                         <input type="hidden" name="stock_id" value="<?= (int)$articleId ?>">
                         <div class="mb-2">
@@ -861,13 +872,16 @@ $archivedAlerts = $st->fetchAll(PDO::FETCH_ASSOC);
         <li class="nav-item" role="presentation">
             <button class="nav-link" id="history-tab" data-bs-toggle="tab" data-bs-target="#history" type="button" role="tab">Historique des transferts</button>
         </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#etatlog" type="button" role="tab">
-                Historique des états
-            </button>
-        </li>
 
+        <?php if ($showEtatTab): ?>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#etatlog" type="button" role="tab">
+                    Historique des états
+                </button>
+            </li>
+        <?php endif; ?>
     </ul>
+
 
     <div class="tab-content" id="articleTabContent">
         <!-- Détails -->
@@ -999,7 +1013,7 @@ $archivedAlerts = $st->fetchAll(PDO::FETCH_ASSOC);
                                                 <span class="badge bg-secondary ms-2">archivée</span>
                                             <?php elseif (!$isUnread): ?>
                                                 <!-- déjà vue mais pas résolue -->
-                                                <span class="badge bg-secondary ms-2">lu</span>
+                                                <span class="badge bg-light text-muted border ms-2">lu</span>
                                             <?php endif; ?>
                                         </div>
 
@@ -1126,16 +1140,7 @@ $archivedAlerts = $st->fetchAll(PDO::FETCH_ASSOC);
                                 <?php endforeach; ?>
                             </ul>
 
-                            <?php if ($hasOpenProblem && $isAdmin): ?>
-                                <div class="text-end mt-2">
-                                    <button type="button"
-                                        class="btn btn-success btn-resolve-all"
-                                        data-article-id="<?= (int)$articleId ?>">
-                                        Marquer résolu
-                                    </button>
-                                </div>
-                            <?php endif; ?>
-
+                    
                         <?php else: ?>
                             <small class="text-muted d-block mt-2">Aucune alerte enregistrée.</small>
                         <?php endif; ?>
@@ -1185,6 +1190,9 @@ $archivedAlerts = $st->fetchAll(PDO::FETCH_ASSOC);
                                         placeholder="Décrire le symptôme, contexte, etc."
                                         required></textarea>
                                 </div>
+                                <?php if (!empty($contextChantier)): ?>
+                                    <input type="hidden" id="panneChantierId" value="<?= (int)$contextChantier ?>">
+                                <?php endif; ?>
 
                                 <?php if (($article['maintenance_mode'] ?? '') === 'hour_meter'): ?>
                                     <!-- Champ compteur visible UNIQUEMENT pour les articles en mode compteur d'heures -->
@@ -1322,147 +1330,139 @@ $archivedAlerts = $st->fetchAll(PDO::FETCH_ASSOC);
             </div>
         </div>
         <!-- Onglet "Historique des états" -->
-        <div class="tab-pane fade" id="etatlog" role="tabpanel">
-            <?php
-            /* =========================================================
-   Onglet "Historique des états" — bloc complet avec couleurs
-========================================================= */
+        <?php if ($showEtatTab): ?>
+            <div class="tab-pane fade" id="etatlog" role="tabpanel">
+                <?php
+                /* =========================================================
+       Onglet "Historique des états" — bloc complet avec couleurs
+    ========================================================= */
 
-            // Récup de l’historique des états + auteur (created_by)
-            $rows = [];
-            try {
-                $sql = "
-        SELECT ae.id, ae.created_at, ae.action, ae.valeur_int, ae.commentaire, ae.fichier, ae.created_by,
-       ae.alert_id, 
-               u.nom  AS auteur_nom, u.prenom AS auteur_prenom
-        FROM article_etats ae
-        LEFT JOIN utilisateurs u ON u.id = ae.created_by
-        WHERE ae.article_id = :aid
-        " . ($ENT_ID ? " AND ae.entreprise_id = :eid " : "") . "
-        ORDER BY ae.id DESC, ae.created_at DESC
-    ";
-                $st = $pdo->prepare($sql);
-                $params = [':aid' => $articleId];
-                if ($ENT_ID) $params[':eid'] = $ENT_ID;
-                $st->execute($params);
-                $rows = $st->fetchAll(PDO::FETCH_ASSOC);
-            } catch (Throwable $e) {
+                // Récup de l’historique des états + auteur (created_by)
                 $rows = [];
-            }
-
-            // helpers
-            $fullName = fn(?string $nom, ?string $prenom): string => (trim((string)$nom . $prenom) === '') ? '—' : htmlspecialchars(trim($prenom . ' ' . $nom));
-
-            $renderActionBadge = function (string $action): string {
-                return match ($action) {
-                    'declarer_panne' => '<span class="badge bg-danger">panne déclarée</span>',
-                    'declarer_ok'    => '<span class="badge bg-success">panne résolue</span>',
-                    'compteur_maj'   => '<span class="badge bg-secondary">relevé compteur</span>',
-                    default          => '<span class="badge bg-secondary">' . htmlspecialchars($action) . '</span>',
-                };
-            };
-
-            $renderValue = fn($action, $val) => (is_numeric($val) && in_array($action, ['compteur_maj', 'declarer_panne', 'declarer_ok'], true))
-                ? htmlspecialchars((string)$val) . ' h'
-                : '—';
-
-
-            $renderPhoto = function (?string $filePath) {
-                if (!$filePath) return '—';
-                $url = '/' . ltrim($filePath, '/');
-                $ext = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
-                if (in_array($ext, ['jpg', 'jpeg', 'png', 'webp'], true)) {
-                    return '<a href="' . htmlspecialchars($url) . '" target="_blank" rel="noopener">
-                  <img src="' . htmlspecialchars($url) . '" alt="pièce jointe"
-                       style="max-width:70px; max-height:70px; border-radius:6px;"/>
-                </a>';
+                try {
+                    $sql = "
+          SELECT ae.id, ae.created_at, ae.action, ae.valeur_int, ae.commentaire, ae.fichier, ae.created_by,
+                 ae.alert_id, ae.chantier_id,
+                 u.nom  AS auteur_nom, u.prenom AS auteur_prenom,
+                 c.nom  AS chantier_nom
+          FROM article_etats ae
+          LEFT JOIN utilisateurs u ON u.id = ae.created_by
+          LEFT JOIN chantiers   c ON c.id = ae.chantier_id
+          WHERE ae.article_id = :aid
+          " . ($ENT_ID ? " AND ae.entreprise_id = :eid " : "") . "
+          ORDER BY ae.id DESC, ae.created_at DESC
+        ";
+                    $st = $pdo->prepare($sql);
+                    $params = [':aid' => $articleId];
+                    if ($ENT_ID) $params[':eid'] = $ENT_ID;
+                    $st->execute($params);
+                    $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+                } catch (Throwable $e) {
+                    $rows = [];
                 }
-                if ($ext === 'pdf') return '<a href="' . htmlspecialchars($url) . '" target="_blank" rel="noopener">Voir le PDF</a>';
-                return '<a href="' . htmlspecialchars($url) . '" target="_blank" rel="noopener">Voir le fichier</a>';
-            };
-            ?>
 
-            <div class="card mt-3">
-                <div class="card-body">
-                    <h5 class="card-title mb-3">Historique des états</h5>
+                // helpers
+                $fullName = fn(?string $nom, ?string $prenom): string => (trim((string)$nom . $prenom) === '') ? '—' : htmlspecialchars(trim($prenom . ' ' . $nom));
 
-                    <div class="table-responsive">
-                        <table class="table table-sm align-middle">
-                            <thead>
-                                <tr>
-                                    <th style="width:100px;">N°</th>
-                                    <th style="width:160px;">Date</th>
-                                    <th style="width:150px;">Action</th>
-                                    <th style="width:190px;">Envoyé par</th>
-                                    <th style="width:220px;">Réparation validée par</th>
-                                    <th style="width:110px;">Valeur</th>
-                                    <th>Commentaire</th>
-                                    <th style="width:110px;">Photos</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php if (empty($rows)): ?>
+                $renderActionBadge = function (string $action): string {
+                    return match ($action) {
+                        'declarer_panne' => '<span class="badge bg-danger">panne déclarée</span>',
+                        'declarer_ok'    => '<span class="badge bg-success">panne résolue</span>',
+                        'compteur_maj'   => '<span class="badge bg-secondary">relevé compteur</span>',
+                        default          => '<span class="badge bg-secondary">' . htmlspecialchars($action) . '</span>',
+                    };
+                };
+
+                $renderValue = fn($action, $val) => (is_numeric($val) && in_array($action, ['compteur_maj', 'declarer_panne', 'declarer_ok'], true))
+                    ? htmlspecialchars((string)$val) . ' h'
+                    : '—';
+
+                $renderPhoto = function (?string $filePath) {
+                    if (!$filePath) return '—';
+                    $url = '/' . ltrim($filePath, '/');
+                    $ext = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
+                    if (in_array($ext, ['jpg', 'jpeg', 'png', 'webp'], true)) {
+                        return '<a href="' . htmlspecialchars($url) . '" target="_blank" rel="noopener">
+                      <img src="' . htmlspecialchars($url) . '" alt="pièce jointe"
+                           style="max-width:70px; max-height:70px; border-radius:6px;"/>
+                    </a>';
+                    }
+                    if ($ext === 'pdf') return '<a href="' . htmlspecialchars($url) . '" target="_blank" rel="noopener">Voir le PDF</a>';
+                    return '<a href="' . htmlspecialchars($url) . '" target="_blank" rel="noopener">Voir le fichier</a>';
+                };
+                ?>
+
+                <div class="card mt-3">
+                    <div class="card-body">
+                        <h5 class="card-title mb-3">Historique des états</h5>
+
+                        <div class="table-responsive">
+                            <table class="table table-sm align-middle">
+                                <thead>
                                     <tr>
-                                        <td colspan="7" class="text-muted">Aucun évènement enregistré.</td>
+                                        <th style="width:100px;">N°</th>
+                                        <th style="width:160px;">Date</th>
+                                        <th style="width:150px;">Action</th>
+                                        <th style="width:190px;">Envoyé par</th>
+                                        <th style="width:190px;">Chantier</th>
+                                        <th style="width:220px;">Réparation validée par</th>
+                                        <th style="width:110px;">Valeur</th>
+                                        <th>Commentaire</th>
+                                        <th style="width:110px;">Photos</th>
                                     </tr>
-                                    <?php else: foreach ($rows as $r):
-                                        $num    = !empty($r['alert_id']) ? '#' . (int)$r['alert_id'] : '—';
-                                        $action = (string)$r['action'];
-
-                                        // Valeur (afficher pour compteur_maj, declarer_panne, declarer_ok)
-                                        $val = (is_numeric($r['valeur_int']) && in_array($action, ['compteur_maj', 'declarer_panne', 'declarer_ok'], true))
-                                            ? htmlspecialchars((string)$r['valeur_int']) . ' h' : '—';
-
-                                        // Commentaire : si résoudre ciblée et alert_id présent, on impose le libellé demandé
-                                        if ($action === 'declarer_ok' && !empty($r['alert_id'])) {
-                                            $com = 'problème #' . (int)$r['alert_id'] . ' résolu';
-                                        } else {
-                                            $com = trim((string)$r['commentaire']) !== '' ? htmlspecialchars((string)$r['commentaire']) : '—';
-                                        }
-
-
-                                        $who    = $fullName($r['auteur_nom'] ?? '', $r['auteur_prenom'] ?? '');
-
-
-                                        $photo  = $renderPhoto($r['fichier'] ?? null);
-
-                                        // auteurs
-                                        $envoyePar = '—';
-                                        $reparePar = '—';
-                                        if ($action === 'declarer_panne') {
-                                            $envoyePar = ($who !== '—') ? $who : '<span class="text-muted">QR public</span>';
-                                        } elseif ($action === 'declarer_ok') {
-                                            $reparePar = ($who !== '—') ? $who : '<span class="text-muted">—</span>';
-                                        }
-
-                                        // couleur de ligne
-                                        $rowClass = match ($action) {
-                                            'declarer_panne' => 'table-danger',
-                                            'declarer_ok'    => 'table-success',
-                                            'compteur_maj'   => 'table-secondary',
-                                            default          => ''
-                                        };
-                                    ?>
-                                        <tr class="<?= $rowClass ?>">
-                                            <td><?= $num ?></td>
-                                            <td><?= htmlspecialchars(date('d/m/Y H:i', strtotime((string)($r['created_at'] ?? 'now')))) ?></td>
-                                            <td><?= $renderActionBadge($action) ?></td>
-                                            <td><?= $envoyePar ?></td>
-                                            <td><?= $reparePar ?></td>
-                                            <td><?= $val ?></td>
-                                            <td><?= $com ?></td>
-                                            <td><?= $photo ?></td>
+                                </thead>
+                                <tbody>
+                                    <?php if (empty($rows)): ?>
+                                        <tr>
+                                            <td colspan="9" class="text-muted">Aucun évènement enregistré.</td>
                                         </tr>
-                                <?php endforeach;
-                                endif; ?>
-                            </tbody>
-                        </table>
+                                        <?php else: foreach ($rows as $r):
+                                            $num     = !empty($r['alert_id']) ? '#' . (int)$r['alert_id'] : '—';
+                                            $action  = (string)$r['action'];
+                                            $chantier = trim((string)($r['chantier_nom'] ?? '')) !== '' ? htmlspecialchars((string)$r['chantier_nom']) : '—';
+                                            $val = (is_numeric($r['valeur_int']) && in_array($action, ['compteur_maj', 'declarer_panne', 'declarer_ok'], true))
+                                                ? htmlspecialchars((string)$r['valeur_int']) . ' h' : '—';
+                                            if ($action === 'declarer_ok' && !empty($r['alert_id'])) {
+                                                $com = 'problème #' . (int)$r['alert_id'] . ' résolu';
+                                            } else {
+                                                $com = trim((string)$r['commentaire']) !== '' ? htmlspecialchars((string)$r['commentaire']) : '—';
+                                            }
+                                            $who   = $fullName($r['auteur_nom'] ?? '', $r['auteur_prenom'] ?? '');
+                                            $photo = $renderPhoto($r['fichier'] ?? null);
+                                            $envoyePar = '—';
+                                            $reparePar = '—';
+                                            if ($action === 'declarer_panne') {
+                                                $envoyePar = ($who !== '—') ? $who : '<span class="text-muted">QR public</span>';
+                                            } elseif ($action === 'declarer_ok') {
+                                                $reparePar = ($who !== '—') ? $who : '<span class="text-muted">—</span>';
+                                            }
+                                            $rowClass = match ($action) {
+                                                'declarer_panne' => 'table-danger',
+                                                'declarer_ok'    => 'table-success',
+                                                'compteur_maj'   => 'table-secondary',
+                                                default          => ''
+                                            };
+                                        ?>
+                                            <tr class="<?= $rowClass ?>">
+                                                <td><?= $num ?></td>
+                                                <td><?= htmlspecialchars(date('d/m/Y H:i', strtotime((string)($r['created_at'] ?? 'now')))) ?></td>
+                                                <td><?= $renderActionBadge($action) ?></td>
+                                                <td><?= $envoyePar ?></td>
+                                                <td><?= $chantier ?></td>
+                                                <td><?= $reparePar ?></td>
+                                                <td><?= $val ?></td>
+                                                <td><?= $com ?></td>
+                                                <td><?= $photo ?></td>
+                                            </tr>
+                                    <?php endforeach;
+                                    endif; ?>
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             </div>
-        </div><!-- /tab-pane etatlog -->
-
-
+        <?php endif; ?>
 
 
     </div>

@@ -9,6 +9,22 @@ header('Content-Type: application/json; charset=utf-8');
 ini_set('display_errors', '0');
 ini_set('log_errors', '1');
 
+// --- Trappe erreurs fatales -> renvoyer du JSON propre ---
+register_shutdown_function(function () {
+    $e = error_get_last();
+    if ($e && in_array($e['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
+        if (!headers_sent()) {
+            header('Content-Type: application/json; charset=utf-8');
+        }
+        http_response_code(500);
+        echo json_encode([
+            'ok'  => false,
+            'msg' => 'Fatal: ' . $e['message'] . ' @ ' . basename($e['file']) . ':' . $e['line'],
+        ], JSON_UNESCAPED_UNICODE);
+    }
+});
+
+
 function jexit(int $code, array $payload): void
 {
     http_response_code($code);
@@ -22,14 +38,14 @@ function jexit(int $code, array $payload): void
 function article_by_id(PDO $pdo, int $id): ?array
 {
     $st = $pdo->prepare("
-    SELECT id, entreprise_id, maintenance_mode,
-           compteur_heures,
-           COALESCE(hour_meter_initial, 0)      AS hour_meter_initial,
-           COALESCE(maintenance_threshold, 150) AS maintenance_threshold
-    FROM stock
-    WHERE id = :id
-    LIMIT 1
-  ");
+        SELECT id, entreprise_id, maintenance_mode,
+               compteur_heures,
+               COALESCE(hour_meter_initial, 0)      AS hour_meter_initial,
+               COALESCE(maintenance_threshold, 150) AS maintenance_threshold
+        FROM stock
+        WHERE id = :id
+        LIMIT 1
+    ");
     $st->execute([':id' => $id]);
     $row = $st->fetch(PDO::FETCH_ASSOC);
     return $row ?: null;
@@ -38,27 +54,27 @@ function article_by_id(PDO $pdo, int $id): ?array
 function maintenance_alert_exists(PDO $pdo, int $stockId): bool
 {
     $q = $pdo->prepare("
-    SELECT id
-    FROM stock_alerts
-    WHERE stock_id = :sid
-      AND type = 'incident'
-      AND url = 'maintenance_due'
-      AND is_read = 0
-      AND archived_at IS NULL
-    LIMIT 1
-  ");
+        SELECT id
+        FROM stock_alerts
+        WHERE stock_id = :sid
+          AND type = 'incident'
+          AND url = 'maintenance_due'
+          AND is_read = 0
+          AND archived_at IS NULL
+        LIMIT 1
+    ");
     $q->execute([':sid' => $stockId]);
     return (bool)$q->fetchColumn();
 }
 
 function create_maintenance_alert(PDO $pdo, int $stockId, int $entrepriseId, int $current, int $limit): void
 {
-    if (maintenance_alert_exists($pdo, $stockId)) return; // anti-doublon
+    if (maintenance_alert_exists($pdo, $stockId)) return;
     $msg = "Entretien à prévoir : compteur {$current} h (≥ {$limit} h).";
     $ins = $pdo->prepare("
-    INSERT INTO stock_alerts (entreprise_id, stock_id, type, message, url, created_at, is_read)
-    VALUES (:eid, :sid, 'incident', :msg, 'maintenance_due', NOW(), 0)
-  ");
+        INSERT INTO stock_alerts (entreprise_id, stock_id, type, message, url, created_at, is_read)
+        VALUES (:eid, :sid, 'incident', :msg, 'maintenance_due', NOW(), 0)
+    ");
     $ins->execute([':eid' => $entrepriseId, ':sid' => $stockId, ':msg' => $msg]);
 }
 
@@ -71,31 +87,51 @@ function now(): string
 function recent_problem_exists(PDO $pdo, int $stockId, string $msg): ?int
 {
     $q = $pdo->prepare("
-    SELECT id
-    FROM stock_alerts
-    WHERE stock_id = :sid
-      AND type = 'incident'
-      AND url  = 'problem'
-      AND archived_at IS NULL
-      AND is_read = 0
-      AND message = :msg
-      AND created_at >= (NOW() - INTERVAL 2 MINUTE)
-    ORDER BY id DESC
-    LIMIT 1
-  ");
+        SELECT id
+        FROM stock_alerts
+        WHERE stock_id = :sid
+          AND type = 'incident'
+          AND url  = 'problem'
+          AND archived_at IS NULL
+          AND is_read = 0
+          AND message = :msg
+          AND created_at >= (NOW() - INTERVAL 2 MINUTE)
+        ORDER BY id DESC
+        LIMIT 1
+    ");
     $q->execute([':sid' => $stockId, ':msg' => $msg]);
     $id = $q->fetchColumn();
     return $id ? (int)$id : null;
 }
 
+/** Déduit le chantier courant depuis les affectations (stock_chantiers) */
+function current_chantier_id(PDO $pdo, int $stockId, int $entId = 0): ?int
+{
+    $sql = "
+        SELECT sc.chantier_id
+        FROM stock_chantiers sc
+        " . ($entId ? "JOIN chantiers c ON c.id = sc.chantier_id AND c.entreprise_id = :eid" : "") . "
+        WHERE sc.stock_id = :sid
+          AND sc.quantite > 0
+        ORDER BY sc.created_at DESC, sc.id DESC
+        LIMIT 1
+    ";
+    $st = $pdo->prepare($sql);
+    $params = [':sid' => $stockId];
+    if ($entId) $params[':eid'] = $entId;
+    $st->execute($params);
+    $cid = $st->fetchColumn();
+    return $cid ? (int)$cid : null;
+}
+
 /* -------------------------------------------------------
-   Paramètres
+   Paramètres bruts
 ------------------------------------------------------- */
 $actionRaw   = (string)($_POST['action'] ?? '');
 $articleId   = (int)($_POST['article_id'] ?? ($_POST['stock_id'] ?? 0));
-$valeurInt   = isset($_POST['valeur_int']) ? (int)$_POST['valeur_int'] : null;   // alias compteur_maj
-$hours       = isset($_POST['hours']) ? (int)$_POST['hours'] : null;             // alias QR / modale
-$chantierId  = isset($_POST['chantier_id']) ? (int)$_POST['chantier_id'] : null; // pour logs
+$valeurInt   = array_key_exists('valeur_int', $_POST) ? (int)$_POST['valeur_int'] : null;
+$hours       = array_key_exists('hours', $_POST)      ? (int)$_POST['hours']      : null;
+$chantierId  = array_key_exists('chantier_id', $_POST) ? (int)$_POST['chantier_id'] : null;
 $comment     = trim((string)($_POST['commentaire'] ?? ($_POST['message'] ?? '')));
 
 $actionMap = [
@@ -107,10 +143,10 @@ $actionMap = [
 $action = $actionMap[$actionRaw] ?? $actionRaw;
 
 /* -------------------------------------------------------
-   Auth / contexte
+   Auth / contexte (AVANT toute déduction de chantier_id)
 ------------------------------------------------------- */
 $isLogged = isset($_SESSION['utilisateurs']);
-$uid      = $isLogged ? (int)$_SESSION['utilisateurs']['id'] : 0;
+$uid      = $isLogged ? (int)($_SESSION['utilisateurs']['id'] ?? 0) : 0;
 $entId    = $isLogged ? (int)($_SESSION['utilisateurs']['entreprise_id'] ?? 0) : 0;
 $role     = $isLogged ? (string)($_SESSION['utilisateurs']['fonction'] ?? '') : '';
 
@@ -130,6 +166,38 @@ if ($isLogged && $entId > 0 && (int)$art['entreprise_id'] !== $entId) {
 $maintenanceMode = (string)($art['maintenance_mode'] ?? 'none');
 $profil = $maintenanceMode === 'hour_meter' ? 'compteur_heures'
     : ($maintenanceMode === 'electrical' ? 'autre' : 'aucun');
+
+/* -------------------------------------------------------
+   Déduction du chantier_id (APRES $entId)
+------------------------------------------------------- */
+// 1) si le POST n'a pas donné chantier_id, on essaie l'affectation active
+if (!$chantierId) {
+    $chantierId = current_chantier_id($pdo, $articleId, $entId);
+}
+
+// 2) sinon, on tente le dernier mouvement impliquant un chantier
+if (!$chantierId) {
+    $qCid = $pdo->prepare("
+        SELECT
+            CASE
+                WHEN dest_type = 'chantier' THEN dest_id
+                WHEN source_type = 'chantier' THEN source_id
+                ELSE NULL
+            END AS chantier_id
+        FROM stock_mouvements
+        WHERE stock_id = :sid
+          AND (
+                dest_type = 'chantier'
+             OR source_type = 'chantier'
+          )
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+    ");
+    $qCid->execute([':sid' => $articleId]);
+    $cid = $qCid->fetchColumn();
+    $chantierId = $cid ? (int)$cid : null;
+}
+
 
 /* -------------------------------------------------------
    Upload optionnel (pour déclarer_panne)
@@ -176,9 +244,9 @@ try {
         // 1) log
         $source = ($role === 'chef') ? 'chef' : (($role === 'depot') ? 'depot' : (($role === 'administrateur') ? 'admin' : 'qr'));
         $insH = $pdo->prepare("
-      INSERT INTO stock_hour_logs (stock_id, chantier_id, utilisateur_id, hours, source)
-      VALUES (?, ?, ?, ?, ?)
-    ");
+            INSERT INTO stock_hour_logs (stock_id, chantier_id, utilisateur_id, hours, source)
+            VALUES (?, ?, ?, ?, ?)
+        ");
         $insH->execute([$articleId, $chantierId, ($uid ?: null), $val, $source]);
 
         // 2) maj champ direct pour l'affichage rapide
@@ -187,36 +255,36 @@ try {
 
         // 3) fermer les demandes de relevé (tag = hour_meter_request)
         $pdo->prepare("
-      UPDATE stock_alerts
-         SET is_read = 1, archived_at = NOW()
-       WHERE stock_id = :sid
-         AND type = 'incident'
-         AND url  = 'hour_meter_request'
-         AND archived_at IS NULL
-    ")->execute([':sid' => $articleId]);
+            UPDATE stock_alerts
+               SET is_read = 1, archived_at = NOW()
+             WHERE stock_id = :sid
+               AND type = 'incident'
+               AND url  = 'hour_meter_request'
+               AND archived_at IS NULL
+        ")->execute([':sid' => $articleId]);
 
         // 4) seuil entretien : initial + threshold
         $initial   = (int)($art['hour_meter_initial'] ?? 0);
         $threshold = (int)($art['maintenance_threshold'] ?? 150);
         $limit     = $initial + $threshold;
-
         if ($val >= $limit) {
             create_maintenance_alert($pdo, $articleId, (int)$art['entreprise_id'], $val, $limit);
         }
 
         // 5) historique
         $ins = $pdo->prepare("
-      INSERT INTO article_etats
-        (entreprise_id, article_id, profil_qr, action, valeur_int, commentaire, fichier, created_by)
-      VALUES
-        (:eid, :aid, :profil, 'compteur_maj', :val, NULL, NULL, :uid)
-    ");
+            INSERT INTO article_etats
+              (entreprise_id, article_id, chantier_id, profil_qr, action, valeur_int, commentaire, fichier, created_by)
+            VALUES
+              (:eid, :aid, :cid, :profil, 'compteur_maj', :val, NULL, NULL, :uid)
+        ");
         $ins->execute([
-            ':eid' => (int)$art['entreprise_id'],
-            ':aid' => $articleId,
+            ':eid'    => (int)$art['entreprise_id'],
+            ':aid'    => $articleId,
+            ':cid'    => ($chantierId ?: null),
             ':profil' => $profil,
-            ':val' => $val,
-            ':uid' => ($uid ?: null),
+            ':val'    => $val,
+            ':uid'    => ($uid ?: null),
         ]);
 
         $pdo->commit();
@@ -238,7 +306,7 @@ try {
                 jexit(400, ['ok' => false, 'msg' => 'Compteur invalide']);
             }
             $valOpt = $hours;
-        } elseif ($valeurInt !== null) { // alias
+        } elseif ($valeurInt !== null) {
             if (!is_int($valeurInt) || $valeurInt < 0) {
                 $pdo->rollBack();
                 jexit(400, ['ok' => false, 'msg' => 'Compteur invalide']);
@@ -246,46 +314,44 @@ try {
             $valOpt = $valeurInt;
         }
 
-        // 🔒 Idempotence : si une alerte identique vient d'être créée, on n'en recrée pas
+        // Idempotence : si une alerte identique vient d'être créée, on n'en recrée pas
         if ($dupId = recent_problem_exists($pdo, $articleId, $comment)) {
-            // Vérifie s'il y a déjà un historique lié à cette alerte
             $chk = $pdo->prepare("SELECT id FROM article_etats WHERE alert_id = :aid LIMIT 1");
             $chk->execute([':aid' => $dupId]);
             $hasHist = (bool)$chk->fetchColumn();
 
             if (!$hasHist) {
-                // (optionnel) tu peux garder ceci si tu veux absolument tracer UNE fois
                 $insDup = $pdo->prepare("
-      INSERT INTO article_etats
-        (entreprise_id, article_id, profil_qr, action, valeur_int, commentaire, fichier, created_by, alert_id)
-      VALUES
-        (:eid, :aid, :profil, 'declarer_panne', :val, :com, :file, :uid, :alert_id)
-    ");
+                    INSERT INTO article_etats
+                      (entreprise_id, article_id, chantier_id, profil_qr, action, valeur_int, commentaire, fichier, created_by, alert_id)
+                    VALUES
+                      (:eid, :aid, :cid, :profil, 'declarer_panne', :val, :com, :file, :uid, :alert_id)
+                ");
                 $insDup->execute([
-                    ':eid' => (int)$art['entreprise_id'],
-                    ':aid' => $articleId,
-                    ':profil' => $profil,
-                    ':val' => $valOpt,
-                    ':com' => $comment,
-                    ':file' => $fichierPath,
-                    ':uid' => ($uid ?: null),
+                    ':eid'      => (int)$art['entreprise_id'],
+                    ':aid'      => $articleId,
+                    ':cid'      => ($chantierId ?: null),
+                    ':profil'   => $profil,
+                    ':val'      => $valOpt,
+                    ':com'      => $comment,
+                    ':file'     => $fichierPath,
+                    ':uid'      => ($uid ?: null),
                     ':alert_id' => $dupId,
                 ]);
             }
 
             $pdo->commit();
             jexit(200, [
-                'ok' => true,
+                'ok'    => true,
                 'alert' => [
-                    'id' => $dupId,
-                    'message' => $comment,
+                    'id'         => $dupId,
+                    'message'    => $comment,
                     'created_at' => now(),
-                    'url' => 'problem',
-                    'is_read' => 0,
+                    'url'        => 'problem',
+                    'is_read'    => 0,
                 ],
             ]);
         }
-
 
         // passe en panne
         $pdo->prepare("UPDATE stock SET panne=1 WHERE id=:id")->execute([':id' => $articleId]);
@@ -294,20 +360,20 @@ try {
         if ($valOpt !== null) {
             $source = ($role === 'chef') ? 'chef' : (($role === 'depot') ? 'depot' : (($role === 'administrateur') ? 'admin' : 'qr'));
             $insH = $pdo->prepare("
-        INSERT INTO stock_hour_logs (stock_id, chantier_id, utilisateur_id, hours, source)
-        VALUES (?, ?, ?, ?, ?)
-      ");
+                INSERT INTO stock_hour_logs (stock_id, chantier_id, utilisateur_id, hours, source)
+                VALUES (?, ?, ?, ?, ?)
+            ");
             $insH->execute([$articleId, $chantierId, ($uid ?: null), $valOpt, $source]);
 
             $pdo->prepare("UPDATE stock SET compteur_heures = :v WHERE id = :id")
                 ->execute([':v' => $valOpt, ':id' => $articleId]);
         }
 
-        // alerte problème (type=incident, tag=problem)
+        // alerte problème
         $insAlert = $pdo->prepare("
-      INSERT INTO stock_alerts (entreprise_id, stock_id, type, message, url, created_at, is_read)
-      VALUES (:eid, :sid, 'incident', :msg, 'problem', NOW(), 0)
-    ");
+            INSERT INTO stock_alerts (entreprise_id, stock_id, type, message, url, created_at, is_read)
+            VALUES (:eid, :sid, 'incident', :msg, 'problem', NOW(), 0)
+        ");
         $insAlert->execute([
             ':eid' => (int)$art['entreprise_id'],
             ':sid' => $articleId,
@@ -320,27 +386,28 @@ try {
         $st->execute([':id' => $alertId]);
         $createdAt = (string)$st->fetchColumn();
 
-        // historique (valeur_int = compteur si fourni, fichier = photo, + lien à l'alerte)
+        // historique
         $ins = $pdo->prepare("
-      INSERT INTO article_etats
-        (entreprise_id, article_id, profil_qr, action, valeur_int, commentaire, fichier, created_by, alert_id)
-      VALUES
-        (:eid, :aid, :profil, 'declarer_panne', :val, :com, :file, :uid, :alert_id)
-    ");
+            INSERT INTO article_etats
+              (entreprise_id, article_id, chantier_id, profil_qr, action, valeur_int, commentaire, fichier, created_by, alert_id)
+            VALUES
+              (:eid, :aid, :cid, :profil, 'declarer_panne', :val, :com, :file, :uid, :alert_id)
+        ");
         $ins->execute([
-            ':eid' => (int)$art['entreprise_id'],
-            ':aid' => $articleId,
-            ':profil' => $profil,
-            ':val' => $valOpt,
-            ':com' => $comment,
-            ':file' => $fichierPath,
-            ':uid' => ($uid ?: null),
+            ':eid'      => (int)$art['entreprise_id'],
+            ':aid'      => $articleId,
+            ':cid'      => ($chantierId ?: null),
+            ':profil'   => $profil,
+            ':val'      => $valOpt,
+            ':com'      => $comment,
+            ':file'     => $fichierPath,
+            ':uid'      => ($uid ?: null),
             ':alert_id' => $alertId,
         ]);
 
         $pdo->commit();
         jexit(200, [
-            'ok' => true,
+            'ok'    => true,
             'alert' => [
                 'id'         => $alertId,
                 'message'    => $comment,
@@ -355,31 +422,29 @@ try {
     if ($action === 'declarer_ok') {
         $pdo->prepare("UPDATE stock SET panne=0 WHERE id=:id")->execute([':id' => $articleId]);
 
-        // on archive toutes les alertes ouvertes taggées problem/generic
         $pdo->prepare("
-      UPDATE stock_alerts
-         SET is_read=1, archived_at=NOW()
-       WHERE stock_id=:sid
-         AND archived_at IS NULL
-         AND type='incident'
-         AND (url IN ('problem','generic') OR url IS NULL)
-    ")->execute([':sid' => $articleId]);
+            UPDATE stock_alerts
+               SET is_read=1, archived_at=NOW()
+             WHERE stock_id=:sid
+               AND archived_at IS NULL
+               AND type='incident'
+               AND (url IN ('problem','generic') OR url IS NULL)
+        ")->execute([':sid' => $articleId]);
 
-        // compteur courant
         $curHours = (int)$pdo->query("SELECT compteur_heures FROM stock WHERE id = {$articleId}")->fetchColumn();
 
-        // historique avec valeur_int
         $ins = $pdo->prepare("
-    INSERT INTO article_etats
-      (entreprise_id, article_id, profil_qr, action, valeur_int, commentaire, fichier, created_by)
-    VALUES
-      (:eid, :aid, :profil, 'declarer_ok', :val, NULL, NULL, :uid)
-  ");
+            INSERT INTO article_etats
+              (entreprise_id, article_id, chantier_id, profil_qr, action, valeur_int, commentaire, fichier, created_by)
+            VALUES
+              (:eid, :aid, :cid, :profil, 'declarer_ok', :val, NULL, NULL, :uid)
+        ");
         $ins->execute([
             ':eid'    => (int)$art['entreprise_id'],
             ':aid'    => $articleId,
+            ':cid'    => ($chantierId ?: null),
             ':profil' => $profil,
-            ':val'    => $curHours, // 👈
+            ':val'    => $curHours,
             ':uid'    => ($uid ?: null),
         ]);
 
@@ -395,48 +460,43 @@ try {
             jexit(400, ['ok' => false, 'msg' => 'alert_id manquant']);
         }
 
-        // archive l’alerte
         $u = $pdo->prepare("UPDATE stock_alerts SET is_read=1, archived_at=NOW() WHERE id=:id AND stock_id=:sid");
         $u->execute([':id' => $alertId, ':sid' => $articleId]);
 
-        // s'il ne reste plus d'alertes ouvertes -> repasse l'article en OK
         $q = $pdo->prepare("
-      SELECT COUNT(*)
-      FROM stock_alerts
-      WHERE stock_id=:sid
-        AND archived_at IS NULL
-        AND (
-              is_read = 0
-           OR (type='incident' AND url IN ('problem','generic'))
-        )
-    ");
+            SELECT COUNT(*)
+            FROM stock_alerts
+            WHERE stock_id=:sid
+              AND archived_at IS NULL
+              AND (
+                    is_read = 0
+                 OR (type='incident' AND url IN ('problem','generic'))
+              )
+        ");
         $q->execute([':sid' => $articleId]);
         $remain = (int)$q->fetchColumn();
         if ($remain === 0) {
             $pdo->prepare("UPDATE stock SET panne=0 WHERE id=:id")->execute([':id' => $articleId]);
         }
 
-        // compteur courant au moment de la résolution
         $curHours = (int)$pdo->query("SELECT compteur_heures FROM stock WHERE id = {$articleId}")->fetchColumn();
 
-        // historique
         $i = $pdo->prepare("
-  INSERT INTO article_etats
-    (entreprise_id, article_id, profil_qr, action, valeur_int, commentaire, fichier, created_by, alert_id)
-  VALUES
-    (:eid, :aid, :profil, 'declarer_ok', :val, :com, NULL, :uid, :alert_id)
-");
-$i->execute([
-  ':eid'      => (int)$art['entreprise_id'],
-  ':aid'      => $articleId,
-  ':profil'   => $profil,
-  ':val'      => $curHours,                       // valeur du compteur au moment de la résolution
-  ':com'      => 'problème #'.$alertId.' résolu', // 👈 wording demandé
-  ':uid'      => ($uid ?: null),
-  ':alert_id' => $alertId,                        // 👈 on relie à l’alerte
-]);
-
-
+            INSERT INTO article_etats
+              (entreprise_id, article_id, chantier_id, profil_qr, action, valeur_int, commentaire, fichier, created_by, alert_id)
+            VALUES
+              (:eid, :aid, :cid, :profil, 'declarer_ok', :val, :com, NULL, :uid, :alert_id)
+        ");
+        $i->execute([
+            ':eid'      => (int)$art['entreprise_id'],
+            ':aid'      => $articleId,
+            ':cid'      => ($chantierId ?: null),
+            ':profil'   => $profil,
+            ':val'      => $curHours,
+            ':com'      => 'problème #' . $alertId . ' résolu',
+            ':uid'      => ($uid ?: null),
+            ':alert_id' => $alertId,
+        ]);
 
         $pdo->commit();
         jexit(200, ['ok' => true]);
