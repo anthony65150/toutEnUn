@@ -319,10 +319,11 @@ if ($depotId > 0) {
 ================================ */
 try {
     $sql = "
-        SELECT c.nom AS chantier_nom, sc.quantite
+        SELECT sc.chantier_id, c.nom AS chantier_nom, sc.quantite
         FROM stock_chantiers sc
         JOIN chantiers c ON c.id = sc.chantier_id
-        WHERE sc.stock_id = :sid AND sc.quantite > 0
+        WHERE sc.stock_id = :sid
+          AND sc.quantite > 0
     ";
     $params = [':sid' => $articleId];
     if ($ENT_ID !== null) {
@@ -335,10 +336,11 @@ try {
     $quantitesParChantier = $stmt->fetchAll(PDO::FETCH_ASSOC);
 } catch (Throwable $e) {
     $stmt = $pdo->prepare("
-        SELECT c.nom AS chantier_nom, sc.quantite
+        SELECT sc.chantier_id, c.nom AS chantier_nom, sc.quantite
         FROM stock_chantiers sc
         JOIN chantiers c ON c.id = sc.chantier_id
-        WHERE sc.stock_id = ? AND sc.quantite > 0
+        WHERE sc.stock_id = ?
+          AND sc.quantite > 0
         ORDER BY c.nom ASC
     ");
     $stmt->execute([$articleId]);
@@ -555,6 +557,37 @@ $st = $pdo->prepare("
 $st->execute([':sid' => $articleId]);
 $archivedAlerts = $st->fetchAll(PDO::FETCH_ASSOC);
 
+// --- Répartition de l'article par chantier (quantités > 0)
+$chantiersLoc = [];
+try {
+    $sql = "
+        SELECT sc.chantier_id, c.nom AS chantier_nom, sc.quantite
+        FROM stock_chantiers sc
+        JOIN chantiers c ON c.id = sc.chantier_id
+        WHERE sc.stock_id = :aid
+          AND sc.quantite > 0
+          " . ($ENT_ID ? " AND c.entreprise_id = :eid " : "") . "
+        ORDER BY c.nom ASC
+    ";
+    $st = $pdo->prepare($sql);
+    $st->bindValue(':aid', (int)$articleId, PDO::PARAM_INT);
+    if ($ENT_ID) $st->bindValue(':eid', (int)$ENT_ID, PDO::PARAM_INT);
+    $st->execute();
+    $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+
+    foreach ($rows as $r) {
+        $q = (int)$r['quantite'];
+        $nom = (string)$r['chantier_nom'];
+        // Formattage "Nom : 3 u" (avec pluriel simple)
+        $chantiersLoc[] = $nom . ' : ' . $q . ' unité' . ($q > 1 ? 's' : '');
+    }
+} catch (Throwable $e) {
+    // silencieux, on garde la page fonctionnelle
+    $chantiersLoc = [];
+}
+
+
+
 ?>
 
 <?php if ($qrSimpleMode): ?>
@@ -575,12 +608,29 @@ $archivedAlerts = $st->fetchAll(PDO::FETCH_ASSOC);
         $qTot = $qDepot + $qCh;
         ?>
         <div class="card mb-3">
-            <div class="card-body d-flex gap-3 flex-wrap">
+            <div class="card-body d-flex gap-3 flex-wrap align-items-start">
                 <div><span class="text-muted">Total :</span> <strong><?= $qTot ?></strong></div>
-                <div><span class="text-muted">Chantiers :</span> <strong><?= $qCh ?></strong></div>
+
+                <div>
+                    <span class="text-muted">Chantiers :</span> <strong><?= (int)$quantiteChantier ?></strong>
+
+                    <?php if (!empty($chantiersLoc)): ?>
+                        <div class="small text-muted mt-1">
+                            <i class="bi bi-geo-alt"></i>
+                            <?= htmlspecialchars(implode(' · ', $chantiersLoc), ENT_QUOTES, 'UTF-8') ?>
+                        </div>
+                    <?php else: ?>
+                        <div class="small text-muted mt-1">
+                            <i class="bi bi-geo-alt"></i> Aucun chantier
+                        </div>
+                    <?php endif; ?>
+                </div>
+
+
                 <div><span class="text-muted">Dépôts :</span> <strong><?= $qDepot ?></strong></div>
             </div>
         </div>
+
 
         <?php if ($maintenanceMode === 'hour_meter' || $hasHourMeter): ?>
             <div class="card mb-3">
@@ -849,50 +899,79 @@ $archivedAlerts = $st->fetchAll(PDO::FETCH_ASSOC);
     </div>
 
     <!-- Cartes quantités + photo -->
-    <div class="row g-4 mb-4">
-        <div class="col-md-4">
-            <div class="card shadow-sm">
-                <?php if (!empty($article['photo'])): ?>
-                    <?php $photoUrl = '/' . ltrim($article['photo'], '/'); ?>
-                    <img src="<?= htmlspecialchars($photoUrl) ?>" class="card-img-top img-fluid" alt="Photo de l'article" style="max-height: 320px; object-fit: contain;">
-                <?php else: ?>
-                    <div class="text-muted text-center p-4">Aucune photo disponible</div>
-                <?php endif; ?>
-            </div>
-        </div>
+    <div class="card mb-3 p-4 bg-body-tertiary border-0 shadow-sm">
+        <div class="row align-items-center g-3">
 
-        <div class="col-md-8">
-            <div class="card shadow-sm p-3">
-                <h5 class="fw-bold mb-3">Quantités disponibles</h5>
-                <div class="row text-center">
-                    <div class="col">
-                        <div class="bg-light p-3 rounded-2">
-                            <div class="fw-bold fs-4"><?= $totalQuantite ?></div>
-                            <div class="text-muted">Total</div>
-                        </div>
-                    </div>
-                    <div class="col">
-                        <div class="bg-light p-3 rounded-2">
-                            <div class="fw-bold fs-4"><?= $quantiteChantier ?></div>
-                            <div class="text-muted">Sur chantiers</div>
-                        </div>
-                    </div>
-                    <div class="col">
-                        <div class="bg-light p-3 rounded-2">
-                            <div class="fw-bold fs-4"><?= $quantiteDepot ?></div>
-                            <div class="text-muted">En dépôt</div>
-                        </div>
-                    </div>
+            <!-- PHOTO À GAUCHE -->
+            <div class="col-md-4">
+                <div class="card shadow-sm">
+                    <?php if (!empty($article['photo'])): ?>
+                        <?php $photoUrl = '/' . ltrim($article['photo'], '/'); ?>
+                        <img src="<?= htmlspecialchars($photoUrl) ?>" class="card-img-top img-fluid" alt="Photo de l'article" style="max-height: 320px; object-fit: contain;">
+                    <?php else: ?>
+                        <div class="text-muted text-center p-4">Aucune photo disponible</div>
+                    <?php endif; ?>
                 </div>
-                <?php if ($currentQtyContext !== null): ?>
-                    <?php $alertClass = $currentQtyContext > 0 ? 'alert-success' : 'alert-danger'; ?>
-                    <div class="alert <?= $alertClass ?> mt-3 mb-0 py-2">
-                        <?= htmlspecialchars($currentLabelContext) ?> : <strong><?= (int)$currentQtyContext ?></strong>
-                    </div>
-                <?php endif; ?>
             </div>
+
+            <!-- QUANTITÉS CENTRÉES À DROITE -->
+            <div class="col-md-8">
+                <div class="text-center mb-3">
+                    <h5 class="fw-bold">Quantités disponibles</h5>
+                </div>
+
+                <div class="d-flex justify-content-center flex-wrap text-center">
+
+                    <!-- Total -->
+                    <div class="p-3 rounded-3 shadow-sm mx-2 mb-2"
+                        style="min-width:180px; background-color:#e0e0e0;">
+                        <div class="fw-bold fs-4 text-dark"><?= (int)$totalQuantite ?></div>
+                        <div class="text-secondary">Total</div>
+                    </div>
+
+                    <!-- Sur chantiers -->
+                    <div class="p-3 rounded-3 shadow-sm mx-2 mb-2"
+                        style="min-width:180px; background-color:#e0e0e0;">
+                        <div class="fw-bold fs-4 text-dark"><?= (int)$quantiteChantier ?></div>
+                        <div class="text-secondary">Sur chantiers</div>
+
+                        <?php if (!empty($quantitesParChantier)): ?>
+                            <ul class="list-unstyled mb-0 small mt-2 text-muted" style="line-height:1.25; max-height:120px; overflow:auto;">
+                                <?php foreach ($quantitesParChantier as $r): ?>
+                                    <?php
+                                    $id  = (int)$r['chantier_id'];
+                                    $nom = htmlspecialchars($r['chantier_nom'], ENT_QUOTES, 'UTF-8');
+                                    $q   = (int)$r['quantite'];
+                                    $label = $nom . ' : ' . $q . ' unité' . ($q > 1 ? 's' : '');
+                                    ?>
+                                    <li class="d-flex align-items-start gap-1">
+                                        <i class="bi bi-geo-alt mt-1"></i>
+                                        <a href="/chantiers/chantier_contenu.php?id=<?= $id ?>"
+                                            class="text-decoration-none text-primary"><?= $label ?></a>
+                                    </li>
+                                <?php endforeach; ?>
+                            </ul>
+                        <?php else: ?>
+                            <div class="small mt-1 text-muted"><i class="bi bi-geo-alt"></i> Aucun chantier</div>
+                        <?php endif; ?>
+
+                    </div>
+
+                    <!-- En dépôt -->
+                    <div class="p-3 rounded-3 shadow-sm mx-2 mb-2"
+                        style="min-width:180px; background-color:#e0e0e0;">
+                        <div class="fw-bold fs-4 text-dark"><?= (int)$quantiteDepot ?></div>
+                        <div class="text-secondary">En dépôt</div>
+                    </div>
+
+                </div>
+            </div>
+
         </div>
     </div>
+
+
+
 
     <!-- Onglets -->
     <ul class="nav nav-tabs mb-3" id="articleTabs" role="tablist">
@@ -922,12 +1001,27 @@ $archivedAlerts = $st->fetchAll(PDO::FETCH_ASSOC);
             <div class="card shadow-sm p-3">
                 <h5 class="fw-bold">Caractéristiques de l'article</h5>
                 <ul class="list-group list-group-flush">
-                    <li class="list-group-item">Référence : <?= htmlspecialchars($article['reference'] ?? '-') ?></li>
-                    <li class="list-group-item">Dimensions : <?= htmlspecialchars($article['dimensions'] ?? '-') ?></li>
-                    <li class="list-group-item">Poids : <?= htmlspecialchars($article['poids'] ?? '-') ?></li>
-                    <li class="list-group-item">Matériau : <?= htmlspecialchars($article['materiau'] ?? '-') ?></li>
-                    <li class="list-group-item">Fournisseur : <?= htmlspecialchars($article['fournisseur'] ?? '-') ?></li>
+                    <li class="list-group-item d-flex align-items-center justify-content-between">
+                        <div>
+                            <span class="fw-semibold">Référence :</span>
+                            <span id="articleRefValue">
+                                <?= htmlspecialchars((string)($article['reference'] ?? '-')) ?: '-' ?>
+                            </span>
+                        </div>
+
+                        <?php if (!empty($isAdmin) && $isAdmin && empty($isQrView)): ?>
+                            <button
+                                type="button"
+                                class="btn btn-sm btn-outline-primary"
+                                id="btnEditRef"
+                                data-article-id="<?= (int)$articleId ?>"
+                                data-article-ref="<?= htmlspecialchars((string)($article['reference'] ?? ''), ENT_QUOTES) ?>">
+                                Modifier
+                            </button>
+                        <?php endif; ?>
+                    </li>
                 </ul>
+
 
                 <?php
 
@@ -935,7 +1029,7 @@ $archivedAlerts = $st->fetchAll(PDO::FETCH_ASSOC);
                 $alerts = [];
                 try {
                     $qa = $pdo->prepare("
-      SELECT a.id, a.type, a.message, a.is_read, a.created_at, a.url, a.archived_at,
+                   SELECT a.id, a.type, a.message, a.is_read, a.created_at, a.url, a.archived_at,
              (
                SELECT ae.fichier
                FROM article_etats ae
@@ -943,12 +1037,12 @@ $archivedAlerts = $st->fetchAll(PDO::FETCH_ASSOC);
                ORDER BY ae.id DESC
                LIMIT 1
              ) AS alert_file
-      FROM stock_alerts a
-      WHERE a.stock_id = :sid
-        AND a.archived_at IS NULL
-        AND a.type IN ('incident','maintenance')
-      ORDER BY a.created_at DESC, a.id DESC
-    ");
+                   FROM stock_alerts a
+                         WHERE a.stock_id = :sid
+                          AND a.archived_at IS NULL
+                   AND a.type IN ('incident','maintenance')
+                      ORDER BY a.created_at DESC, a.id DESC
+                        ");
                     $qa->execute([':sid' => $articleId]);
                     $alerts = $qa->fetchAll(PDO::FETCH_ASSOC);
                 } catch (Throwable $e) {
@@ -1180,21 +1274,6 @@ $archivedAlerts = $st->fetchAll(PDO::FETCH_ASSOC);
 
                 <?php endif; ?>
 
-
-                <hr>
-                <h6 class="fw-bold mt-3">Répartition par chantier</h6>
-                <ul class="list-group list-group-flush">
-                    <?php if (!empty($quantitesParChantier)): ?>
-                        <?php foreach ($quantitesParChantier as $chantier): ?>
-                            <li class="list-group-item">
-                                <?= htmlspecialchars($chantier['chantier_nom']) ?> :
-                                <strong><?= (int)$chantier['quantite'] ?></strong> unité(s)
-                            </li>
-                        <?php endforeach; ?>
-                    <?php else: ?>
-                        <li class="list-group-item text-muted">Aucune quantité sur les chantiers</li>
-                    <?php endif; ?>
-                </ul>
                 <!-- Modale -->
                 <div class="modal fade" id="modalDeclarePanne" tabindex="-1" aria-hidden="true">
                     <div class="modal-dialog modal-dialog-centered">
@@ -1242,6 +1321,33 @@ $archivedAlerts = $st->fetchAll(PDO::FETCH_ASSOC);
                         </div>
                     </div>
                 </div>
+
+                <!-- Modal: Éditer la référence -->
+                <div class="modal fade" id="modalEditRef" tabindex="-1" aria-labelledby="modalEditRefLabel" aria-hidden="true">
+                    <div class="modal-dialog">
+                        <form class="modal-content" id="formEditRef">
+                            <div class="modal-header">
+                                <h5 class="modal-title" id="modalEditRefLabel">Modifier la référence</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fermer"></button>
+                            </div>
+                            <div class="modal-body">
+                                <input type="hidden" name="article_id" id="ref_article_id" value="">
+                                <div class="mb-3">
+                                    <label for="ref_value" class="form-label">Référence</label>
+                                    <input type="text" class="form-control" name="reference" id="ref_value" maxlength="100" required>
+                                    <div class="form-text">100 caractères max.</div>
+                                </div>
+                                <!-- si tu as un token CSRF, ajoute-le ici -->
+                                <!-- <input type="hidden" name="csrf" value="<?= $_SESSION['csrf'] ?? '' ?>"> -->
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-light" data-bs-dismiss="modal">Annuler</button>
+                                <button type="submit" class="btn btn-primary">Enregistrer</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
             </div>
         </div>
 
@@ -1490,6 +1596,56 @@ $archivedAlerts = $st->fetchAll(PDO::FETCH_ASSOC);
 
     </div>
 </div>
+
+
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const editBtn = document.getElementById('btnEditRef');
+        if (editBtn) {
+            editBtn.addEventListener('click', () => {
+                document.getElementById('ref_article_id').value = editBtn.getAttribute('data-article-id');
+                document.getElementById('ref_value').value = editBtn.getAttribute('data-article-ref') || '';
+                new bootstrap.Modal(document.getElementById('modalEditRef')).show();
+            });
+        }
+
+        const form = document.getElementById('formEditRef');
+        if (form) {
+            form.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const fd = new FormData(form);
+
+                try {
+                    const resp = await fetch('/stock/ajax/article_update_reference.php', {
+                        method: 'POST',
+                        headers: {
+                            'X-Requested-With': 'XMLHttpRequest'
+                        },
+                        body: fd
+                    });
+                    const data = await resp.json();
+
+                    if (!resp.ok || !data.ok) throw new Error(data.msg || 'Erreur serveur');
+
+                    const newRef = data.reference || '-';
+                    const refSpan = document.getElementById('articleRefValue');
+                    refSpan.textContent = newRef;
+
+                    // feedback visuel
+                    refSpan.classList.add('bg-warning-subtle', 'px-1', 'rounded');
+                    setTimeout(() => refSpan.classList.remove('bg-warning-subtle', 'px-1', 'rounded'), 1200);
+
+                    // maj attribut du bouton
+                    if (editBtn) editBtn.setAttribute('data-article-ref', newRef);
+
+                    bootstrap.Modal.getInstance(document.getElementById('modalEditRef')).hide();
+                } catch (err) {
+                    alert(err.message || 'Impossible de mettre à jour la référence.');
+                }
+            });
+        }
+    });
+</script>
 
 
 <script>
