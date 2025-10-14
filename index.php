@@ -41,7 +41,15 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
         }
 
-        header("Location: accueil.php");
+        // 🔁 Redirection après login
+        $redirect = $_GET['redirect'] ?? $_POST['redirect'] ?? null;
+
+        if ($redirect && filter_var($redirect, FILTER_VALIDATE_URL) === false && str_starts_with($redirect, '/')) {
+            // On ne redirige que vers une URL interne
+            header("Location: " . $redirect);
+        } else {
+            header("Location: accueil.php");
+        }
         exit;
     } else {
         $error = "Email ou mot de passe incorrect";

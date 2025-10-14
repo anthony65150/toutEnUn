@@ -9,9 +9,9 @@ $qrToken = isset($_GET['t']) ? (string)$_GET['t'] : '';
 $qrToken = (strlen($qrToken) >= 16 && strlen($qrToken) <= 64) ? $qrToken : '';
 $isQrView = ($qrToken !== '');
 
-// Si pas connecté ET pas en mode QR public => connexion
+// Si pas connecté ET pas en mode QR public => envoi vers index avec retour après login
 if (!$isQrView && !isset($_SESSION['utilisateurs'])) {
-    header("Location: ../connexion.php");
+    header("Location: ../index.php?redirect=" . urlencode($_SERVER['REQUEST_URI']));
     exit;
 }
 
@@ -590,28 +590,50 @@ $archivedAlerts = $st->fetchAll(PDO::FETCH_ASSOC);
                         <input type="hidden" name="action" value="hour_meter">
                         <input type="hidden" name="stock_id" value="<?= (int)$articleId ?>">
                         <!-- Prérempli avec la valeur initiale -->
-                        <div class="col-auto"><input type="number" min="0" step="1" class="form-control" name="hours" value="<?= $hourInit ?>"></div>
+                        <div class="col-auto">
+                            <input type="number" min="0" step="1" class="form-control" name="hours" value="<?= $lastHours ?>">
+                        </div>
                         <div class="col-auto"><button class="btn btn-primary">Enregistrer</button></div>
                     </form>
-                    <small class="text-muted d-block mt-2">Dernier relevé: <?= $hourInit ?> <?= htmlspecialchars($hourUnit) ?></small>
+                    <small class="text-muted d-block mt-2">
+                        Dernier relevé : <?= $lastHours ?> <?= htmlspecialchars($hourUnit) ?>
+                        (saisis la valeur totale du compteur. Si tu entres une petite valeur, on la traitera comme un +incrément)
+                    </small>
                     <div id="declareMsgQR" class="alert d-none mt-2"></div>
                 </div>
             </div>
         <?php elseif ($maintenanceMode === 'electrical'): ?>
+            <?php
+            // QR public : charger les alertes (incidents + maintenance) non archivées
+            $alerts = [];
+            try {
+                $qa = $pdo->prepare("
+                  SELECT id, type, message, is_read, created_at, url, archived_at
+                  FROM stock_alerts
+                  WHERE stock_id = :sid
+                    AND archived_at IS NULL
+                    AND type IN ('incident','maintenance')
+                  ORDER BY created_at DESC, id DESC
+                ");
+                $qa->execute([':sid' => $articleId]);
+                $alerts = $qa->fetchAll(PDO::FETCH_ASSOC);
+            } catch (Throwable $e) {
+                $alerts = [];
+            }
+            // Etat basé sur archivage (is_read != résolu)
+            $hasOpen = false;
+            foreach ($alerts as $a) {
+                if (empty($a['archived_at'])) {
+                    $hasOpen = true;
+                    break;
+                }
+            }
+            ?>
             <div class="card mb-3">
                 <div class="card-body">
                     <h5 class="mb-2">Statut</h5>
                     <div>
                         État :
-                        <?php
-                        $hasOpen = false;
-                        foreach ($alerts as $a) {
-                            if (empty($a['archived_at']) && (int)$a['is_read'] === 0) {
-                                $hasOpen = true;
-                                break;
-                            }
-                        }
-                        ?>
                         <?php if ($hasOpen): ?>
                             <span class="badge bg-danger">Problème</span>
                         <?php else: ?>
@@ -624,12 +646,12 @@ $archivedAlerts = $st->fetchAll(PDO::FETCH_ASSOC);
                             <?php foreach ($alerts as $a): ?>
                                 <?php
                                 $isArchived = !empty($a['archived_at']);
-                                $isUnread   = ((int)$a['is_read'] === 0);
+                                $isUnread   = ((int)($a['is_read'] ?? 0) === 0);
                                 ?>
                                 <li class="list-group-item d-flex justify-content-between align-items-start">
                                     <div class="me-3">
-                                        <div class="<?= $isUnread && !$isArchived ? 'fw-semibold' : 'text-muted' ?>">
-                                            <?= nl2br(htmlspecialchars($a['message'])) ?>
+                                        <div class="<?= (!$isArchived && $isUnread) ? 'fw-semibold' : 'text-muted' ?>">
+                                            <?= nl2br(htmlspecialchars($a['message'] ?? '')) ?>
                                         </div>
                                         <small class="text-muted">
                                             <?= date('d/m/Y H:i', strtotime($a['created_at'])) ?>
@@ -637,11 +659,11 @@ $archivedAlerts = $st->fetchAll(PDO::FETCH_ASSOC);
                                         <?php if ($isArchived): ?>
                                             <span class="badge bg-secondary ms-2">archivée</span>
                                         <?php elseif (!$isUnread): ?>
-                                            <span class="badge bg-secondary ms-2">clos</span>
+                                            <span class="badge bg-light text-muted border ms-2">lu</span>
                                         <?php endif; ?>
                                     </div>
 
-                                    <?php if ($isAdmin && $isUnread && !$isArchived): ?>
+                                    <?php if ($isAdmin && !$isArchived): ?>
                                         <button class="btn btn-sm btn-success btn-resolve-one" data-alert-id="<?= (int)$a['id'] ?>">
                                             Marquer résolu
                                         </button>
@@ -662,7 +684,8 @@ $archivedAlerts = $st->fetchAll(PDO::FETCH_ASSOC);
         <?php endif; ?>
 
         <div class="d-grid gap-2">
-            <a class="btn btn-outline-secondary" href="/connexion.php">Se connecter</a>
+            <?php $loginUrl = "/index.php?redirect=" . urlencode($qrPublicUrl); ?>
+            <a class="btn btn-outline-secondary" href="<?= htmlspecialchars($loginUrl) ?>">Se connecter</a>
         </div>
     </div>
 
@@ -719,13 +742,52 @@ $archivedAlerts = $st->fetchAll(PDO::FETCH_ASSOC);
             return json;
         }
 
-        (function() {
+        (async function() {
             const fh = document.getElementById('formHourQR');
             const boxQR = document.getElementById('declareMsgQR');
+            const LAST = <?= (int)$lastHours ?>;
+
+            async function postUrlEncoded(data) {
+                const res = await fetch('/stock/ajax/ajax_article_etat_save.php', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded'
+                    },
+                    body: new URLSearchParams(data),
+                    credentials: 'same-origin'
+                });
+                const raw = await res.text();
+                let json;
+                try {
+                    json = JSON.parse(raw);
+                } catch {
+                    throw new Error('Réponse non-JSON:\n' + raw);
+                }
+                if (!res.ok || json.ok === false) throw new Error(json.msg || json.error || 'Erreur serveur');
+                return json;
+            }
+
             if (fh) {
                 fh.addEventListener('submit', async (e) => {
                     e.preventDefault();
-                    const data = Object.fromEntries(new FormData(fh).entries());
+                    const fd = new FormData(fh);
+                    const data = Object.fromEntries(fd.entries());
+
+                    // 👇 Tolérance incrément côté client : si la saisie est < au dernier relevé, on la considère comme +incrément
+                    let v = parseInt(data.hours, 10);
+                    if (!Number.isFinite(v) || v < 0) {
+                        boxQR?.classList.remove('d-none');
+                        if (boxQR) {
+                            boxQR.className = 'alert alert-danger mt-2';
+                            boxQR.textContent = 'Valeur de compteur invalide';
+                        }
+                        return;
+                    }
+                    if (v < LAST) {
+                        v = LAST + v; // interprète comme +incrément
+                    }
+                    data.hours = String(v);
+
                     const btn = fh.querySelector('button');
                     btn.disabled = true;
                     try {
@@ -741,35 +803,6 @@ $archivedAlerts = $st->fetchAll(PDO::FETCH_ASSOC);
                         }
                     } finally {
                         btn.disabled = false;
-                    }
-                });
-            }
-
-            const btnDeclareQR = document.getElementById('btnSendDeclareQR');
-            if (btnDeclareQR) {
-                btnDeclareQR.addEventListener('click', async () => {
-                    const f = document.getElementById('formDeclareQR');
-                    const data = Object.fromEntries(new FormData(f).entries());
-                    const box = document.getElementById('declareMsg');
-                    btnDeclareQR.disabled = true;
-                    try {
-                        await postUrlEncoded(data);
-                        if (box) {
-                            box.className = 'alert alert-success small';
-                            box.textContent = 'Problème envoyé. Merci.';
-                            box.classList.remove('d-none');
-                        }
-                        setTimeout(() => location.reload(), 800);
-                    } catch (err) {
-                        if (box) {
-                            box.className = 'alert alert-danger small';
-                            box.textContent = err.message;
-                            box.classList.remove('d-none');
-                        } else {
-                            alert(err.message);
-                        }
-                    } finally {
-                        btnDeclareQR.disabled = false;
                     }
                 });
             }
@@ -897,44 +930,47 @@ $archivedAlerts = $st->fetchAll(PDO::FETCH_ASSOC);
                 </ul>
 
                 <?php
+
                 // Charge toutes les alertes non archivées de l’article (incidents + entretien)
                 $alerts = [];
                 try {
                     $qa = $pdo->prepare("
-  SELECT a.id, a.type, a.message, a.is_read, a.created_at, a.url, a.archived_at,
-         /* récupère la dernière pièce jointe liée à cette alerte */
-         (
-           SELECT ae.fichier
-           FROM article_etats ae
-           WHERE ae.alert_id = a.id
-           ORDER BY ae.id DESC
-           LIMIT 1
-         ) AS alert_file
-  FROM stock_alerts a
-  WHERE a.stock_id = :sid
-    AND a.archived_at IS NULL
-    AND a.type IN ('incident','maintenance')
-  ORDER BY a.created_at DESC, a.id DESC
-");
-
-
+      SELECT a.id, a.type, a.message, a.is_read, a.created_at, a.url, a.archived_at,
+             (
+               SELECT ae.fichier
+               FROM article_etats ae
+               WHERE ae.alert_id = a.id
+               ORDER BY ae.id DESC
+               LIMIT 1
+             ) AS alert_file
+      FROM stock_alerts a
+      WHERE a.stock_id = :sid
+        AND a.archived_at IS NULL
+        AND a.type IN ('incident','maintenance')
+      ORDER BY a.created_at DESC, a.id DESC
+    ");
                     $qa->execute([':sid' => $articleId]);
                     $alerts = $qa->fetchAll(PDO::FETCH_ASSOC);
                 } catch (Throwable $e) {
                     $alerts = [];
                 }
 
-                // PANNE s’il existe au moins 1 incident non archivé (peu importe url)
-                $hasOpenIncident = false;
-                foreach ($alerts as $a) {
-                    if (($a['type'] ?? '') === 'incident') {
-                        $hasOpenIncident = true;
-                        break;
-                    }
-                }
-                $etatLabel = $hasOpenIncident ? 'PANNE' : 'OK';
-                $etatClass = $hasOpenIncident ? 'bg-danger' : 'bg-success';
+                // Séparations utiles
+                $alertsProblems = array_filter(
+                    $alerts,
+                    fn($a) => ($a['type'] ?? '') === 'incident' && (($a['url'] ?? '') === 'problem')
+                );
+                $alertsMaintenance = array_filter(
+                    $alerts,
+                    fn($a) => ($a['type'] ?? '') === 'incident' && (($a['url'] ?? '') === 'maintenance_due')
+                );
+
+                // État global pour le badge (PANNE/ENTRETIEN si l’un OU l’autre est ouvert)
+                $hasOpenIncidentOrMaint = !empty($alertsProblems) || !empty($alertsMaintenance);
+                $etatLabel = $hasOpenIncidentOrMaint ? 'PANNE/ENTRETIEN' : 'OK';
+                $etatClass = $hasOpenIncidentOrMaint ? 'bg-danger' : 'bg-success';
                 ?>
+
 
 
                 <!-- ===== Entretien (compteur/état) ===== -->
@@ -966,35 +1002,9 @@ $archivedAlerts = $st->fetchAll(PDO::FETCH_ASSOC);
                             <span class="badge <?= $etatClass ?>" data-article-etat-badge><?= $etatLabel ?></span>
                         </div>
 
-                        <?php
-                        // Incidents utilisateur uniquement
-                        $alertsProblems = array_filter(
-                            $alerts,
-                            fn($a) => ($a['type'] ?? '') === 'incident' && (($a['url'] ?? '') === 'problem')
-                        );
-                        ?>
-
                         <?php if (!empty($alertsProblems)): ?>
-                            <ul class="list-group list-group-flush mt-2" id="alertsProblemsList">
-                                <?php
-                                // Aperçu PJ (image miniature / lien PDF)
-                                $renderAlertAttachment = function (?string $filePath) {
-                                    if (!$filePath) return '';
-                                    $url = '/' . ltrim($filePath, '/');
-                                    $ext = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
-                                    if (in_array($ext, ['jpg', 'jpeg', 'png', 'webp'], true)) {
-                                        return '<a href="' . htmlspecialchars($url) . '" target="_blank" rel="noopener">
-                    <img src="' . htmlspecialchars($url) . '" alt="pièce jointe"
-                         style="max-width:70px; max-height:70px; border-radius:6px; margin-top:.25rem;"/>
-                  </a>';
-                                    }
-                                    if ($ext === 'pdf') {
-                                        return '<div class="mt-1"><a href="' . htmlspecialchars($url) . '" target="_blank" rel="noopener">Voir le PDF</a></div>';
-                                    }
-                                    return '<div class="mt-1"><a href="' . htmlspecialchars($url) . '" target="_blank" rel="noopener">Voir le fichier</a></div>';
-                                };
-                                ?>
-
+                            <div class="mt-2 fw-semibold">⚠️ Problèmes ouverts</div>
+                            <ul class="list-group list-group-flush mt-1" id="alertsProblemsList">
                                 <?php foreach ($alertsProblems as $a): ?>
                                     <?php
                                     $isArchived = !empty($a['archived_at']);
@@ -1006,19 +1016,9 @@ $archivedAlerts = $st->fetchAll(PDO::FETCH_ASSOC);
                                                 <?= nl2br(htmlspecialchars($a['message'] ?? '')) ?>
                                             </div>
                                             <small class="text-muted"><?= date('d/m/Y H:i', strtotime($a['created_at'])) ?></small>
-
                                             <?= $renderAlertAttachment($a['alert_file'] ?? null) ?>
-
-                                            <?php if ($isArchived): ?>
-                                                <span class="badge bg-secondary ms-2">archivée</span>
-                                            <?php elseif (!$isUnread): ?>
-                                                <!-- déjà vue mais pas résolue -->
-                                                <span class="badge bg-light text-muted border ms-2">lu</span>
-                                            <?php endif; ?>
                                         </div>
-
                                         <?php if ($isAdmin && !$isArchived): ?>
-                                            <!-- Autoriser la résolution même si déjà "lu" -->
                                             <button class="btn btn-sm btn-success btn-resolve-one" data-alert-id="<?= (int)$a['id'] ?>">
                                                 Marquer résolu
                                             </button>
@@ -1027,10 +1027,38 @@ $archivedAlerts = $st->fetchAll(PDO::FETCH_ASSOC);
                                 <?php endforeach; ?>
                             </ul>
                         <?php else: ?>
-                            <small id="alertsProblemsEmpty" class="text-muted d-block mt-2">Aucune alerte enregistrée.</small>
+                            <small id="alertsProblemsEmpty" class="text-muted d-block mt-2">Aucun problème en cours.</small>
+                        <?php endif; ?>
+
+                        <?php if (!empty($alertsMaintenance)): ?>
+                            <div class="mt-3 fw-semibold">🛠️ Entretiens à réaliser</div>
+                            <ul class="list-group list-group-flush mt-1" id="alertsMaintenanceList">
+                                <?php foreach ($alertsMaintenance as $a): ?>
+                                    <?php
+                                    $isArchived = !empty($a['archived_at']);
+                                    $isUnread   = ((int)($a['is_read'] ?? 0) === 0);
+                                    ?>
+                                    <li class="list-group-item d-flex justify-content-between align-items-start">
+                                        <div class="me-3">
+                                            <div class="<?= $isUnread && !$isArchived ? 'fw-semibold' : 'text-muted' ?>">
+                                                <?= nl2br(htmlspecialchars($a['message'] ?? 'Entretien à prévoir')) ?>
+                                            </div>
+                                            <small class="text-muted"><?= date('d/m/Y H:i', strtotime($a['created_at'])) ?></small>
+                                            <?= $renderAlertAttachment($a['alert_file'] ?? null) ?>
+                                        </div>
+                                        <?php if ($isAdmin && !$isArchived): ?>
+                                            <!-- on autorise aussi la résolution manuelle si besoin -->
+                                            <button class="btn btn-sm btn-outline-success btn-resolve-one" data-alert-id="<?= (int)$a['id'] ?>">
+                                                Marquer résolu
+                                            </button>
+                                        <?php endif; ?>
+                                    </li>
+                                <?php endforeach; ?>
+                            </ul>
                         <?php endif; ?>
 
                         <div>Compteur: <strong><?= $lastHours ?> <?= htmlspecialchars($hourUnit) ?></strong></div>
+
 
                         <?php if ($isAdmin || $isDepot || $isChef): ?>
                             <form class="mt-2 d-flex gap-2" id="formHour">
@@ -1081,11 +1109,6 @@ $archivedAlerts = $st->fetchAll(PDO::FETCH_ASSOC);
                                 </div>
                             <?php endif; ?>
                         <?php endif; ?>
-
-
-
-
-
 
                     <?php elseif ($maintenanceMode === 'electrical'): ?>
                         <div>État :
@@ -1140,7 +1163,7 @@ $archivedAlerts = $st->fetchAll(PDO::FETCH_ASSOC);
                                 <?php endforeach; ?>
                             </ul>
 
-                    
+
                         <?php else: ?>
                             <small class="text-muted d-block mt-2">Aucune alerte enregistrée.</small>
                         <?php endif; ?>

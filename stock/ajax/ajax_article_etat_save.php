@@ -24,7 +24,6 @@ register_shutdown_function(function () {
     }
 });
 
-
 function jexit(int $code, array $payload): void
 {
     http_response_code($code);
@@ -41,7 +40,7 @@ function article_by_id(PDO $pdo, int $id): ?array
         SELECT id, entreprise_id, maintenance_mode,
                compteur_heures,
                COALESCE(hour_meter_initial, 0)      AS hour_meter_initial,
-               COALESCE(maintenance_threshold, 150) AS maintenance_threshold
+               COALESCE(maintenance_threshold, 100) AS maintenance_threshold
         FROM stock
         WHERE id = :id
         LIMIT 1
@@ -51,25 +50,31 @@ function article_by_id(PDO $pdo, int $id): ?array
     return $row ?: null;
 }
 
-function maintenance_alert_exists(PDO $pdo, int $stockId): bool
-{
-    $q = $pdo->prepare("
-        SELECT id
+function maintenance_alert_exists(PDO $pdo, int $stockId, ?int $entId = null): bool {
+    $sql = "
+        SELECT 1
         FROM stock_alerts
         WHERE stock_id = :sid
           AND type = 'incident'
           AND url = 'maintenance_due'
           AND is_read = 0
           AND archived_at IS NULL
-        LIMIT 1
-    ");
-    $q->execute([':sid' => $stockId]);
+    ";
+    $params = [':sid' => $stockId];
+
+    if ($entId) {
+        $sql .= " AND entreprise_id = :eid";
+        $params[':eid'] = $entId;
+    }
+
+    $q = $pdo->prepare($sql . " LIMIT 1");
+    $q->execute($params);
     return (bool)$q->fetchColumn();
 }
 
 function create_maintenance_alert(PDO $pdo, int $stockId, int $entrepriseId, int $current, int $limit): void
 {
-    if (maintenance_alert_exists($pdo, $stockId)) return;
+    if (maintenance_alert_exists($pdo, $stockId, $entrepriseId)) return;
     $msg = "Entretien à prévoir : compteur {$current} h (≥ {$limit} h).";
     $ins = $pdo->prepare("
         INSERT INTO stock_alerts (entreprise_id, stock_id, type, message, url, created_at, is_read)
@@ -198,7 +203,6 @@ if (!$chantierId) {
     $chantierId = $cid ? (int)$cid : null;
 }
 
-
 /* -------------------------------------------------------
    Upload optionnel (pour déclarer_panne)
 ------------------------------------------------------- */
@@ -241,6 +245,13 @@ try {
             jexit(400, ['ok' => false, 'msg' => 'Valeur du compteur invalide']);
         }
 
+        // Tolérance INCREMENT : si la valeur postée est < initial ET < compteur courant, on l'interprète comme un delta
+        $cur     = (int)($art['compteur_heures'] ?? 0);
+        $initial = (int)($art['hour_meter_initial'] ?? 0);
+        if ($val < $initial && $val < $cur) {
+            $val = $cur + $val; // on ajoute le delta
+        }
+
         // 1) log
         $source = ($role === 'chef') ? 'chef' : (($role === 'depot') ? 'depot' : (($role === 'administrateur') ? 'admin' : 'qr'));
         $insH = $pdo->prepare("
@@ -263,10 +274,16 @@ try {
                AND archived_at IS NULL
         ")->execute([':sid' => $articleId]);
 
-        // 4) seuil entretien : initial + threshold
-        $initial   = (int)($art['hour_meter_initial'] ?? 0);
-        $threshold = (int)($art['maintenance_threshold'] ?? 150);
-        $limit     = $initial + $threshold;
+        // 4) seuil entretien : initial + threshold (défaut 100h)
+        $threshold = (int)($art['maintenance_threshold'] ?? 100);
+        if ($threshold <= 0) { $threshold = 100; }
+        $limit = $initial + $threshold;
+
+        // (debug léger en logs)
+        error_log(sprintf('[MAJ_COMPTEUR] stock_id=%d, initial=%d, threshold=%d, limit=%d, posted=%d, cur_before=%d',
+            $articleId, $initial, $threshold, $limit, $val, $cur
+        ));
+
         if ($val >= $limit) {
             create_maintenance_alert($pdo, $articleId, (int)$art['entreprise_id'], $val, $limit);
         }
