@@ -19,13 +19,24 @@ if ($role !== 'chef' && $role !== 'depot') {
 $KW1 = "%Relevé d'heures%";
 $KW2 = "%compteur%";
 
-// =============== POST : marquer comme lu (unitaire ou tout) ===============
+// --- CSRF simple ---
+if (empty($_SESSION['csrf_token'])) {
+  $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+$csrf = $_SESSION['csrf_token'];
+
+// =============== POST : marquer LU (unitaire) ou SUPPRIMER (unitaire) ===============
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
-    $markId = isset($_POST['notif_id']) ? (int)$_POST['notif_id'] : 0;
+    $action  = isset($_POST['action']) ? (string)$_POST['action'] : '';
+    $markId  = isset($_POST['notif_id']) ? (int)$_POST['notif_id'] : 0;
+    $csrfIn  = (string)($_POST['csrf'] ?? '');
+    if (!hash_equals($csrf, $csrfIn)) {
+        header('Location: /stock/alerts_chef.php'); exit;
+    }
 
     try {
         if ($markId > 0) {
-            // 1) Récupérer la notif -> stock_id si dispo
+            // Récupération éventuelle du stock_id pour synchroniser côté admin (facultatif)
             $row = null;
             try {
                 $st = $pdo->prepare("
@@ -38,18 +49,25 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
                 $row = $st->fetch(PDO::FETCH_ASSOC);
             } catch (Throwable $e) { $row = null; }
 
-            // 2) Marquer la notif comme lue (fallback delete si pas de colonne is_read)
-            try {
-                $pdo->prepare("UPDATE notifications SET is_read = 1 WHERE id = :id AND utilisateur_id = :uid")
-                    ->execute([':id'=>$markId, ':uid'=>$uid]);
-            } catch (Throwable $e) {
-                $pdo->prepare("DELETE FROM notifications WHERE id = :id AND utilisateur_id = :uid")
-                    ->execute([':id'=>$markId, ':uid'=>$uid]);
+            if ($action === 'delete') {
+                // Supprimer l'alerte de la liste côté chef/dépôt
+                try {
+                    $pdo->prepare("DELETE FROM notifications WHERE id = :id AND utilisateur_id = :uid")
+                        ->execute([':id'=>$markId, ':uid'=>$uid]);
+                } catch (Throwable $e) {}
+            } else {
+                // Marquer comme LU (fallback delete si pas de colonne is_read)
+                try {
+                    $pdo->prepare("UPDATE notifications SET is_read = 1 WHERE id = :id AND utilisateur_id = :uid")
+                        ->execute([':id'=>$markId, ':uid'=>$uid]);
+                } catch (Throwable $e) {
+                    $pdo->prepare("DELETE FROM notifications WHERE id = :id AND utilisateur_id = :uid")
+                        ->execute([':id'=>$markId, ':uid'=>$uid]);
+                }
             }
 
-            // 3) SYNC admin (stock_alerts)
+            // SYNC admin (stock_alerts) : si on a un stock_id, on peut marquer LU les demandes HMR correspondantes
             if (!empty($row['stock_id'])) {
-                // a) Cas idéal avec stock_id -> on marque toutes les HMR de cet article
                 $sql = "UPDATE stock_alerts a
                           JOIN stock s ON s.id = a.stock_id
                            SET a.is_read = 1
@@ -59,45 +77,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
                 $p = [':sid' => (int)$row['stock_id']];
                 if ($entId > 0) { $sql .= " AND s.entreprise_id = :eid"; $p[':eid'] = $entId; }
                 try { $pdo->prepare($sql)->execute($p); } catch (Throwable $e) {}
-            } else {
-                // b) Fallback SANS stock_id -> on marque la DERNIÈRE alerte HMR de l’entreprise
-                $sql = "UPDATE stock_alerts
-                           SET is_read = 1
-                         WHERE id = (
-                           SELECT id FROM (
-                             SELECT a.id
-                               FROM stock_alerts a
-                               ".($entId>0 ? "JOIN stock s ON s.id=a.stock_id AND s.entreprise_id = :eid" : "")."
-                              WHERE a.type='hour_meter_request'
-                                AND a.archived_at IS NULL
-                              ORDER BY a.id DESC
-                              LIMIT 1
-                           ) t
-                         )";
-                $p = [];
-                if ($entId > 0) $p[':eid'] = $entId;
-                try { $pdo->prepare($sql)->execute($p); } catch (Throwable $e) {}
             }
-
-        } else {
-            // Tout marquer comme lu (chef / dépôt)
-            $sqlN = "UPDATE notifications
-                        SET is_read = 1
-                      WHERE utilisateur_id = :uid
-                        AND (message LIKE :kw1 OR message LIKE :kw2)";
-            $pN = [':uid'=>$uid, ':kw1'=>$KW1, ':kw2'=>$KW2];
-            if ($entId > 0) { $sqlN .= " AND entreprise_id = :eid"; $pN[':eid'] = $entId; }
-            try { $pdo->prepare($sqlN)->execute($pN); } catch (Throwable $e) {}
-
-            // Puis côté admin : passer à lu toutes les HMR de l’entreprise
-            $sqlA = "UPDATE stock_alerts a
-                       JOIN stock s ON s.id = a.stock_id
-                        SET a.is_read = 1
-                     WHERE a.type = 'hour_meter_request'
-                       AND a.archived_at IS NULL";
-            $pA = [];
-            if ($entId > 0) { $sqlA .= " AND s.entreprise_id = :eid"; $pA[':eid'] = $entId; }
-            try { $pdo->prepare($sqlA)->execute($pA); } catch (Throwable $e) {}
         }
     } catch (Throwable $e) {
         // on n'empêche pas l'affichage
@@ -135,19 +115,20 @@ try {
 }
 
 // Affichage
-$pageTitle = "Alertes relevé d'heures";
+$pageTitle = "Alertes";
 require_once __DIR__ . '/../templates/header.php';
+require_once __DIR__ . '/../templates/navigation/navigation.php';
 ?>
 <div class="container py-4">
-  <h3 class="mb-3">Alertes relevé d'heures</h3>
+
+  <!-- Titre centré -->
+  <div class="text-center mb-3">
+    <h2 class="fw-bold m-0">Alertes</h2>
+  </div>
 
   <?php if (empty($rows)): ?>
-    <div class="alert alert-light border">Aucune alerte en cours.</div>
+    <div class="alert alert-light border text-center">Aucune alerte en cours.</div>
   <?php else: ?>
-    <form method="post" class="mb-3">
-      <button class="btn btn-sm btn-outline-primary">Tout marquer comme lu</button>
-    </form>
-
     <div class="list-group">
       <?php foreach ($rows as $r): ?>
         <div class="list-group-item d-flex justify-content-between align-items-start <?= (int)$r['is_read'] ? '' : 'list-group-item-warning' ?>">
@@ -165,9 +146,21 @@ require_once __DIR__ . '/../templates/header.php';
                  Ouvrir
               </a>
             <?php endif; ?>
+
+            <!-- Marquer comme lu -->
             <form method="post">
+              <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">
               <input type="hidden" name="notif_id" value="<?= (int)$r['id'] ?>">
+              <input type="hidden" name="action" value="mark">
               <button class="btn btn-sm btn-outline-success">Marquer lu</button>
+            </form>
+
+            <!-- Supprimer -->
+            <form method="post" onsubmit="return confirm('Supprimer cette alerte ?');">
+              <input type="hidden" name="csrf" value="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">
+              <input type="hidden" name="notif_id" value="<?= (int)$r['id'] ?>">
+              <input type="hidden" name="action" value="delete">
+              <button class="btn btn-sm btn-outline-danger">Supprimer</button>
             </form>
           </div>
         </div>
