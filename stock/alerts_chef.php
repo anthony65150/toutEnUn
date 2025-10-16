@@ -142,7 +142,7 @@ require_once __DIR__ . '/../templates/navigation/navigation.php';
           <div class="d-flex gap-2">
             <?php if (!empty($r['stock_id'])): ?>
               <a class="btn btn-sm btn-outline-secondary"
-                 href="/stock/article.php?id=<?= (int)$r['stock_id'] ?>" target="_blank">
+                 href="/stock/article.php?id=<?= (int)$r['stock_id'] ?>">
                  Ouvrir
               </a>
             <?php endif; ?>

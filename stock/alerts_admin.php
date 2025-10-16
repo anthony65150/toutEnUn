@@ -6,7 +6,7 @@ require_once __DIR__ . '/../config/init.php';
 
 // ==== Sécurité : admin requis ====
 $role = (string)($_SESSION['utilisateurs']['fonction'] ?? '');
-if (!isset($_SESSION['utilisateurs']) || !in_array($role, ['administrateur','admin'], true)) {
+if (!isset($_SESSION['utilisateurs']) || !in_array($role, ['administrateur', 'admin'], true)) {
     header("Location: ../connexion.php");
     exit;
 }
@@ -17,7 +17,19 @@ require_once __DIR__ . '/../templates/navigation/navigation.php';
 // ===== Multi-entreprise =====
 $ENT_ID = (int)($_SESSION['utilisateurs']['entreprise_id'] ?? 0);
 
-// ===== Récup des alertes NON archivées : Pannes + Entretiens =====
+// --- helpers (au-dessus de la requête)
+function alerts_has_col(PDO $pdo, string $col): bool
+{
+    try {
+        $q = $pdo->prepare("SHOW COLUMNS FROM stock_alerts LIKE :c");
+        $q->execute([':c' => $col]);
+        return (bool)$q->fetch();
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+$HAS_TARGET = alerts_has_col($pdo, 'target_role');
+
 $params = [':eid' => $ENT_ID];
 
 $sql = "
@@ -35,12 +47,27 @@ $sql = "
       AND sa.archived_at IS NULL
       AND sa.type = 'incident'
       AND sa.url IN ('maintenance_due','problem')
-    ORDER BY sa.created_at DESC, sa.id DESC
+AND (
+    sa.target_role = 'admin'
+    OR sa.target_role IS NULL  -- pour garder compatibilité avec anciennes alertes sans rôle
+)
 ";
+
+// >>> NE GARDER que les alertes destinées à l'ADMIN <<<
+if ($HAS_TARGET) {
+    // strict: uniquement les alertes taggées admin
+    $sql .= " AND sa.target_role = 'admin'";
+    // si tu dois encore voir les très vieilles lignes sans rôle, remplace par :
+    // $sql .= " AND (sa.target_role = 'admin' OR sa.target_role IS NULL)";
+}
+
+$sql .= " ORDER BY sa.created_at DESC, sa.id DESC";
+
 $st = $pdo->prepare($sql);
 $st->execute($params);
 $rows = $st->fetchAll(PDO::FETCH_ASSOC);
 $count = count($rows);
+
 
 // CSRF simple pour les POST (archive)
 if (empty($_SESSION['csrf_token'])) {
@@ -49,7 +76,8 @@ if (empty($_SESSION['csrf_token'])) {
 $csrf = $_SESSION['csrf_token'];
 
 // Helpers affichage
-function badgeType(string $url): string {
+function badgeType(string $url): string
+{
     if ($url === 'problem')          return '<span class="badge bg-danger">PANNE</span>';
     if ($url === 'maintenance_due')  return '<span class="badge bg-warning text-dark">ENTRETIEN</span>';
     return '<span class="badge bg-secondary">ALERTE</span>';
@@ -124,71 +152,83 @@ function badgeType(string $url): string {
 </div>
 
 <script>
-// Archiver (soft-delete) via AJAX avec CSRF
-document.addEventListener('click', async (e) => {
-    const btn = e.target.closest('.archive-btn');
-    if (!btn) return;
+    // Archiver (soft-delete) via AJAX avec CSRF
+    document.addEventListener('click', async (e) => {
+        const btn = e.target.closest('.archive-btn');
+        if (!btn) return;
 
-    const id   = parseInt(btn.dataset.id, 10);
-    const csrf = btn.dataset.csrf || '';
-    if (!id)  { alert('ID manquant'); return; }
+        const id = parseInt(btn.dataset.id, 10);
+        const csrf = btn.dataset.csrf || '';
+        if (!id) {
+            alert('ID manquant');
+            return;
+        }
 
-    if (!confirm("Retirer cette alerte de la liste ?\n(L'historique restera dans la fiche article)")) return;
+        if (!confirm("Retirer cette alerte de la liste ?\n(L'historique restera dans la fiche article)")) return;
 
-    btn.disabled = true;
+        btn.disabled = true;
 
-    try {
-        const res  = await fetch('archive_alert.php', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams({ id, csrf })
-        });
-        const json = await res.json();
+        try {
+            const res = await fetch('archive_alert.php', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                body: new URLSearchParams({
+                    id,
+                    csrf
+                })
+            });
+            const json = await res.json();
 
-        if (!json.ok) throw new Error(json.msg || 'Erreur');
+            if (!json.ok) throw new Error(json.msg || 'Erreur');
 
-        const tr = btn.closest('tr');
-        tr.style.transition = 'background-color .4s, opacity .4s';
-        tr.style.backgroundColor = '#f8d7da';
-        tr.style.opacity = '0';
-        setTimeout(() => tr.remove(), 320);
-    } catch (err) {
-        alert(err.message || 'Erreur réseau');
-        btn.disabled = false;
-    }
-});
+            const tr = btn.closest('tr');
+            tr.style.transition = 'background-color .4s, opacity .4s';
+            tr.style.backgroundColor = '#f8d7da';
+            tr.style.opacity = '0';
+            setTimeout(() => tr.remove(), 320);
+        } catch (err) {
+            alert(err.message || 'Erreur réseau');
+            btn.disabled = false;
+        }
+    });
 
-// Ouvrir : marque l’alerte LU puis redirige vers la fiche article
-document.addEventListener('click', async (e) => {
-    const btn = e.target.closest('.open-btn');
-    if (!btn) return;
+    // Ouvrir : marque l’alerte LU puis redirige vers la fiche article
+    document.addEventListener('click', async (e) => {
+        const btn = e.target.closest('.open-btn');
+        if (!btn) return;
 
-    const id      = parseInt(btn.dataset.id, 10);
-    const stockId = parseInt(btn.dataset.stockId, 10);
-    if (!id || !stockId) return;
+        const id = parseInt(btn.dataset.id, 10);
+        const stockId = parseInt(btn.dataset.stockId, 10);
+        if (!id || !stockId) return;
 
-    btn.disabled = true;
+        btn.disabled = true;
 
-    try {
-        await fetch('api/alert_mark_read.php', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: new URLSearchParams({ id })
-        });
+        try {
+            await fetch('api/alert_mark_read.php', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                body: new URLSearchParams({
+                    id
+                })
+            });
 
-        // maj UI immédiate
-        const row = btn.closest('tr');
-        const readCell = row?.querySelector('.col-read');
-        if (readCell) readCell.textContent = 'Oui';
+            // maj UI immédiate
+            const row = btn.closest('tr');
+            const readCell = row?.querySelector('.col-read');
+            if (readCell) readCell.textContent = 'Oui';
 
-        // redirection vers la fiche article
-        window.location.href = 'article.php?id=' + stockId;
+            // redirection vers la fiche article
+            window.location.href = 'article.php?id=' + stockId;
 
-    } catch (err) {
-        alert('Impossible de marquer comme lu.');
-        btn.disabled = false;
-    }
-});
+        } catch (err) {
+            alert('Impossible de marquer comme lu.');
+            btn.disabled = false;
+        }
+    });
 </script>
 
 <?php

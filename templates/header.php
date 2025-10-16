@@ -209,15 +209,41 @@ if ($isLogged && !empty($_SESSION['utilisateurs']['photo'])) {
     </div>
   </nav>
 
-  <!-- Scripts cloche (unifiés) : s’exécutent seulement si éléments présents (admin/chef/dépôt) -->
+    <!-- Son de notification -->
+  <audio id="alertSound" src="../sounds/BELLHand_Clochette 1 (ID 0292)_LS.mp3" preload="auto"></audio>
+
+  <!-- Scripts cloche (unifiés) + son -->
   <script>
   (function(){
-    const bellD  = document.getElementById('alertsBell');
-    const badgeD = document.getElementById('alertsBadge');
-    const bellM  = document.getElementById('alertsBellMobile');
-    const badgeM = document.getElementById('alertsBadgeMobile');
+    const bellD   = document.getElementById('alertsBell');
+    const badgeD  = document.getElementById('alertsBadge');
+    const bellM   = document.getElementById('alertsBellMobile');
+    const badgeM  = document.getElementById('alertsBadgeMobile');
+    const soundEl = document.getElementById('alertSound');
 
     if (!bellD && !bellM) return; // pas de cloche à gérer
+
+    // --- Déblocage audio mobile : un seul tap et l'audio sera autorisé ensuite
+    function unlockAudioOnce(){
+      if (!soundEl) return;
+      const tryPlay = () => {
+        soundEl.play().then(()=>{
+          soundEl.pause();
+          soundEl.currentTime = 0;
+          window.removeEventListener('pointerdown', tryPlay, {capture:false});
+          window.removeEventListener('click', tryPlay, {capture:false});
+          window.removeEventListener('touchstart', tryPlay, {capture:false});
+        }).catch(()=>{ /* ignore */ });
+      };
+      window.addEventListener('pointerdown', tryPlay, {once:true});
+      window.addEventListener('click', tryPlay, {once:true});
+      window.addEventListener('touchstart', tryPlay, {once:true});
+    }
+    unlockAudioOnce();
+
+    // --- Mémoire locale pour éviter de re-sonner au refresh
+    let prevCount = Number(sessionStorage.getItem('alerts_prev_count') || 0);
+    let prevLastId = localStorage.getItem('alerts_last_id') || null;
 
     function play(el){
       if (!el) return;
@@ -225,7 +251,17 @@ if ($isLogged && !empty($_SESSION['utilisateurs']['photo'])) {
       void el.offsetWidth; // reset anim
       el.classList.add('ringing');
     }
-    function updateCount(count){
+    function playDing(){
+      if (!soundEl) return;
+      // Évite de jouer si l’onglet est totalement caché (optionnel)
+      if (document.hidden) return;
+      try{
+        soundEl.currentTime = 0;
+        soundEl.play().catch(()=>{ /* bloqué par le navigateur ? débloqué au 1er tap */ });
+      }catch(e){}
+    }
+
+    function updateVisual(count){
       const has = count > 0;
 
       if (badgeD && bellD){
@@ -237,19 +273,45 @@ if ($isLogged && !empty($_SESSION['utilisateurs']['photo'])) {
         else    { bellM.classList.add('d-none'); bellM.classList.remove('ringing'); }
       }
     }
+
     async function refresh(){
       try{
         const r = await fetch('/stock/api/alerts_unread_count.php', {credentials:'same-origin'});
         const j = await r.json();
-        updateCount((j && j.ok) ? (j.count|0) : 0);
+
+        const count  = (j && j.ok) ? (j.count|0) : 0;
+        const lastId = (j && j.last_id) ? String(j.last_id) : null;
+
+        // Maj visuelle
+        updateVisual(count);
+
+        // Logique de son :
+        // 1) si l'API expose last_id, on ne sonne que si un nouvel ID apparaît
+        // 2) sinon fallback : on sonne si le count augmente
+        let shouldDing = false;
+        if (lastId){
+          if (prevLastId && lastId !== prevLastId) shouldDing = true;
+          if (!prevLastId && count > 0) shouldDing = true; // 1er chargement avec déjà des non-lus
+          prevLastId = lastId;
+          localStorage.setItem('alerts_last_id', lastId);
+        }else{
+          if (count > prevCount) shouldDing = true;
+        }
+
+        if (shouldDing) playDing();
+
+        prevCount = count;
+        sessionStorage.setItem('alerts_prev_count', String(prevCount));
       }catch(e){
-        updateCount(0);
+        updateVisual(0);
       }
     }
+
     // initial + périodique
     refresh();
     setInterval(refresh, 60000);
-    // rappel léger toutes les 10s tant qu'il reste des non-lus
+
+    // petit rappel visuel toutes les 10s tant qu'il reste des non-lus (pas de son ici)
     setInterval(()=>{
       const anyVisible =
         (badgeD && !badgeD.classList.contains('d-none')) ||
@@ -258,6 +320,7 @@ if ($isLogged && !empty($_SESSION['utilisateurs']['photo'])) {
     }, 10000);
   })();
   </script>
+
 
   <!-- Google Maps (si utilisé ailleurs) -->
   <script>

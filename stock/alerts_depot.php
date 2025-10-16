@@ -1,80 +1,123 @@
 <?php
+
 declare(strict_types=1);
 
 require_once __DIR__ . '/../config/init.php';
 
 if (empty($_SESSION['utilisateurs']) || ($_SESSION['utilisateurs']['fonction'] ?? '') !== 'depot') {
-    header("Location: /connexion.php"); exit;
+  header("Location: /connexion.php");
+  exit;
 }
 $u      = $_SESSION['utilisateurs'];
 $ENT_ID = (int)($u['entreprise_id'] ?? 0);
 
-//
-// Actions POST : marquer lu (unitaire / tout)
-//
+/** util: colonne existe ? */
+function alerts_has_col(PDO $pdo, string $col): bool
+{
+  try {
+    $q = $pdo->prepare("SHOW COLUMNS FROM stock_alerts LIKE :c");
+    $q->execute([':c' => $col]);
+    return (bool)$q->fetch();
+  } catch (Throwable $e) {
+    return false;
+  }
+}
+$HAS_TARGET = alerts_has_col($pdo, 'target_role');
+$HAS_ARTICLE = alerts_has_col($pdo, 'article_id'); // si jamais tu as un ancien schéma
+$JOIN_KEY = $HAS_ARTICLE ? "COALESCE(a.stock_id, a.article_id)" : "a.stock_id";
+
+/* =========================
+   Actions POST
+========================= */
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
-    try {
-        if (isset($_POST['mark_one'])) {
-            $aid = (int)($_POST['alert_id'] ?? 0);
-            if ($aid > 0) {
-                // borne par entreprise via le join sur stock
-                $sql = "
+  try {
+    // Marquer 1 alerte lue
+    if (isset($_POST['mark_one'])) {
+      $aid = (int)($_POST['alert_id'] ?? 0);
+      if ($aid > 0) {
+        $sql = "
                     UPDATE stock_alerts a
-                    JOIN stock s ON s.id = a.stock_id
+                    JOIN stock s ON s.id = {$JOIN_KEY}
                        SET a.is_read = 1
                      WHERE a.id = :id
                        AND a.archived_at IS NULL
                        AND (
-                             a.type = 'hour_meter_request'
-                          OR ( (a.type IS NULL OR a.type='generic') AND a.message LIKE 'Machine reçue sur chantier%')
+                            a.type = 'hour_meter_request'
+                         OR (a.type = 'incident' AND a.url IN ('hour_meter_request','problem'))
                        )
                 ";
-                $params = [':id' => $aid];
-                if ($ENT_ID > 0) { $sql .= " AND s.entreprise_id = :eid"; $params[':eid'] = $ENT_ID; }
-                $st = $pdo->prepare($sql);
-                $st->execute($params);
-                $_SESSION['success_message'] = "Alerte #$aid marquée comme lue.";
-            }
-        } elseif (isset($_POST['mark_all'])) {
-            $sql = "
+        $params = [':id' => $aid];
+        if ($ENT_ID > 0) {
+          $sql .= " AND s.entreprise_id = :eid";
+          $params[':eid'] = $ENT_ID;
+        }
+        // côté dépôt : ne marquer que les alertes du dépôt
+        if ($HAS_TARGET) {
+          $sql .= " AND a.target_role = 'depot'";
+        }
+        $pdo->prepare($sql)->execute($params);
+        $_SESSION['success_message'] = "Alerte #$aid marquée comme lue.";
+      }
+    }
+
+    // Marquer TOUT lue
+    if (isset($_POST['mark_all'])) {
+      $sql = "
                 UPDATE stock_alerts a
-                JOIN stock s ON s.id = a.stock_id
+                JOIN stock s ON s.id = {$JOIN_KEY}
                    SET a.is_read = 1
                  WHERE a.archived_at IS NULL
                    AND a.is_read = 0
                    AND (
-                         a.type = 'hour_meter_request'
-                      OR ( (a.type IS NULL OR a.type='generic') AND a.message LIKE 'Machine reçue sur chantier%')
+                        a.type = 'hour_meter_request'
+                     OR (a.type = 'incident' AND a.url IN ('hour_meter_request','problem'))
                    )
             ";
-            $params = [];
-            if ($ENT_ID > 0) { $sql .= " AND s.entreprise_id = :eid"; $params[':eid'] = $ENT_ID; }
-            $pdo->prepare($sql)->execute($params);
-            $_SESSION['success_message'] = "Toutes les alertes ont été marquées comme lues.";
-        }
-    } catch (Throwable $e) {
-        $_SESSION['error_message'] = "Impossible de marquer l’alerte : ".$e->getMessage();
+      $params = [];
+      if ($ENT_ID > 0) {
+        $sql .= " AND s.entreprise_id = :eid";
+        $params[':eid'] = $ENT_ID;
+      }
+      if ($HAS_TARGET) {
+        $sql .= " AND a.target_role = 'depot'";
+      }
+      $pdo->prepare($sql)->execute($params);
+      $_SESSION['success_message'] = "Toutes les alertes ont été marquées comme lues.";
     }
-    header("Location: /stock/alerts_depot.php"); exit;
+  } catch (Throwable $e) {
+    $_SESSION['error_message'] = "Impossible de marquer l’alerte : " . $e->getMessage();
+  }
+  header("Location: /stock/alerts_depot.php");
+  exit;
 }
 
 require_once __DIR__ . '/../templates/header.php';
 require_once __DIR__ . '/../templates/navigation/navigation.php';
 
-// Liste des alertes
+/* =========================
+   Liste des alertes dépôt
+========================= */
 $sql = "
-  SELECT a.id, a.message, a.is_read, a.created_at,
+  SELECT a.id, a.message, a.is_read, a.created_at, a.type, a.url,
          s.id AS stock_id, s.nom AS stock_nom
   FROM stock_alerts a
-  JOIN stock s ON s.id = a.stock_id
+  JOIN stock s ON s.id = {$JOIN_KEY}
   WHERE a.archived_at IS NULL
     AND (
-          a.type = 'hour_meter_request'
-       OR ( (a.type IS NULL OR a.type='generic') AND a.message LIKE 'Machine reçue sur chantier%')
-    )
+        a.type = 'hour_meter_request'
+     OR (a.type = 'incident' AND a.url IN ('hour_meter_request','problem'))
+     OR ((a.type IS NULL OR a.type='generic') AND a.message LIKE 'Machine reçue sur chantier%')
+  )
+  AND a.target_role = 'depot'
 ";
 $params = [];
-if ($ENT_ID>0) { $sql .= " AND s.entreprise_id = :eid"; $params[':eid']=$ENT_ID; }
+if ($ENT_ID > 0) {
+  $sql .= " AND s.entreprise_id = :eid";
+  $params[':eid'] = $ENT_ID;
+}
+if ($HAS_TARGET) {
+  $sql .= " AND a.target_role = 'depot'";
+}  // <- clé anti-doublon côté dépôt
 $sql .= " ORDER BY a.is_read ASC, a.created_at DESC, a.id DESC ";
 
 $st = $pdo->prepare($sql);
@@ -84,7 +127,7 @@ $rows = $st->fetchAll(PDO::FETCH_ASSOC);
 <div class="container mt-4">
 
   <div class="d-flex align-items-center justify-content-between mb-3">
-    <h2 class="mb-0">Alertes relevé d'heures (dépôt)</h2>
+    <h2 class="mb-0">Alertes (Dépôt)</h2>
     <?php if (!empty($rows)): ?>
       <form method="post" class="m-0">
         <input type="hidden" name="mark_all" value="1">
@@ -94,10 +137,12 @@ $rows = $st->fetchAll(PDO::FETCH_ASSOC);
   </div>
 
   <?php if (isset($_SESSION['success_message'])): ?>
-    <div class="alert alert-success"><?= htmlspecialchars($_SESSION['success_message']); unset($_SESSION['success_message']); ?></div>
+    <div class="alert alert-success"><?= htmlspecialchars($_SESSION['success_message']);
+                                      unset($_SESSION['success_message']); ?></div>
   <?php endif; ?>
   <?php if (isset($_SESSION['error_message'])): ?>
-    <div class="alert alert-danger"><?= htmlspecialchars($_SESSION['error_message']); unset($_SESSION['error_message']); ?></div>
+    <div class="alert alert-danger"><?= htmlspecialchars($_SESSION['error_message']);
+                                    unset($_SESSION['error_message']); ?></div>
   <?php endif; ?>
 
   <?php if (empty($rows)): ?>
@@ -116,33 +161,33 @@ $rows = $st->fetchAll(PDO::FETCH_ASSOC);
           </tr>
         </thead>
         <tbody>
-        <?php foreach ($rows as $r): ?>
-          <?php $unread = ((int)$r['is_read'] === 0); ?>
-          <tr class="<?= $unread ? 'table-warning' : '' ?>">
-            <td>#<?= (int)$r['id'] ?></td>
-            <td><?= htmlspecialchars($r['stock_nom'] ?? 'Article') ?></td>
-            <td><?= htmlspecialchars($r['message'] ?? '') ?></td>
-            <td><?= $r['created_at'] ? date('d/m/Y H:i', strtotime($r['created_at'])) : '-' ?></td>
-            <td>
-              <?php if ($unread): ?>
-                <span class="badge bg-danger">Non</span>
-              <?php else: ?>
-                <span class="badge bg-success">Oui</span>
-              <?php endif; ?>
-            </td>
-            <td class="text-end">
-              <a class="btn btn-sm btn-primary"
-                 target="_blank"
-                 href="/stock/article.php?id=<?= (int)$r['stock_id'] ?>">Ouvrir</a>
-              <?php if ($unread): ?>
-                <form method="post" class="d-inline">
-                  <input type="hidden" name="alert_id" value="<?= (int)$r['id'] ?>">
-                  <button class="btn btn-sm btn-outline-success" name="mark_one" value="1">Marquer lu</button>
-                </form>
-              <?php endif; ?>
-            </td>
-          </tr>
-        <?php endforeach; ?>
+          <?php foreach ($rows as $r): ?>
+            <?php $unread = ((int)$r['is_read'] === 0); ?>
+            <tr class="<?= $unread ? 'table-warning' : '' ?>">
+              <td>#<?= (int)$r['id'] ?></td>
+              <td><?= htmlspecialchars($r['stock_nom'] ?? 'Article') ?></td>
+              <td><?= htmlspecialchars($r['message'] ?? '') ?></td>
+              <td><?= $r['created_at'] ? date('d/m/Y H:i', strtotime($r['created_at'])) : '-' ?></td>
+              <td>
+                <?php if ($unread): ?>
+                  <span class="badge bg-danger">Non</span>
+                <?php else: ?>
+                  <span class="badge bg-success">Oui</span>
+                <?php endif; ?>
+              </td>
+              <td class="text-end">
+                <a class="btn btn-sm btn-primary"
+                  
+                  href="/stock/article.php?id=<?= (int)$r['stock_id'] ?>">Ouvrir</a>
+                <?php if ($unread): ?>
+                  <form method="post" class="d-inline">
+                    <input type="hidden" name="alert_id" value="<?= (int)$r['id'] ?>">
+                    <button class="btn btn-sm btn-outline-success" name="mark_one" value="1">Marquer lu</button>
+                  </form>
+                <?php endif; ?>
+              </td>
+            </tr>
+          <?php endforeach; ?>
         </tbody>
       </table>
     </div>

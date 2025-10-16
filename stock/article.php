@@ -133,6 +133,20 @@ if ($fonction === 'chef' && $chantierId > 0) {
         exit;
     }
 }
+
+
+$role = (string)($_SESSION['utilisateurs']['fonction'] ?? '');
+function alerts_has_col(PDO $pdo, string $col): bool
+{
+    try {
+        $q = $pdo->prepare("SHOW COLUMNS FROM stock_alerts LIKE :c");
+        $q->execute([':c' => $col]);
+        return (bool)$q->fetch();
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+$HAS_TARGET = alerts_has_col($pdo, 'target_role');
 /* Dépôt : ne voir que son dépôt si depot_id fourni */
 if ($fonction === 'depot' && $depotId > 0) {
     $stmt = $pdo->prepare("SELECT 1 FROM depots WHERE id = ? AND responsable_id = ? LIMIT 1");
@@ -172,6 +186,94 @@ $isDepot = $isLoggedIn && (($_SESSION['utilisateurs']['fonction'] ?? '') === 'de
 $isChef  = $isLoggedIn && (($_SESSION['utilisateurs']['fonction'] ?? '') === 'chef');
 
 $qrSimpleMode = ($isQrView && !$isLoggedIn);
+
+
+/* ================================
+   ALERTES EN COURS (anti-doublon)
+================================ */
+// Qui regarde la fiche ?
+$isAdmin = isset($_SESSION['utilisateurs']) && (($_SESSION['utilisateurs']['fonction'] ?? '') === 'administrateur' || ($_SESSION['utilisateurs']['fonction'] ?? '') === 'admin');
+$isDepot = isset($_SESSION['utilisateurs']) && (($_SESSION['utilisateurs']['fonction'] ?? '') === 'depot');
+$isChef  = isset($_SESSION['utilisateurs']) && (($_SESSION['utilisateurs']['fonction'] ?? '') === 'chef');
+
+// La table a-t-elle la colonne target_role ?
+
+$HAS_TARGET = alerts_has_col($pdo, 'target_role');
+
+// === Charger les alertes en évitant le doublon admin+depot ===
+$sql = "
+  SELECT
+    a.id,
+    a.type,
+    a.message,
+    a.created_at,
+    a.is_read,
+    a.archived_at,
+    a.url,
+    a.target_role,
+    (
+      SELECT ae.fichier
+      FROM article_etats ae
+      WHERE ae.article_id = a.stock_id
+        AND ae.action = 'declarer_panne'
+        AND ae.commentaire = a.message
+      ORDER BY ae.id DESC
+      LIMIT 1
+    ) AS alert_file
+  FROM stock_alerts a
+  WHERE a.stock_id = :sid
+    AND a.archived_at IS NULL
+    AND a.type = 'incident'
+    AND a.url IN ('problem','maintenance_due')
+";
+
+$params = [':sid' => (int)$articleId];
+
+// Filtrer par rôle quand la colonne existe
+if ($HAS_TARGET) {
+    if ($isAdmin) $sql .= " AND a.target_role = 'admin'";
+    elseif ($isDepot) $sql .= " AND a.target_role = 'depot'";
+    elseif ($isChef)  $sql .= " AND a.target_role = 'chef'";
+    else              $sql .= " AND a.target_role IS NULL"; // visiteur QR / autre rôle
+}
+
+$sql .= " ORDER BY a.created_at DESC, a.id DESC";
+
+$st = $pdo->prepare($sql);
+$st->execute($params);
+$alerts = $st->fetchAll(PDO::FETCH_ASSOC);
+// ===== Déduplication anti-twincast (admin+depot pour le même message/instant) =====
+// Clé sémantique: type | url | message | minute(created_at)
+// Retiens de préférence la version "non lue", sinon la plus récente (id max).
+$alerts = (function (array $rows) {
+    $byKey = [];
+    foreach ($rows as $r) {
+        $key = implode('|', [
+            (string)($r['type'] ?? ''),
+            (string)($r['url'] ?? ''),
+            trim((string)($r['message'] ?? '')),
+            substr((string)($r['created_at'] ?? ''), 0, 16) // précision à la minute
+        ]);
+
+        if (!isset($byKey[$key])) {
+            $byKey[$key] = $r;
+            continue;
+        }
+
+        $keep     = $byKey[$key];
+        $keepUnread = ((int)($keep['is_read'] ?? 0) === 0);
+        $currUnread = ((int)($r['is_read'] ?? 0) === 0);
+
+        // Priorité au "non lu", sinon on garde l'id le plus grand
+        if ($currUnread && !$keepUnread) {
+            $byKey[$key] = $r;
+        } elseif ((int)($r['id'] ?? 0) > (int)($keep['id'] ?? 0)) {
+            $byKey[$key] = $r;
+        }
+    }
+    return array_values($byKey);
+})($alerts);
+
 
 /* ================================
    Heures compteur : variables dédiées
@@ -585,7 +687,6 @@ try {
     // silencieux, on garde la page fonctionnelle
     $chantiersLoc = [];
 }
-
 
 
 ?>
@@ -1025,44 +1126,16 @@ try {
 
                 <?php
 
-                // Charge toutes les alertes non archivées de l’article (incidents + entretien)
-                $alerts = [];
-                try {
-                    $qa = $pdo->prepare("
-                   SELECT a.id, a.type, a.message, a.is_read, a.created_at, a.url, a.archived_at,
-             (
-               SELECT ae.fichier
-               FROM article_etats ae
-               WHERE ae.alert_id = a.id
-               ORDER BY ae.id DESC
-               LIMIT 1
-             ) AS alert_file
-                   FROM stock_alerts a
-                         WHERE a.stock_id = :sid
-                          AND a.archived_at IS NULL
-                   AND a.type IN ('incident','maintenance')
-                      ORDER BY a.created_at DESC, a.id DESC
-                        ");
-                    $qa->execute([':sid' => $articleId]);
-                    $alerts = $qa->fetchAll(PDO::FETCH_ASSOC);
-                } catch (Throwable $e) {
-                    $alerts = [];
-                }
-
                 // Séparations utiles
-                $alertsProblems = array_filter(
-                    $alerts,
-                    fn($a) => ($a['type'] ?? '') === 'incident' && (($a['url'] ?? '') === 'problem')
-                );
-                $alertsMaintenance = array_filter(
-                    $alerts,
-                    fn($a) => ($a['type'] ?? '') === 'incident' && (($a['url'] ?? '') === 'maintenance_due')
-                );
+                // On réutilise $alerts (déjà filtrées par target_role) :
+                $alertsProblems = array_filter($alerts, fn($a) => ($a['url'] ?? '') === 'problem');
+                $alertsMaintenance = array_filter($alerts, fn($a) => ($a['url'] ?? '') === 'maintenance_due');
 
-                // État global pour le badge (PANNE/ENTRETIEN si l’un OU l’autre est ouvert)
+                // État global pour le badge
                 $hasOpenIncidentOrMaint = !empty($alertsProblems) || !empty($alertsMaintenance);
                 $etatLabel = $hasOpenIncidentOrMaint ? 'PANNE/ENTRETIEN' : 'OK';
                 $etatClass = $hasOpenIncidentOrMaint ? 'bg-danger' : 'bg-success';
+
                 ?>
 
 
@@ -1103,6 +1176,8 @@ try {
                                     <?php
                                     $isArchived = !empty($a['archived_at']);
                                     $isUnread   = ((int)($a['is_read'] ?? 0) === 0);
+                                    $canResolve = ($isAdmin || $isDepot) && !$isArchived;
+
                                     ?>
                                     <li class="list-group-item d-flex justify-content-between align-items-start">
                                         <div class="me-3">
@@ -1112,13 +1187,15 @@ try {
                                             <small class="text-muted"><?= date('d/m/Y H:i', strtotime($a['created_at'])) ?></small>
                                             <?= $renderAlertAttachment($a['alert_file'] ?? null) ?>
                                         </div>
-                                        <?php if ($isAdmin && !$isArchived): ?>
+
+                                        <?php if ($canResolve): ?>
                                             <button class="btn btn-sm btn-success btn-resolve-one" data-alert-id="<?= (int)$a['id'] ?>">
                                                 Marquer résolu
                                             </button>
                                         <?php endif; ?>
                                     </li>
                                 <?php endforeach; ?>
+
                             </ul>
                         <?php else: ?>
                             <small id="alertsProblemsEmpty" class="text-muted d-block mt-2">Aucun problème en cours.</small>
@@ -1131,6 +1208,8 @@ try {
                                     <?php
                                     $isArchived = !empty($a['archived_at']);
                                     $isUnread   = ((int)($a['is_read'] ?? 0) === 0);
+                                    $canResolve = ($isAdmin || $isDepot) && !$isArchived;
+
                                     ?>
                                     <li class="list-group-item d-flex justify-content-between align-items-start">
                                         <div class="me-3">
@@ -1140,14 +1219,15 @@ try {
                                             <small class="text-muted"><?= date('d/m/Y H:i', strtotime($a['created_at'])) ?></small>
                                             <?= $renderAlertAttachment($a['alert_file'] ?? null) ?>
                                         </div>
-                                        <?php if ($isAdmin && !$isArchived): ?>
-                                            <!-- on autorise aussi la résolution manuelle si besoin -->
+
+                                        <?php if ($canResolve): ?>
                                             <button class="btn btn-sm btn-outline-success btn-resolve-one" data-alert-id="<?= (int)$a['id'] ?>">
                                                 Marquer résolu
                                             </button>
                                         <?php endif; ?>
                                     </li>
                                 <?php endforeach; ?>
+
                             </ul>
                         <?php endif; ?>
 
@@ -1229,6 +1309,8 @@ try {
                                     <?php
                                     $isArchived = !empty($a['archived_at']);
                                     $isUnread   = ((int)($a['is_read'] ?? 0) === 0);
+                                    $canResolve = ($isAdmin || $isDepot) && !$isArchived;
+
                                     ?>
                                     <li class="list-group-item d-flex justify-content-between align-items-start">
                                         <div class="me-3">
@@ -1247,12 +1329,13 @@ try {
                                             <?php endif; ?>
                                         </div>
 
-                                        <?php if ($isAdmin && !$isArchived): ?>
-                                            <button class="btn btn-sm btn-success btn-resolve-one"
-                                                data-alert-id="<?= (int)$a['id'] ?>">
+                                        <?php $canResolve = ($isAdmin || $isDepot) && !$isArchived && $isUnread; ?>
+                                        <?php if ($canResolve): ?>
+                                            <button class="btn btn-sm btn-success btn-resolve-one" data-alert-id="<?= (int)$a['id'] ?>">
                                                 Marquer résolu
                                             </button>
                                         <?php endif; ?>
+
                                     </li>
                                 <?php endforeach; ?>
                             </ul>

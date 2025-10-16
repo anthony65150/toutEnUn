@@ -34,6 +34,31 @@ function jexit(int $code, array $payload): void
 /* -------------------------------------------------------
    Helpers
 ------------------------------------------------------- */
+function recent_alert_exists_role(PDO $pdo, int $stockId, string $url, string $msg, ?string $role): ?int
+{
+    $sql = "
+        SELECT id
+        FROM stock_alerts
+        WHERE stock_id = :sid
+          AND type = 'incident'
+          AND url  = :url
+          AND message = :msg
+          AND archived_at IS NULL
+          AND (is_read = 0 OR is_read IS NULL)
+          AND created_at >= (NOW() - INTERVAL 2 MINUTE)
+    ";
+    $params = [':sid' => $stockId, ':url' => $url, ':msg' => $msg];
+    if ($role !== null) {
+        $sql .= " AND target_role = :role";
+        $params[':role'] = $role;
+    }
+    $sql .= " ORDER BY id DESC LIMIT 1";
+    $st = $pdo->prepare($sql);
+    $st->execute($params);
+    $id = $st->fetchColumn();
+    return $id ? (int)$id : null;
+}
+
 function article_by_id(PDO $pdo, int $id): ?array
 {
     $st = $pdo->prepare("
@@ -50,7 +75,8 @@ function article_by_id(PDO $pdo, int $id): ?array
     return $row ?: null;
 }
 
-function maintenance_alert_exists(PDO $pdo, int $stockId, ?int $entId = null): bool {
+function maintenance_alert_exists(PDO $pdo, int $stockId, ?int $entId = null): bool
+{
     $sql = "
         SELECT 1
         FROM stock_alerts
@@ -276,12 +302,20 @@ try {
 
         // 4) seuil entretien : initial + threshold (défaut 100h)
         $threshold = (int)($art['maintenance_threshold'] ?? 100);
-        if ($threshold <= 0) { $threshold = 100; }
+        if ($threshold <= 0) {
+            $threshold = 100;
+        }
         $limit = $initial + $threshold;
 
         // (debug léger en logs)
-        error_log(sprintf('[MAJ_COMPTEUR] stock_id=%d, initial=%d, threshold=%d, limit=%d, posted=%d, cur_before=%d',
-            $articleId, $initial, $threshold, $limit, $val, $cur
+        error_log(sprintf(
+            '[MAJ_COMPTEUR] stock_id=%d, initial=%d, threshold=%d, limit=%d, posted=%d, cur_before=%d',
+            $articleId,
+            $initial,
+            $threshold,
+            $limit,
+            $val,
+            $cur
         ));
 
         if ($val >= $limit) {
@@ -386,22 +420,69 @@ try {
                 ->execute([':v' => $valOpt, ':id' => $articleId]);
         }
 
-        // alerte problème
-        $insAlert = $pdo->prepare("
+        // alerte problème (admin + dépôt si "autre", avec idempotence par rôle)
+        $alertId = 0;
+        $createdAt = null;
+
+        try {
+            // ADMIN — évite doublon admin
+            $existingAdmin = recent_alert_exists_role($pdo, $articleId, 'problem', $comment, 'admin');
+            if ($existingAdmin) {
+                $alertId = $existingAdmin;
+            } else {
+                $insAdmin = $pdo->prepare("
+            INSERT INTO stock_alerts (entreprise_id, stock_id, type, message, url, target_role, created_at, is_read)
+            VALUES (:eid, :sid, 'incident', :msg, 'problem', 'admin', NOW(), 0)
+        ");
+                $insAdmin->execute([
+                    ':eid' => (int)$art['entreprise_id'],
+                    ':sid' => $articleId,
+                    ':msg' => $comment
+                ]);
+                $alertId = (int)$pdo->lastInsertId();
+            }
+
+            // DÉPÔT — seulement si pas hour_meter, et évite doublon dépôt
+            if ($maintenanceMode !== 'hour_meter') {
+                $existingDepot = recent_alert_exists_role($pdo, $articleId, 'problem', $comment, 'depot');
+                if (!$existingDepot) {
+                    $insDepot = $pdo->prepare("
+                INSERT INTO stock_alerts (entreprise_id, stock_id, type, message, url, target_role, created_at, is_read)
+                VALUES (:eid, :sid, 'incident', :msg, 'problem', 'depot', NOW(), 0)
+            ");
+                    $insDepot->execute([
+                        ':eid' => (int)$art['entreprise_id'],
+                        ':sid' => $articleId,
+                        ':msg' => $comment
+                    ]);
+                }
+            }
+
+            // récupérer la date de l'alerte admin
+            $st = $pdo->prepare("SELECT created_at FROM stock_alerts WHERE id = :id");
+            $st->execute([':id' => $alertId]);
+            $createdAt = (string)$st->fetchColumn();
+        } catch (Throwable $e) {
+            // Fallback : schéma sans target_role — éviter doublon sans rôle
+            $existingAny = recent_alert_exists_role($pdo, $articleId, 'problem', $comment, null);
+            if ($existingAny) {
+                $alertId = $existingAny;
+                $createdAt = now();
+            } else {
+                $insAlert = $pdo->prepare("
             INSERT INTO stock_alerts (entreprise_id, stock_id, type, message, url, created_at, is_read)
             VALUES (:eid, :sid, 'incident', :msg, 'problem', NOW(), 0)
         ");
-        $insAlert->execute([
-            ':eid' => (int)$art['entreprise_id'],
-            ':sid' => $articleId,
-            ':msg' => $comment
-        ]);
-        $alertId = (int)$pdo->lastInsertId();
+                $insAlert->execute([
+                    ':eid' => (int)$art['entreprise_id'],
+                    ':sid' => $articleId,
+                    ':msg' => $comment
+                ]);
+                $alertId  = (int)$pdo->lastInsertId();
+                $createdAt = now();
+            }
+        }
 
-        // récup created_at
-        $st = $pdo->prepare("SELECT created_at FROM stock_alerts WHERE id = :id");
-        $st->execute([':id' => $alertId]);
-        $createdAt = (string)$st->fetchColumn();
 
         // historique
         $ins = $pdo->prepare("
@@ -469,55 +550,116 @@ try {
         jexit(200, ['ok' => true]);
     }
 
-    /* --------- Résoudre UNE alerte ciblée --------- */
-    if ($action === 'resolve_one') {
-        $alertId = (int)($_POST['alert_id'] ?? 0);
-        if ($alertId <= 0) {
-            $pdo->rollBack();
-            jexit(400, ['ok' => false, 'msg' => 'alert_id manquant']);
-        }
+    /* --------- Résoudre UNE alerte ciblée (archive le groupe admin+depot) --------- */
+if ($action === 'resolve_one') {
+    $alertId = (int)($_POST['alert_id'] ?? 0);
+    if ($alertId <= 0) {
+        $pdo->rollBack();
+        jexit(400, ['ok' => false, 'msg' => 'alert_id manquant']);
+    }
 
-        $u = $pdo->prepare("UPDATE stock_alerts SET is_read=1, archived_at=NOW() WHERE id=:id AND stock_id=:sid");
-        $u->execute([':id' => $alertId, ':sid' => $articleId]);
+    // 1) Récupère l’alerte cliquée (clé de regroupement)
+    $st = $pdo->prepare("
+      SELECT id, stock_id, type, url, TRIM(message) AS message, created_at
+      FROM stock_alerts
+      WHERE id = :id
+        AND stock_id = :sid
+        AND archived_at IS NULL
+        AND type = 'incident'
+      LIMIT 1
+    ");
+    $st->execute([':id' => $alertId, ':sid' => $articleId]);
+    $a = $st->fetch(PDO::FETCH_ASSOC);
 
-        $q = $pdo->prepare("
-            SELECT COUNT(*)
-            FROM stock_alerts
-            WHERE stock_id=:sid
-              AND archived_at IS NULL
-              AND (
-                    is_read = 0
-                 OR (type='incident' AND url IN ('problem','generic'))
-              )
-        ");
-        $q->execute([':sid' => $articleId]);
-        $remain = (int)$q->fetchColumn();
-        if ($remain === 0) {
-            $pdo->prepare("UPDATE stock SET panne=0 WHERE id=:id")->execute([':id' => $articleId]);
-        }
+    // Déjà archivée ? On ne fait qu’un retour OK
+    if (!$a) {
+        $pdo->commit();
+        jexit(200, ['ok' => true, 'resolved_ids' => []]);
+    }
 
-        $curHours = (int)$pdo->query("SELECT compteur_heures FROM stock WHERE id = {$articleId}")->fetchColumn();
+    $createdMinute = substr((string)$a['created_at'], 0, 16);
+    $msgKey        = trim((string)$a['message']);
+    $urlKey        = (string)$a['url'];
 
+    // 2) Lister toutes les jumelles ouvertes de ce “groupe”
+    $st = $pdo->prepare("
+      SELECT id
+      FROM stock_alerts
+      WHERE stock_id = :sid
+        AND archived_at IS NULL
+        AND type = 'incident'
+        AND url = :url
+        AND TRIM(message) = :msg
+        AND LEFT(created_at,16) = :min
+    ");
+    $st->execute([
+        ':sid' => $articleId,
+        ':url' => $urlKey,
+        ':msg' => $msgKey,
+        ':min' => $createdMinute,
+    ]);
+    $ids = array_map('intval', array_column($st->fetchAll(PDO::FETCH_ASSOC), 'id'));
+    if (empty($ids)) $ids = [$alertId];
+
+    // 3) Archiver toutes ces alertes en une fois
+    $in = implode(',', array_fill(0, count($ids), '?'));
+    $st = $pdo->prepare("
+      UPDATE stock_alerts
+         SET is_read = 1, archived_at = NOW(), archived_by = ?
+       WHERE id IN ($in) AND archived_at IS NULL
+    ");
+    $params = array_merge([$uid ?: null], $ids);
+    $st->execute($params);
+
+    // 4) Si plus AUCUNE alerte “problem/generic” ouverte, on repasse l’article à OK
+    $q = $pdo->prepare("
+        SELECT COUNT(*)
+        FROM stock_alerts
+        WHERE stock_id=:sid
+          AND archived_at IS NULL
+          AND type='incident'
+          AND (url IN ('problem','generic') OR (url IS NULL AND type='incident'))
+    ");
+    $q->execute([':sid' => $articleId]);
+    $remain = (int)$q->fetchColumn();
+    if ($remain === 0) {
+        $pdo->prepare("UPDATE stock SET panne=0 WHERE id=:id")->execute([':id' => $articleId]);
+    }
+
+    // 5) Insérer UNE seule ligne historique (idempotent)
+    $refId = min($ids); // identifiant “stable” du groupe, pour afficher #xxx
+    $curHours = (int)$pdo->query("SELECT compteur_heures FROM stock WHERE id = {$articleId}")->fetchColumn();
+
+    // évite les doublons si double-clic / seconde jumelle :
+    $check = $pdo->prepare("
+      SELECT 1 FROM article_etats
+      WHERE article_id = :aid AND alert_id = :ref AND action = 'declarer_ok'
+      LIMIT 1
+    ");
+    $check->execute([':aid' => $articleId, ':ref' => $refId]);
+    if (!$check->fetchColumn()) {
         $i = $pdo->prepare("
             INSERT INTO article_etats
               (entreprise_id, article_id, chantier_id, profil_qr, action, valeur_int, commentaire, fichier, created_by, alert_id)
             VALUES
-              (:eid, :aid, :cid, :profil, 'declarer_ok', :val, :com, NULL, :uid, :alert_id)
+              (:eid, :aid, :cid, :profil, 'declarer_ok', :val, :com, NULL, :uid, :ref)
         ");
         $i->execute([
-            ':eid'      => (int)$art['entreprise_id'],
-            ':aid'      => $articleId,
-            ':cid'      => ($chantierId ?: null),
-            ':profil'   => $profil,
-            ':val'      => $curHours,
-            ':com'      => 'problème #' . $alertId . ' résolu',
-            ':uid'      => ($uid ?: null),
-            ':alert_id' => $alertId,
+            ':eid'    => (int)$art['entreprise_id'],
+            ':aid'    => $articleId,
+            ':cid'    => ($chantierId ?: null),
+            ':profil' => $profil,
+            ':val'    => $curHours,
+            ':com'    => 'problème #' . $refId . ' résolu',
+            ':uid'    => ($uid ?: null),
+            ':ref'    => $refId,
         ]);
-
-        $pdo->commit();
-        jexit(200, ['ok' => true]);
     }
+
+    $pdo->commit();
+    jexit(200, ['ok' => true, 'resolved_ids' => $ids]);
+}
+
 
     /* --------- Action non supportée --------- */
     $pdo->rollBack();

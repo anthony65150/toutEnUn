@@ -1,7 +1,9 @@
 <?php
+
 declare(strict_types=1);
 
 require_once __DIR__ . '/../config/init.php';
+require_once __DIR__ . '/api/alerts_helper.php'; // [ALERTES DEPOT] helper alertes
 
 if (!isset($_SESSION['utilisateurs']) || ($_SESSION['utilisateurs']['fonction'] ?? '') !== 'depot') {
     $_SESSION['error_message'] = "Accès refusé.";
@@ -107,18 +109,79 @@ try {
         $stmtInsert->execute([':eid' => $ENT_ID, ':did' => $depotId, ':sid' => $articleId, ':qte' => $quantite]);
     }
 
-    /* 4.1) Archiver une éventuelle demande de relevé si l’article revient au dépôt */
+    /* 4.1) Archiver les anciennes demandes de relevé sur cet article (si existantes)
+            On tente avec article_id ET stock_id pour couvrir les 2 schémas possibles. */
     try {
         $pdo->prepare("
             UPDATE stock_alerts
                SET is_read = 1, archived_at = NOW()
-             WHERE stock_id = :sid
+             WHERE entreprise_id = :eid
                AND type = 'hour_meter_request'
+               AND article_id = :sid
                AND archived_at IS NULL
-        ")->execute([':sid' => $articleId]);
+        ")->execute([':eid' => $ENT_ID, ':sid' => $articleId]);
+
+        // Variante si la colonne est nommée stock_id dans ton schéma
+        $pdo->prepare("
+            UPDATE stock_alerts
+               SET is_read = 1, archived_at = NOW()
+             WHERE entreprise_id = :eid
+               AND type = 'hour_meter_request'
+               AND stock_id = :sid
+               AND archived_at IS NULL
+        ")->execute([':eid' => $ENT_ID, ':sid' => $articleId]);
     } catch (Throwable $e) {
-        error_log('archive hour_meter_request on depot reception: '.$e->getMessage());
+        error_log('archive hour_meter_request on depot reception: ' . $e->getMessage());
     }
+
+    /* 4.2) Si l’article a un compteur → créer une alerte “Relevé d’heures” pour DEPOT (stock_id !) */
+    try {
+        $stA = $pdo->prepare("
+        SELECT id, entreprise_id, nom, maintenance_mode,
+               COALESCE(compteur_heures,0)    AS compteur_heures,
+               COALESCE(hour_meter_initial,0) AS hour_meter_initial
+        FROM stock
+        WHERE id = :id AND entreprise_id = :eid
+        LIMIT 1
+    ");
+        $stA->execute([':id' => $articleId, ':eid' => $ENT_ID]);
+        if ($art2 = $stA->fetch(PDO::FETCH_ASSOC)) {
+            $hasHour = ($art2['maintenance_mode'] === 'hour_meter')
+                || ((int)$art2['compteur_heures'] > 0)
+                || ((int)$art2['hour_meter_initial'] > 0);
+
+            if ($hasHour) {
+                $msg = "Relevé d'heures demandé pour {$art2['nom']}. Merci de mettre le compteur à jour.";
+
+                // 1) Essai avec target_role (schema récent)
+                try {
+                    $ins = $pdo->prepare("
+                    INSERT INTO stock_alerts (entreprise_id, stock_id, type, message, url, target_role, created_at, is_read)
+                    VALUES (:eid, :sid, 'incident', :msg, 'hour_meter_request', 'depot', NOW(), 0)
+                ");
+                    $ins->execute([
+                        ':eid' => (int)$art2['entreprise_id'],
+                        ':sid' => (int)$art2['id'],
+                        ':msg' => $msg,
+                    ]);
+                } catch (Throwable $eTarget) {
+                    // 2) Fallback sans target_role
+                    $ins = $pdo->prepare("
+                    INSERT INTO stock_alerts (entreprise_id, stock_id, type, message, url, created_at, is_read)
+                    VALUES (:eid, :sid, 'incident', :msg, 'hour_meter_request', NOW(), 0)
+                ");
+                    $ins->execute([
+                        ':eid' => (int)$art2['entreprise_id'],
+                        ':sid' => (int)$art2['id'],
+                        ':msg' => $msg,
+                    ]);
+                }
+            }
+        }
+    } catch (Throwable $e) {
+        error_log('create depot hour_meter_request alert: ' . $e->getMessage());
+    }
+
 
     /* 5) Retirer de la source si source = chantier (bornage entreprise) */
     if ($sourceType === 'chantier' && $sourceId) {
@@ -190,7 +253,6 @@ try {
 
     $_SESSION['success_message']    = "Transfert validé avec succès.";
     $_SESSION['highlight_stock_id'] = $articleId;
-
 } catch (Throwable $e) {
     if ($pdo->inTransaction()) $pdo->rollBack();
     $_SESSION['error_message'] = "Erreur lors de la validation : " . $e->getMessage();
